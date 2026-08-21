@@ -71,7 +71,11 @@ header {
   background: linear-gradient(135deg, var(--primary), var(--primary-2));
   display: flex; align-items: center; justify-content: center; color: #fff;
 }
-.brand h1 { font-size: 17px; font-weight: 700; letter-spacing: .2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand h1 {
+  font-size: 17px; font-weight: 800; letter-spacing: .2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: linear-gradient(120deg, var(--primary), var(--primary-2));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
 .brand p { font-size: 12px; color: var(--text-sub); margin-top: 2px; display: none; }
 .hdr-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 
@@ -82,9 +86,10 @@ header {
   background: var(--panel); color: var(--text); font-size: 13.5px; font-weight: 600;
   cursor: pointer; transition: all .15s; white-space: nowrap; min-height: 38px;
 }
-.btn:hover { border-color: var(--primary); color: var(--primary); }
-.btn.primary { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #fff; border: none; }
-.btn.primary:hover { opacity: .9; color: #fff; }
+.btn:hover { border-color: var(--primary); color: var(--primary); transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+.btn.primary { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #fff; border: none; box-shadow: 0 4px 14px rgba(79,70,229,.28); }
+.btn.primary:hover { opacity: .92; color: #fff; box-shadow: 0 6px 18px rgba(79,70,229,.36); }
 .btn.danger:hover { border-color: var(--red); color: var(--red); }
 .btn.icon { padding: 9px; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -93,10 +98,11 @@ header {
 
 /* stats */
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
-.stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
+.stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); transition: transform .18s ease, box-shadow .18s ease; }
+.stat:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
 .stat .num { font-size: 24px; font-weight: 800; }
 .stat .label { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
-.stat.total .num { color: var(--primary); }
+.stat.total .num { background: linear-gradient(120deg, var(--primary), var(--primary-2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .stat.done .num { color: var(--green); }
 .stat.pending .num { color: var(--amber); }
 
@@ -113,7 +119,9 @@ header {
 .card {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 13px;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
+.card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); border-color: var(--primary); }
 .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 .avatar {
   width: 42px; height: 42px; border-radius: 50%;
@@ -168,9 +176,16 @@ header {
   background: linear-gradient(135deg, var(--primary), var(--primary-2));
   display: flex; align-items: center; justify-content: center; color: #fff;
 }
-.login-card h1 { font-size: 20px; font-weight: 800; }
+.login-card h1 { font-size: 20px; font-weight: 800; background: linear-gradient(120deg, var(--primary), var(--primary-2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .login-card .sub { font-size: 13px; color: var(--text-sub); margin: 6px 0 22px; }
 .login-card .input { text-align: center; font-size: 15px; }
+
+/* 入场动画 */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+header { animation: fadeUp .4s ease both; }
+.stats { animation: fadeUp .45s ease both; }
+.main { animation: fadeUp .5s ease both; }
+.login-card { animation: fadeUp .4s ease both; }
 
 /* modal */
 .modal-mask {

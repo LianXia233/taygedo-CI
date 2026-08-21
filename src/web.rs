@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{Html, Response};
 use axum::routing::{delete, get, post};
@@ -30,7 +30,45 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/logs", get(get_logs))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
-    public.merge(protected).with_state(state)
+    public
+        .merge(protected)
+        .layer(middleware::from_fn(cors_middleware))
+        .with_state(state)
+}
+
+/// CORS 中间件：允许 LuCI（不同端口）跨源调用本 API。
+/// 内网自用工具，允许任意来源；OPTIONS 预检直接放行。
+async fn cors_middleware(req: axum::extract::Request, next: Next) -> Result<Response, StatusCode> {
+    if req.method() == Method::OPTIONS {
+        return Ok(Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .header(
+                header::ACCESS_CONTROL_ALLOW_METHODS,
+                "GET, POST, DELETE, OPTIONS",
+            )
+            .header(
+                header::ACCESS_CONTROL_ALLOW_HEADERS,
+                "Authorization, Content-Type",
+            )
+            .body(axum::body::Body::empty())
+            .unwrap());
+    }
+
+    let mut response = next.run(req).await;
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, POST, DELETE, OPTIONS"),
+    );
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("Authorization, Content-Type"),
+    );
+    Ok(response)
 }
 
 /// 鉴权中间件：校验 Bearer token 或 cookie。

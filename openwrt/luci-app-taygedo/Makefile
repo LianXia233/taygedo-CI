@@ -1,11 +1,14 @@
 # OpenWrt LuCI app: 塔吉多自动签到 (Taygedo auto attendance)
 #
+# 现代 LuCI JS 前端：htdocs/luci-static/resources/view/taygedo/status.js
+# 界面与内置 WebUI 功能一致，直接调用 Rust 后端（默认 8787 端口）的 REST API。
+#
 # 两种构建方式（二选一）：
 #   A. 预编译二进制下载（默认）：从 GitHub Release 下载对应架构的 musl 二进制。
 #      由仓库根目录 .github/workflows/build.yml 预编译产出。
 #   B. 源码编译：需要 openwrt/packages 的 lang/rust feed，见文件末尾注释。
 #
-# 安装位置：/usr/bin/taygedo-rs + LuCI 界面（服务 -> 塔吉多签到）
+# 安装位置：/usr/bin/taygedo-rs + LuCI JS 界面（服务 -> 塔吉多签到）
 
 include $(TOPDIR)/rules.mk
 
@@ -20,7 +23,6 @@ TAYGEDO_REPO:=https://github.com/LianXia233/taygedo-CI
 TAYGEDO_VER:=v$(PKG_VERSION)
 
 include $(INCLUDE_DIR)/package.mk
-include $(TOPDIR)/feeds/luci/luci.mk
 
 # ---------------------------------------------------------------------------
 # OpenWrt CONFIG_ARCH -> Rust musl target 映射
@@ -48,12 +50,12 @@ define Package/luci-app-taygedo
   SUBMENU:=3. Applications
   TITLE:=Taygedo auto attendance (塔吉多自动签到)
   URL:=$(TAYGEDO_REPO)
-  DEPENDS:=+ca-bundle
+  DEPENDS:=+ca-bundle +luci-base
   PKGARCH:=all
 endef
 
 define Package/luci-app-taygedo/description
-  LuCI interface for the Taygedo (Hotta 幻塔 / Neverness to Everness 异环)
+  LuCI interface (JS) for the Taygedo (Hotta 幻塔 / Neverness to Everness 异环)
   daily attendance tool. Multi-account, SMS/password login, daily scheduling
   and a built-in responsive WebUI with authentication.
 endef
@@ -73,9 +75,27 @@ define Build/Compile
 endef
 
 define Package/luci-app-taygedo/install
-	$(call Package/luci/install,$(1))
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/taygedo-rs $(1)/usr/bin/taygedo-rs
+
+	# LuCI JS 前端（view）
+	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/taygedo
+	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/taygedo/status.js \
+		$(1)/www/luci-static/resources/view/taygedo/status.js
+
+	# 菜单 / ACL
+	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d
+	$(INSTALL_DATA) ./root/usr/share/luci/menu.d/taygedo.json \
+		$(1)/usr/share/luci/menu.d/taygedo.json
+	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d
+	$(INSTALL_DATA) ./root/usr/share/rpcd/acl.d/luci-app-taygedo.json \
+		$(1)/usr/share/rpcd/acl.d/luci-app-taygedo.json
+
+	# UCI 默认配置 + init 脚本
+	$(INSTALL_DIR) $(1)/etc/config
+	$(INSTALL_DATA) ./root/etc/config/taygedo $(1)/etc/config/taygedo
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./root/etc/init.d/taygedo $(1)/etc/init.d/taygedo
 endef
 
 $(eval $(call BuildPackage,luci-app-taygedo))

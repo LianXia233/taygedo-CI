@@ -5,11 +5,13 @@
 			"ubus": {
 				"service": [ "list" ]
 			},
+			"uci": [ "taygedo" ],
 			"file": {
 				"/etc/config/taygedo": [ "read" ]
 			}
 		},
 		"write": {
+			"uci": [ "taygedo" ],
 			"file": {
 				"/etc/config/taygedo": [ "write" ]
 			},

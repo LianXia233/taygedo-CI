@@ -36,9 +36,10 @@ stage_root() {
         if [ -d "$LUCI_DIR/root" ]; then
             cp -a "$LUCI_DIR/root/." "$PKGROOT/"
         fi
-        if [ -d "$LUCI_DIR/luasrc" ]; then
-            mkdir -p "$PKGROOT/usr/lib/lua/luci"
-            cp -a "$LUCI_DIR/luasrc/." "$PKGROOT/usr/lib/lua/luci/"
+        # 现代 LuCI JS 前端（htdocs -> /www）
+        if [ -d "$LUCI_DIR/htdocs" ]; then
+            mkdir -p "$PKGROOT/www"
+            cp -a "$LUCI_DIR/htdocs/." "$PKGROOT/www/"
         fi
     fi
 }

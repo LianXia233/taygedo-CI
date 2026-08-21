@@ -19,7 +19,9 @@
 // ---------------------------------------------------------------------------
 var TGD = (function () {
 	var apiBase = '';
-	var token = localStorage.getItem('taygedo_luci_token') || '';
+	// LuCI 页面已由 OpenWrt root 鉴权保护，token 仅存内存、每次进入页面静默登录，
+	// 不持久化到 localStorage（避免旧 token 因后端重启失效而误判为未登录）。
+	var token = '';
 	var pollTimer = null;
 
 	function esc(s) {
@@ -37,7 +39,7 @@ var TGD = (function () {
 		t._t = setTimeout(function () { t.className = 'tgd-toast'; }, 2600);
 	}
 
-	function api(path, method, body) {
+	function api(path, method, body, _retry) {
 		var opts = { method: method || 'GET', headers: {} };
 		if (token) opts.headers['Authorization'] = 'Bearer ' + token;
 		if (body !== undefined) {
@@ -45,7 +47,18 @@ var TGD = (function () {
 			opts.body = JSON.stringify(body);
 		}
 		return fetch(apiBase + path, opts).then(function (r) {
-			if (r.status === 401) { token = ''; localStorage.removeItem('taygedo_luci_token'); showLogin(); throw new Error('未登录或登录已过期'); }
+			if (r.status === 401 && !_retry) {
+				// token 失效：静默重新登录后端后重试一次
+				token = '';
+				return autoLogin().then(function () {
+					return api(path, method, body, true);
+				});
+			}
+			if (r.status === 401) {
+				token = '';
+				showLogin();
+				throw new Error('未登录或登录已过期');
+			}
 			return r.json().catch(function () { return {}; }).then(function (data) {
 				if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
 				return data;
@@ -62,7 +75,7 @@ var TGD = (function () {
 	return {
 		esc: esc, toast: toast, api: api, initApiBase: initApiBase,
 		getToken: function () { return token; },
-		setToken: function (t) { token = t; if (t) localStorage.setItem('taygedo_luci_token', t); else localStorage.removeItem('taygedo_luci_token'); },
+		setToken: function (t) { token = t || ''; },
 		getApiBase: function () { return apiBase; }
 	};
 })();
@@ -308,11 +321,9 @@ function showLogin() {
 }
 
 // LuCI 页面已由 OpenWrt root 鉴权保护，无需用户再次输入签到服务密码。
-// 自动用 UCI 里的 web_password（默认 admin）静默登录后端，失败才兜底显示登录框。
+// 每次进入页面都强制用 UCI web_password（默认 admin）静默登录后端拿新 token，
+// 仅当后端密码与 UCI 不同步时才兜底显示登录框。
 function autoLogin() {
-	if (TGD.getToken()) {
-		return TGD.api('/api/accounts', 'GET').then(function () {});
-	}
 	var pwd = 'admin';
 	try {
 		var wp = uci.get('taygedo', 'main', 'web_password');

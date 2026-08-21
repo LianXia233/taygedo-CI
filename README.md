@@ -267,17 +267,17 @@ cargo +stable-x86_64-pc-windows-gnu build --release
 
 `openwrt/luci-app-taygedo/` 提供完整 LuCI 包，安装后可在 **LuCI → 服务 → 塔吉多签到** 里：
 
-- 查看运行状态，一键打开内置 WebUI。
-- 配置：启用开关、监听端口、数据目录、Web 登录密码、默认签到时间、金币任务、云时长、分享平台（UCI `config taygedo`）。
+- **功能与 WebUI 完全一致**：账号管理、密码/短信验证码登录、每日签到时间、立即签到、运行日志、全局设置、修改密码。
+- LuCI 页面已由 OpenWrt root 鉴权保护，进入后**自动静默登录后端**（UCI `web_password`，默认 `admin`），无需二次输入密码。
+- 配置项（UCI `config taygedo`）：启用开关、监听端口、数据目录、Web 登录密码、默认签到时间、金币任务、云时长、分享平台。
 - init.d 脚本（procd）自动拉起/守护 `taygedo-rs`，支持 reload。
 
 ```
 openwrt/luci-app-taygedo/
 ├── Makefile                       # 包定义（默认预编译下载，源码编译见注释）
-├── luasrc/
-│   ├── controller/taygedo.lua     # 菜单 + 路由 + 打开 WebUI
-│   ├── model/cbi/taygedo.lua      # UCI 配置表单
-│   └── view/taygedo/status.htm    # 状态页
+├── htdocs/
+│   └── luci-static/resources/view/taygedo/
+│       └── status.js              # 现代 LuCI JS 前端（功能对齐 WebUI）
 └── root/
     ├── etc/config/taygedo         # UCI 默认配置
     ├── etc/init.d/taygedo         # procd 守护脚本
@@ -341,6 +341,16 @@ scripts/package.sh          # deb / ipk / apk 打包脚本
 ---
 
 ## 更新日志 (Changelog)
+
+### [0.2.5] - 2026-08-21
+
+**新增 / 变更**
+- **LuCI 前端从 Lua 重写为现代 JS**（`htdocs/luci-static/resources/view/taygedo/status.js`），功能与 WebUI 完全一致：账号管理、密码/短信验证码登录、每日签到时间、立即签到、运行日志、全局设置、修改密码。
+- LuCI 已由 OpenWrt root 鉴权保护，进入页面**自动静默登录后端**（用 UCI `web_password`，默认 `admin`），无需二次输入密码；仅当后端密码与 UCI 不同步时才兜底显示登录框。
+- 删除 `luasrc/` 下三个 Lua 文件（controller / model/cbi / view 模板）。
+- Rust 后端新增 **CORS 中间件**，允许 LuCI（不同端口）跨源调用 API。
+- WebUI 美化：品牌渐变标题、卡片/统计卡片 hover 微动效、入场动画、按钮质感提升。
+- Makefile / package.sh 改为安装 `htdocs` 到 `/www/luci-static`。
 
 ### [0.2.4] - 2026-08-21
 

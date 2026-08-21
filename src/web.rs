@@ -72,13 +72,13 @@ async fn cors_middleware(req: axum::extract::Request, next: Next) -> Result<Resp
     Ok(response)
 }
 
-/// 鉴权中间件：校验 Bearer token 或 cookie。
+/// 鉴权中间件：校验 Bearer token 或 cookie。免鉴权模式下直接放行。
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     req: axum::extract::Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if state.validate_token(&extract_token(&req)) {
+    if state.no_auth || state.validate_token(&extract_token(&req)) {
         Ok(next.run(req).await)
     } else {
         Err(StatusCode::UNAUTHORIZED)

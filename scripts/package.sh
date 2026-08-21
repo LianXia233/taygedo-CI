@@ -23,6 +23,9 @@ LUCI_DIR="$ROOT/openwrt/luci-app-taygedo"
 
 [ -x "$BIN" ] || { echo "二进制不存在或不可执行: $BIN"; exit 1; }
 mkdir -p "$OUT"
+# 转绝对路径，避免后续 (cd "$STAGE" && tar ...) 中相对路径失效
+OUT="$(cd "$OUT" && pwd)"
+BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
 
 # 构建文件系统根（含二进制 + 可选 LuCI 文件）
 stage_root() {

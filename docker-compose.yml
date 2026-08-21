@@ -1,0 +1,15 @@
+services:
+  taygedo:
+    build: .
+    image: taygedo-rs:latest
+    container_name: taygedo-rs
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      TAYGEDO_LISTEN: 0.0.0.0:8787
+      TAYGEDO_DATA_DIR: /data
+      # 首次启动的 WebUI 登录密码（可选；不设置则自动生成随机密码打印到日志）
+      TAYGEDO_WEB_PASSWORD: ${TAYGEDO_WEB_PASSWORD:-}
+    volumes:
+      - ./data:/data

@@ -1,0 +1,6 @@
+config taygedo 'main'
+	option enabled '0'
+	option port '8787'
+	option data_dir '/etc/taygedo'
+	option web_password ''
+	option default_schedule '06:10'

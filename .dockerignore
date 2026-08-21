@@ -1,0 +1,8 @@
+target/
+.git/
+.github/
+.gitignore
+*.md
+data/
+openwrt/
+upstream-taygedo/

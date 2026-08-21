@@ -1,0 +1,185 @@
+name: build-release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1) 编译各平台二进制
+  # ---------------------------------------------------------------------------
+  build:
+    name: build-${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            cross: false
+          # Linux musl（用于 OpenWrt / 静态部署）
+          - name: linux-x86_64-musl
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cross: true
+          - name: linux-aarch64-musl
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            cross: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use default crates.io on GitHub runners
+        if: runner.os == 'Linux'
+        run: rm -f .cargo/config.toml
+
+      - name: Install Rust (native)
+        if: matrix.cross == false
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross == true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build (native)
+        if: matrix.cross == false
+        run: cargo build --release --locked
+
+      - name: Build (cross)
+        if: matrix.cross == true
+        run: cross build --release --locked --target ${{ matrix.target }}
+
+      - name: Locate binary
+        id: bin
+        shell: bash
+        run: |
+          if [ "${{ matrix.target }}" = "x86_64-pc-windows-msvc" ]; then
+            echo "path=target/release/taygedo-rs.exe" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=target/${{ matrix.target }}/release/taygedo-rs" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package (Windows zip)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "${{ steps.bin.outputs.path }}" dist/taygedo-rs.exe
+          (cd dist && zip -q ../taygedo-rs-windows-x86_64.zip taygedo-rs.exe)
+          cp taygedo-rs-windows-x86_64.zip dist/
+
+      - name: Package (Linux tar.gz)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "${{ steps.bin.outputs.path }}" dist/taygedo-rs
+          tar czf taygedo-rs-${{ matrix.target }}.tar.gz -C dist taygedo-rs
+          cp taygedo-rs-${{ matrix.target }}.tar.gz dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/
+
+  # ---------------------------------------------------------------------------
+  # 2) Debian .deb
+  # ---------------------------------------------------------------------------
+  debian:
+    name: debian-amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use default crates.io on GitHub runners
+        run: rm -f .cargo/config.toml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Build (glibc)
+        run: cargo build --release --locked
+      - name: Package .deb
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ -n "$VERSION" ] || VERSION="0.2.0"
+          bash scripts/package.sh deb x86_64 target/release/taygedo-rs "$VERSION" dist-deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian-amd64
+          path: dist-deb/*.deb
+
+  # ---------------------------------------------------------------------------
+  # 3) OpenWrt .ipk + .apk
+  # ---------------------------------------------------------------------------
+  openwrt:
+    name: openwrt-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            artifact: linux-x86_64-musl
+          - arch: aarch64_cortex-a53
+            artifact: linux-aarch64-musl
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: bin
+      - name: Package ipk + apk
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ -n "$VERSION" ] || VERSION="0.2.0"
+          BIN="$(find bin -type f -name 'taygedo-rs' | head -1)"
+          chmod +x "$BIN"
+          mkdir -p dist-openwrt
+          bash scripts/package.sh ipk "${{ matrix.arch }}" "$BIN" "$VERSION" dist-openwrt
+          bash scripts/package.sh apk "${{ matrix.arch }}" "$BIN" "$VERSION" dist-openwrt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-${{ matrix.arch }}
+          path: dist-openwrt/
+
+  # ---------------------------------------------------------------------------
+  # 4) 发布到 Releases
+  # ---------------------------------------------------------------------------
+  release:
+    name: release
+    needs: [build, debian, openwrt]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten files
+        run: |
+          mkdir -p dist
+          find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.deb' -o -name '*.ipk' -o -name '*.apk' \) \
+            -exec cp {} dist/ \;
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

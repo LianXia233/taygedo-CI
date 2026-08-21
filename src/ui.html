@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#4f46e5">
+<title>塔吉多自动签到</title>
+<style>
+:root {
+  --bg: #f5f7fb;
+  --panel: #ffffff;
+  --border: #e7eaf0;
+  --text: #1a2233;
+  --text-sub: #6b7280;
+  --primary: #4f46e5;
+  --primary-2: #7c3aed;
+  --primary-soft: #eef2ff;
+  --green: #16a34a;
+  --green-soft: #dcfce7;
+  --red: #dc2626;
+  --red-soft: #fee2e2;
+  --amber: #d97706;
+  --amber-soft: #fef3c7;
+  --radius: 14px;
+  --shadow: 0 1px 3px rgba(16,24,40,.06), 0 1px 2px rgba(16,24,40,.04);
+  --shadow-lg: 0 10px 30px rgba(16,24,40,.10);
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+}
+[data-theme="dark"] {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --border: #2a3038;
+  --text: #e6edf3;
+  --text-sub: #8b949e;
+  --primary: #818cf8;
+  --primary-2: #a78bfa;
+  --primary-soft: #1e2440;
+  --green: #3fb950;
+  --green-soft: #12261c;
+  --red: #f85149;
+  --red-soft: #2d1517;
+  --amber: #d29922;
+  --amber-soft: #2a2410;
+  --shadow: 0 1px 3px rgba(0,0,0,.4);
+  --shadow-lg: 0 10px 30px rgba(0,0,0,.5);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  transition: background .2s, color .2s;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+
+/* header */
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); margin-bottom: 16px; gap: 10px;
+}
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand .logo {
+  width: 42px; height: 42px; border-radius: 12px; flex: none;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+.brand h1 { font-size: 17px; font-weight: 700; letter-spacing: .2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand p { font-size: 12px; color: var(--text-sub); margin-top: 2px; display: none; }
+.hdr-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+
+/* buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 9px 14px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text); font-size: 13.5px; font-weight: 600;
+  cursor: pointer; transition: all .15s; white-space: nowrap; min-height: 38px;
+}
+.btn:hover { border-color: var(--primary); color: var(--primary); }
+.btn.primary { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #fff; border: none; }
+.btn.primary:hover { opacity: .9; color: #fff; }
+.btn.danger:hover { border-color: var(--red); color: var(--red); }
+.btn.icon { padding: 9px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn svg { width: 16px; height: 16px; flex: none; }
+.btn .btn-txt { }
+
+/* stats */
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
+.stat .num { font-size: 24px; font-weight: 800; }
+.stat .label { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
+.stat.total .num { color: var(--primary); }
+.stat.done .num { color: var(--green); }
+.stat.pending .num { color: var(--amber); }
+
+/* layout */
+.main { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 900px) {
+  .main { grid-template-columns: 1.2fr 1fr; align-items: start; }
+  .brand p { display: block; }
+}
+
+/* accounts */
+.accounts { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 640px) { .accounts { grid-template-columns: repeat(2, 1fr); } }
+.card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 13px;
+}
+.card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.avatar {
+  width: 42px; height: 42px; border-radius: 50%;
+  background: var(--primary-soft); color: var(--primary);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 17px; flex: none;
+}
+.card-info { flex: 1; min-width: 0; }
+.card-info .name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card-info .sub { font-size: 12.5px; color: var(--text-sub); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px; flex: none; }
+.badge.ok { background: var(--green-soft); color: var(--green); }
+.badge.wait { background: var(--amber-soft); color: var(--amber); }
+.card-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.card-row .lab { font-size: 12.5px; color: var(--text-sub); display: flex; align-items: center; gap: 6px; }
+.card-row .lab svg { width: 14px; height: 14px; }
+.time-input {
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
+  background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; min-height: 34px;
+}
+.card-actions { display: flex; gap: 8px; }
+.card-actions .btn { flex: 1; padding: 9px 10px; font-size: 13px; }
+.empty {
+  grid-column: 1 / -1; text-align: center; padding: 44px 20px;
+  color: var(--text-sub); border: 1.5px dashed var(--border); border-radius: var(--radius);
+}
+.empty .big { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+
+/* panel + logs */
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.panel-head h2 { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.panel-head h2 svg { width: 16px; height: 16px; color: var(--primary); }
+.logs { height: 400px; overflow-y: auto; padding: 12px 14px; background: #0b1020; font-family: var(--mono); font-size: 12px; line-height: 1.7; -webkit-overflow-scrolling: touch; }
+[data-theme="dark"] .logs { background: #0a0d16; }
+.log-line { color: #c9d1d9; word-break: break-all; }
+.log-line .ts { color: #6b7280; margin-right: 6px; }
+.log-line .lv { font-weight: 700; margin-right: 6px; }
+.log-line.info .lv { color: #58a6ff; }
+.log-line.error .lv { color: #f85149; }
+.log-line.warn .lv { color: #d29922; }
+.logs .empty-log { color: #6b7280; }
+
+/* login */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.login-card {
+  width: 100%; max-width: 380px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 18px; box-shadow: var(--shadow-lg); padding: 34px 30px; text-align: center;
+}
+.login-card .logo {
+  width: 56px; height: 56px; border-radius: 16px; margin: 0 auto 16px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+.login-card h1 { font-size: 20px; font-weight: 800; }
+.login-card .sub { font-size: 13px; color: var(--text-sub); margin: 6px 0 22px; }
+.login-card .input { text-align: center; font-size: 15px; }
+
+/* modal */
+.modal-mask {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 50;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+.modal-mask.show { opacity: 1; pointer-events: auto; }
+.modal {
+  background: var(--panel); border-radius: 16px; width: 100%; max-width: 440px;
+  max-height: 92vh; overflow-y: auto; box-shadow: var(--shadow-lg); transform: translateY(8px); transition: transform .2s;
+}
+.modal-mask.show .modal { transform: translateY(0); }
+.modal-head { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: var(--panel); }
+.modal-head h3 { font-size: 16px; font-weight: 700; }
+.modal-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 13px; }
+.modal-close { background: none; border: none; color: var(--text-sub); cursor: pointer; font-size: 22px; line-height: 1; padding: 4px; }
+.modal-close:hover { color: var(--text); }
+
+/* tabs */
+.tabs { display: flex; gap: 6px; background: var(--bg); border-radius: 10px; padding: 4px; }
+.tab { flex: 1; text-align: center; padding: 9px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text-sub); border: none; background: none; }
+.tab.active { background: var(--panel); color: var(--primary); box-shadow: var(--shadow); }
+
+/* form */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label { font-size: 12.5px; font-weight: 600; color: var(--text-sub); }
+.input {
+  border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px;
+  font-size: 14px; background: var(--bg); color: var(--text); outline: none;
+  transition: border-color .15s; width: 100%; min-height: 44px;
+}
+.input:focus { border-color: var(--primary); }
+.captcha-row { display: flex; gap: 8px; }
+.captcha-row .input { flex: 1; }
+.captcha-row .btn { flex: none; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; }
+.switch-row .txt { font-size: 14px; }
+.switch { position: relative; width: 44px; height: 24px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider { position: absolute; inset: 0; background: var(--border); border-radius: 24px; cursor: pointer; transition: .2s; }
+.switch .slider:before { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+.switch input:checked + .slider { background: var(--primary); }
+.switch input:checked + .slider:before { transform: translateX(20px); }
+
+.divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+.section-title { font-size: 13px; font-weight: 700; color: var(--text-sub); }
+
+/* toast */
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: var(--text); color: var(--bg); padding: 11px 20px; border-radius: 10px;
+  font-size: 13.5px; font-weight: 600; z-index: 100; opacity: 0; transition: all .25s;
+  box-shadow: var(--shadow-lg); max-width: 90vw;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.err { background: var(--red); color: #fff; }
+.toast.ok { background: var(--green); color: #fff; }
+
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* mobile */
+@media (max-width: 520px) {
+  .wrap { padding: 12px 10px 40px; }
+  header { padding: 12px 14px; }
+  .brand h1 { font-size: 16px; }
+  .btn .btn-txt.hide-m { display: none; }
+  .stats { gap: 8px; }
+  .stat { padding: 12px 12px; }
+  .stat .num { font-size: 21px; }
+  .logs { height: 300px; }
+  .card-actions .btn { font-size: 12.5px; }
+}
+</style>
+</head>
+<body data-theme="light">
+
+<!-- 登录界面 -->
+<div class="login-wrap" id="loginScreen">
+  <div class="login-card">
+    <div class="logo">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 11h4M8 9v4"/><path d="M15 11h.01M18 13h.01"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/></svg>
+    </div>
+    <h1>塔吉多自动签到</h1>
+    <div class="sub">请输入账号和密码</div>
+    <form id="loginForm">
+      <input class="input" id="loginUser" placeholder="账号" value="admin" autocomplete="username">
+      <input class="input" type="password" id="loginPwd" placeholder="密码" autocomplete="current-password" style="margin-top:10px">
+      <button class="btn primary" type="submit" id="loginBtn" style="width:100%; margin-top:14px; min-height:46px; font-size:15px;">登 录</button>
+    </form>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="mainScreen" style="display:none">
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 11h4M8 9v4"/><path d="M15 11h.01M18 13h.01"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/></svg>
+      </div>
+      <div>
+        <h1>塔吉多自动签到</h1>
+        <p>多账号 · 每日定时 · 云游戏时长</p>
+      </div>
+    </div>
+    <div class="hdr-actions">
+      <button class="btn icon" id="themeBtn" title="切换主题"></button>
+      <button class="btn icon" id="settingsBtn" title="设置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+      <button class="btn primary" id="addBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        <span class="btn-txt hide-m">添加账号</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat total"><div class="num" id="statTotal">0</div><div class="label">总账号</div></div>
+    <div class="stat done"><div class="num" id="statDone">0</div><div class="label">今日已签到</div></div>
+    <div class="stat pending"><div class="num" id="statPending">0</div><div class="label">待签到</div></div>
+  </div>
+
+  <div class="main">
+    <div class="accounts" id="accounts"></div>
+    <div class="panel">
+      <div class="panel-head">
+        <h2>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
+          运行日志
+        </h2>
+        <button class="btn icon" id="refreshLogsBtn" title="刷新日志">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+        </button>
+      </div>
+      <div class="logs" id="logs"><div class="empty-log">暂无日志</div></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- 添加账号 modal -->
+<div class="modal-mask" id="addModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>添加账号</h3>
+      <button class="modal-close" data-close="addModal">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="tabs">
+        <button class="tab active" data-mode="password">密码登录</button>
+        <button class="tab" data-mode="captcha">验证码登录</button>
+      </div>
+      <div class="field">
+        <label>手机号</label>
+        <input class="input" id="loginPhone" placeholder="请输入手机号" inputmode="numeric">
+      </div>
+      <div class="field" id="passwordField">
+        <label>密码</label>
+        <input class="input" id="loginPassword" type="password" placeholder="请输入密码">
+      </div>
+      <div class="field" id="captchaField" style="display:none">
+        <label>验证码</label>
+        <div class="captcha-row">
+          <input class="input" id="loginCaptcha" placeholder="短信验证码" inputmode="numeric">
+          <button class="btn" id="sendCodeBtn">发送验证码</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>备注名（可选）</label>
+        <input class="input" id="loginName" placeholder="如：主账号">
+      </div>
+      <button class="btn primary" id="loginSubmit">登录</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置 modal -->
+<div class="modal-mask" id="settingsModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>全局设置</h3>
+      <button class="modal-close" data-close="settingsModal">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>默认签到时间（每天）</label>
+        <input class="input time-input" type="time" id="cfgSchedule">
+      </div>
+      <div class="switch-row">
+        <span class="txt">金币任务</span>
+        <label class="switch"><input type="checkbox" id="cfgCoin"><span class="slider"></span></label>
+      </div>
+      <div class="switch-row">
+        <span class="txt">云异环时长</span>
+        <label class="switch"><input type="checkbox" id="cfgCloud"><span class="slider"></span></label>
+      </div>
+      <div class="field">
+        <label>分享平台</label>
+        <input class="input" id="cfgShare" placeholder="qq / wechat / weibo">
+      </div>
+      <button class="btn primary" id="cfgSave">保存</button>
+
+      <hr class="divider">
+      <div class="section-title">修改登录账号密码</div>
+      <div class="field">
+        <label>账号</label>
+        <input class="input" id="oldUser" value="admin" autocomplete="username">
+      </div>
+      <div class="field">
+        <label>原密码</label>
+        <input class="input" type="password" id="oldPwd" autocomplete="current-password">
+      </div>
+      <div class="field">
+        <label>新密码（至少 6 位）</label>
+        <input class="input" type="password" id="newPwd" autocomplete="new-password">
+      </div>
+      <button class="btn" id="pwdSave">修改账号密码</button>
+
+      <hr class="divider">
+      <button class="btn danger" id="logoutBtn">退出登录</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let currentMode = 'password';
+let token = localStorage.getItem('taygedo_token') || '';
+let sendCodeTimer = null;
+
+function toast(msg, type) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (type || '');
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.className = 'toast', 2600);
+}
+
+function showLogin() {
+  $('mainScreen').style.display = 'none';
+  $('loginScreen').style.display = '';
+}
+function showMain() {
+  $('loginScreen').style.display = 'none';
+  $('mainScreen').style.display = '';
+}
+
+async function api(path, method, body) {
+  const opts = { method, headers: {} };
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, opts);
+  if (r.status === 401) { showLogin(); throw new Error('未登录或登录已过期'); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
+}
+
+async function doLogin(e) {
+  e && e.preventDefault();
+  const user = $('loginUser').value.trim() || 'admin';
+  const pwd = $('loginPwd').value;
+  if (!pwd) { toast('请输入密码', 'err'); return; }
+  const btn = $('loginBtn');
+  btn.disabled = true; btn.textContent = '登录中...';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user, password: pwd }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || '登录失败');
+    token = j.token;
+    localStorage.setItem('taygedo_token', token);
+    $('loginPwd').value = '';
+    showMain();
+    loadAccounts();
+    loadLogs();
+    toast('登录成功', 'ok');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+  btn.disabled = false; btn.textContent = '登 录';
+}
+
+async function loadAccounts() {
+  try {
+    const data = await api('/api/accounts', 'GET');
+    const list = data.accounts || [];
+    $('statTotal').textContent = list.length;
+    $('statDone').textContent = list.filter(a => a.signed_today).length;
+    $('statPending').textContent = list.filter(a => !a.signed_today).length;
+    renderAccounts(list);
+  } catch (e) { console.error(e); }
+}
+
+function renderAccounts(list) {
+  const wrap = $('accounts');
+  if (!list.length) {
+    wrap.innerHTML = `<div class="empty"><div class="big">还没有账号</div>点击右上角「添加账号」开始使用</div>`;
+    return;
+  }
+  wrap.innerHTML = list.map(a => `
+    <div class="card" data-id="${a.id}">
+      <div class="card-top">
+        <div class="avatar">${esc(a.name).charAt(0).toUpperCase()}</div>
+        <div class="card-info">
+          <div class="name">${esc(a.name)} ${a.signed_today ? '<span class="badge ok">今日已签</span>' : '<span class="badge wait">待签到</span>'}</div>
+          <div class="sub">${a.phone || '未绑定手机'} · UID ${esc(a.uid || '-')}${a.role_name ? ' · ' + esc(a.role_name) : ''}</div>
+        </div>
+      </div>
+      <div class="card-row">
+        <span class="lab">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          每日签到时间
+        </span>
+        <input class="input time-input" type="time" value="${esc(a.schedule)}" data-schedule="${a.id}">
+      </div>
+      <div class="card-actions">
+        <button class="btn primary" data-signin="${a.id}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>
+          立即签到
+        </button>
+        <button class="btn danger" data-del="${a.id}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+          删除
+        </button>
+      </div>
+    </div>
+  `).join('');
+
+  wrap.querySelectorAll('[data-schedule]').forEach(inp => {
+    inp.addEventListener('change', async () => {
+      const id = inp.dataset.schedule;
+      try {
+        await api(`/api/accounts/${id}/schedule`, 'POST', { time: inp.value || null });
+        toast('签到时间已更新', 'ok');
+        loadAccounts();
+      } catch (e) { toast(e.message, 'err'); }
+    });
+  });
+  wrap.querySelectorAll('[data-signin]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.signin;
+      btn.disabled = true;
+      btn.innerHTML = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-opacity=".25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg> 签到中...';
+      try {
+        await api(`/api/accounts/${id}/signin`, 'POST', { force: true });
+        toast('签到完成', 'ok');
+      } catch (e) { toast(e.message, 'err'); }
+      btn.disabled = false;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg> 立即签到';
+      loadAccounts();
+      loadLogs();
+    });
+  });
+  wrap.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.del;
+      if (!confirm('确认删除该账号？删除后需重新登录。')) return;
+      try {
+        await api(`/api/accounts/${id}`, 'DELETE');
+        toast('已删除', 'ok');
+        loadAccounts();
+      } catch (e) { toast(e.message, 'err'); }
+    });
+  });
+}
+
+async function loadLogs() {
+  try {
+    const data = await api('/api/logs?limit=200', 'GET');
+    const logs = data.logs || [];
+    const box = $('logs');
+    if (!logs.length) { box.innerHTML = '<div class="empty-log">暂无日志</div>'; return; }
+    box.innerHTML = logs.map(l => {
+      const lv = (l.level || 'info').toUpperCase().padEnd(5, ' ');
+      return `<div class="log-line ${esc(l.level || 'info')}"><span class="ts">${esc(l.ts)}</span><span class="lv">${esc(lv)}</span>${esc(l.message)}</div>`;
+    }).join('');
+    box.scrollTop = box.scrollHeight;
+  } catch (e) { console.error(e); }
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* modal helpers */
+function openModal(id) { $(id).classList.add('show'); }
+function closeModal(id) { $(id).classList.remove('show'); }
+document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => closeModal(b.dataset.close)));
+document.querySelectorAll('.modal-mask').forEach(m => m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); }));
+
+/* tabs */
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  currentMode = t.dataset.mode;
+  $('passwordField').style.display = currentMode === 'password' ? '' : 'none';
+  $('captchaField').style.display = currentMode === 'captcha' ? '' : 'none';
+}));
+
+/* send code */
+$('sendCodeBtn').addEventListener('click', async () => {
+  const phone = $('loginPhone').value.trim();
+  if (!phone) { toast('请输入手机号', 'err'); return; }
+  const btn = $('sendCodeBtn');
+  btn.disabled = true;
+  try {
+    await api('/api/send-code', 'POST', { phone });
+    toast('验证码已发送', 'ok');
+    let n = 60;
+    btn.textContent = n + 's';
+    sendCodeTimer = setInterval(() => {
+      n--;
+      if (n <= 0) { clearInterval(sendCodeTimer); btn.textContent = '发送验证码'; btn.disabled = false; }
+      else btn.textContent = n + 's';
+    }, 1000);
+  } catch (e) {
+    toast(e.message, 'err');
+    btn.disabled = false;
+  }
+});
+
+/* login submit */
+$('loginSubmit').addEventListener('click', async () => {
+  const phone = $('loginPhone').value.trim();
+  const name = $('loginName').value.trim();
+  if (!phone) { toast('请输入手机号', 'err'); return; }
+  const btn = $('loginSubmit');
+  btn.disabled = true; btn.textContent = '登录中...';
+  const body = { phone, mode: currentMode, name: name || null };
+  if (currentMode === 'password') {
+    body.password = $('loginPassword').value;
+    if (!body.password) { toast('请输入密码', 'err'); btn.disabled = false; btn.textContent = '登录'; return; }
+  } else {
+    body.captcha = $('loginCaptcha').value;
+    if (!body.captcha) { toast('请输入验证码', 'err'); btn.disabled = false; btn.textContent = '登录'; return; }
+  }
+  try {
+    await api('/api/accounts', 'POST', body);
+    toast('登录成功', 'ok');
+    closeModal('addModal');
+    $('loginPassword').value = ''; $('loginCaptcha').value = ''; $('loginPhone').value = ''; $('loginName').value = '';
+    loadAccounts();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  btn.disabled = false; btn.textContent = '登录';
+});
+
+/* add modal open */
+$('addBtn').addEventListener('click', () => {
+  currentMode = 'password';
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.mode === 'password'));
+  $('passwordField').style.display = '';
+  $('captchaField').style.display = 'none';
+  openModal('addModal');
+});
+
+/* settings */
+let loadedCfg = {};
+async function openSettings() {
+  try {
+    loadedCfg = await api('/api/config', 'GET');
+    $('cfgSchedule').value = loadedCfg.default_schedule;
+    $('cfgCoin').checked = !!loadedCfg.coin_tasks;
+    $('cfgCloud').checked = !!loadedCfg.cloud_duration;
+    $('cfgShare').value = loadedCfg.share_platform || 'qq';
+    $('oldUser').value = 'admin'; $('oldPwd').value = ''; $('newPwd').value = '';
+    openModal('settingsModal');
+  } catch (e) { toast(e.message, 'err'); }
+}
+$('settingsBtn').addEventListener('click', openSettings);
+$('cfgSave').addEventListener('click', async () => {
+  try {
+    await api('/api/config', 'POST', {
+      default_schedule: $('cfgSchedule').value,
+      coin_tasks: $('cfgCoin').checked,
+      cloud_duration: $('cfgCloud').checked,
+      share_platform: $('cfgShare').value.trim() || 'qq',
+    });
+    toast('设置已保存', 'ok');
+    closeModal('settingsModal');
+    loadAccounts();
+  } catch (e) { toast(e.message, 'err'); }
+});
+
+/* change password */
+$('pwdSave').addEventListener('click', async () => {
+  const oldUser = $('oldUser').value.trim() || 'admin';
+  const oldPwd = $('oldPwd').value;
+  const newPwd = $('newPwd').value;
+  if (!oldPwd || !newPwd) { toast('请输入原密码和新密码', 'err'); return; }
+  try {
+    await api('/api/password', 'POST', { username: oldUser, old_password: oldPwd, new_password: newPwd });
+    toast('账号密码已修改', 'ok');
+    $('oldPwd').value = ''; $('newPwd').value = '';
+  } catch (e) { toast(e.message, 'err'); }
+});
+
+/* logout */
+$('logoutBtn').addEventListener('click', () => {
+  token = '';
+  localStorage.removeItem('taygedo_token');
+  showLogin();
+  toast('已退出登录');
+});
+
+/* theme */
+function applyTheme(t) {
+  document.body.dataset.theme = t;
+  localStorage.setItem('taygedo-theme', t);
+  $('themeBtn').innerHTML = t === 'dark'
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+}
+$('themeBtn').addEventListener('click', () => {
+  applyTheme(document.body.dataset.theme === 'dark' ? 'light' : 'dark');
+});
+applyTheme(localStorage.getItem('taygedo-theme') || 'light');
+
+$('refreshLogsBtn').addEventListener('click', loadLogs);
+$('loginForm').addEventListener('submit', doLogin);
+
+/* init */
+(async function init() {
+  if (!token) { showLogin(); return; }
+  try {
+    await api('/api/accounts', 'GET');
+    showMain();
+    loadAccounts();
+    loadLogs();
+  } catch (e) {
+    showLogin();
+  }
+})();
+
+let pollTimer = null;
+function startPoll() {
+  if (pollTimer) return;
+  pollTimer = setInterval(() => {
+    if (token) { loadLogs(); }
+  }, 3000);
+}
+setInterval(() => { if (token && $('mainScreen').style.display !== 'none') loadAccounts(); }, 10000);
+startPoll();
+</script>
+</body>
+</html>

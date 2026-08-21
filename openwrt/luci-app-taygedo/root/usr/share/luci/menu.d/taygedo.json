@@ -1,0 +1,13 @@
+{
+	"admin/services/taygedo": {
+		"title": "塔吉多签到",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "taygedo/status"
+		},
+		"depends": {
+			"acl": [ "luci-app-taygedo" ]
+		}
+	}
+}

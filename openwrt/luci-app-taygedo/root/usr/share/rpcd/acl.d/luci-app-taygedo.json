@@ -1,0 +1,21 @@
+{
+	"luci-app-taygedo": {
+		"description": "Grant access to Taygedo auto attendance",
+		"read": {
+			"ubus": {
+				"service": [ "list" ]
+			},
+			"file": {
+				"/etc/config/taygedo": [ "read" ]
+			}
+		},
+		"write": {
+			"file": {
+				"/etc/config/taygedo": [ "write" ]
+			},
+			"ubus": {
+				"service": [ "restart", "reload" ]
+			}
+		}
+	}
+}

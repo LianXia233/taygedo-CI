@@ -24,17 +24,19 @@ LUCI_DIR="$ROOT/openwrt/luci-app-taygedo"
 [ -x "$BIN" ] || { echo "二进制不存在或不可执行: $BIN"; exit 1; }
 mkdir -p "$OUT"
 
-# 构建文件系统根（含二进制 + LuCI 文件）
+# 构建文件系统根（含二进制 + 可选 LuCI 文件）
 stage_root() {
     local PKGROOT="$1"
+    local WITH_LUCI="${2:-1}"
     install -Dm755 "$BIN" "$PKGROOT/usr/bin/$PKG_NAME"
-    # LuCI 文件
-    if [ -d "$LUCI_DIR/root" ]; then
-        cp -a "$LUCI_DIR/root/." "$PKGROOT/"
-    fi
-    if [ -d "$LUCI_DIR/luasrc" ]; then
-        mkdir -p "$PKGROOT/usr/lib/lua/luci"
-        cp -a "$LUCI_DIR/luasrc/." "$PKGROOT/usr/lib/lua/luci/"
+    if [ "$WITH_LUCI" = "1" ]; then
+        if [ -d "$LUCI_DIR/root" ]; then
+            cp -a "$LUCI_DIR/root/." "$PKGROOT/"
+        fi
+        if [ -d "$LUCI_DIR/luasrc" ]; then
+            mkdir -p "$PKGROOT/usr/lib/lua/luci"
+            cp -a "$LUCI_DIR/luasrc/." "$PKGROOT/usr/lib/lua/luci/"
+        fi
     fi
 }
 
@@ -52,11 +54,11 @@ case "$MODE" in
     deb)
         DARCH="$(deb_arch)"
         STAGE="$(mktemp -d)"
-        PKGROOT="$STAGE/root"
-        DEBIAN="$STAGE/debian"
-        mkdir -p "$PKGROOT" "$DEBIAN"
+        PKGROOT="$STAGE"
+        DEBIAN="$STAGE/DEBIAN"
+        mkdir -p "$DEBIAN"
 
-        stage_root "$PKGROOT"
+        stage_root "$PKGROOT" 0
 
         # systemd unit
         mkdir -p "$PKGROOT/usr/lib/systemd/system"

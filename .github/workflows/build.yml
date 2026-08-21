@@ -76,12 +76,11 @@ jobs:
 
       - name: Package (Windows zip)
         if: matrix.os == 'windows-latest'
-        shell: bash
+        shell: pwsh
         run: |
-          mkdir -p dist
-          cp "${{ steps.bin.outputs.path }}" dist/taygedo-rs.exe
-          (cd dist && zip -q ../taygedo-rs-windows-x86_64.zip taygedo-rs.exe)
-          cp taygedo-rs-windows-x86_64.zip dist/
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "${{ steps.bin.outputs.path }}" dist/taygedo-rs.exe
+          Compress-Archive -Path dist/taygedo-rs.exe -DestinationPath dist/taygedo-rs-windows-x86_64.zip -Force
 
       - name: Package (Linux tar.gz)
         if: matrix.os == 'ubuntu-latest'

@@ -741,6 +741,16 @@ $('loginForm').addEventListener('submit', doLogin);
 
 /* init */
 (async function init() {
+  // 免鉴权模式（TAYGEDO_NO_AUTH=1）：跳过登录，直接进入主界面
+  try {
+    const meta = await (await fetch('/api/meta')).json();
+    if (meta.no_auth) {
+      showMain();
+      loadAccounts();
+      loadLogs();
+      return;
+    }
+  } catch (e) { /* 探测失败则按原逻辑处理 */ }
   if (!token) { showLogin(); return; }
   try {
     await api('/api/accounts', 'GET');

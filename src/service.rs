@@ -22,6 +22,8 @@ pub struct AppState {
     pub run_lock: Mutex<()>,
     /// 登录会话：token -> 过期 unix 秒。
     pub sessions: std::sync::Mutex<HashMap<String, i64>>,
+    /// 免鉴权模式：为 true 时所有 API 无需登录即可访问（内网自用场景）。
+    pub no_auth: bool,
 }
 
 impl AppState {
@@ -72,6 +74,11 @@ impl AppState {
         }
         store.save_config(&config);
 
+        // 免鉴权模式：环境变量 TAYGEDO_NO_AUTH=1/true/yes/on 时开启
+        let no_auth = std::env::var("TAYGEDO_NO_AUTH")
+            .map(|v| parse_bool_env(&v))
+            .unwrap_or(false);
+
         let state = store.load_state();
         let app = Arc::new(Self {
             api: Api::new(),
@@ -83,6 +90,7 @@ impl AppState {
             pending_devices: std::sync::Mutex::new(HashMap::new()),
             run_lock: Mutex::new(()),
             sessions: std::sync::Mutex::new(HashMap::new()),
+            no_auth,
         });
 
         if let Some(pwd) = initial_password {

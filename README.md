@@ -19,6 +19,7 @@
 - **幽灵角色修复**：优先使用战绩卡（`getGameRecordCards`）作为角色↔游戏权威映射，避免 `getGameRoles` 返回幽灵角色导致整账号 `code=5050` 失败。
 - **会话自动续期**：`accessToken` 失效时自动 `refreshToken` → 失效再走 `laohuToken` 重建 → 有密码则密码重登。
 - **登录鉴权**：WebUI 与所有 API 需要账号密码登录（默认 `admin / admin`，`sha256` 加盐哈希），token 有效期 7 天，支持在线修改账号密码。
+- **免鉴权模式（可选）**：设置环境变量 `TAYGEDO_NO_AUTH=1`（OpenWrt 下在 UCI 配置 `option no_auth '1'`）后，WebUI 与 LuCI 页面**无需登录**即可直接使用，适合内网自用场景。
 - **响应式界面**：手机 / PC 自适应布局，深浅色主题，背景壁纸（毛玻璃卡片）。
 - **实时日志**：WebUI 内置带时间戳的详细运行日志。
 
@@ -237,6 +238,7 @@ cargo run --release
 | `TAYGEDO_COIN_TASKS` | 无 | 覆盖金币任务开关（true/false） |
 | `TAYGEDO_CLOUD_DURATION` | 无 | 覆盖云时长开关（true/false） |
 | `TAYGEDO_SHARE_PLATFORM` | 无 | 覆盖分享平台 |
+| `TAYGEDO_NO_AUTH` | `false` | 免鉴权模式（`1/true/yes/on` 开启），WebUI 与 API 无需登录 |
 
 ### Windows 编译
 
@@ -341,6 +343,16 @@ scripts/package.sh          # deb / ipk / apk 打包脚本
 ---
 
 ## 更新日志 (Changelog)
+
+### [0.3.0] - 2026-08-22
+
+**新增**
+- **免鉴权模式**：新增 `TAYGEDO_NO_AUTH` 环境变量（OpenWrt UCI `option no_auth`），开启后 WebUI / LuCI / 所有 API 均无需登录即可直接使用，适合内网自用。
+- 新增公开接口 `GET /api/meta` 返回服务元信息（含 `no_auth` 状态），WebUI 与 LuCI 前端据此自动跳过登录步骤。
+
+**变更**
+- OpenWrt UCI 默认配置新增 `no_auth` 选项（默认 `1` 开启）；init.d 自动透传 `TAYGEDO_NO_AUTH`。
+- 版本号统一升至 0.3.0（Cargo.toml / Makefile）。
 
 ### [0.2.5] - 2026-08-21
 

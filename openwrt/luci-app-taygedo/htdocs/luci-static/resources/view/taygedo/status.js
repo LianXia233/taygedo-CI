@@ -583,14 +583,30 @@ return view.extend({
 		TGD.initApiBase();
 		var root = E('div', { 'id': 'tgd-root', 'class': 'tgd-root' });
 
-		// 默认静默自动登录后端，直接进入主界面；仅当后端密码与 UCI 不同步时才兜底显示登录框。
+		// 免鉴权模式（后端 TAYGEDO_NO_AUTH=1）直接进入主界面；
+		// 否则静默自动登录后端，仅当后端密码与 UCI 不同步时才兜底显示登录框。
 		root.innerHTML = '<style>' + TGD_CSS + '</style><div class="tgd-login-wrap"><div class="tgd-login-card"><div class="tgd-logo">' +
 			ICONS.logo + '</div><h1>塔吉多自动签到</h1><div class="tgd-sub">正在连接签到服务…</div></div></div><div class="tgd-toast"></div>';
 
-		autoLogin().then(function () {
-			renderMain();
+		fetch(TGD.getApiBase() + '/api/meta').then(function (r) {
+			return r.json().catch(function () { return {}; });
+		}).then(function (meta) {
+			if (meta.no_auth) {
+				renderMain();
+				return;
+			}
+			return autoLogin().then(function () {
+				renderMain();
+			}).catch(function () {
+				showLogin();
+			});
 		}).catch(function () {
-			showLogin();
+			// 探测失败：退回原静默登录流程
+			autoLogin().then(function () {
+				renderMain();
+			}).catch(function () {
+				showLogin();
+			});
 		});
 
 		return root;

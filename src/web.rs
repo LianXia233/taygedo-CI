@@ -13,10 +13,11 @@ use serde::Deserialize;
 use crate::service::{self, AppState};
 
 pub fn router(state: Arc<AppState>) -> Router {
-    // 公开路由：首页 + 登录
+    // 公开路由：首页 + 登录 + 服务元信息（免鉴权探测）
     let public = Router::new()
         .route("/", get(index))
-        .route("/api/login", post(login_api));
+        .route("/api/login", post(login_api))
+        .route("/api/meta", get(meta_api));
 
     // 受保护路由：所有业务 API
     let protected = Router::new()
@@ -115,6 +116,11 @@ fn extract_token(req: &axum::extract::Request) -> String {
 
 async fn index() -> Html<&'static str> {
     Html(include_str!("ui.html"))
+}
+
+/// 服务元信息：供前端判断是否处于免鉴权模式。
+async fn meta_api(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "ok": true, "no_auth": state.no_auth }))
 }
 
 // ---- DTO ----

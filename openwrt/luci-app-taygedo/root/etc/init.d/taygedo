@@ -8,7 +8,7 @@ PROG=/usr/bin/taygedo-rs
 
 start_service() {
     local enabled port data_dir web_password default_schedule
-    local coin_tasks cloud_duration share_platform
+    local coin_tasks cloud_duration share_platform no_auth
     config_load 'taygedo'
     config_get_bool enabled 'main' 'enabled' 0
     [ "$enabled" -eq 0 ] && return 0
@@ -20,6 +20,7 @@ start_service() {
     config_get_bool coin_tasks 'main' 'coin_tasks' 1
     config_get_bool cloud_duration 'main' 'cloud_duration' 1
     config_get share_platform 'main' 'share_platform' 'qq'
+    config_get_bool no_auth 'main' 'no_auth' 0
 
     [ -d "$data_dir" ] || mkdir -p "$data_dir"
 
@@ -31,7 +32,8 @@ start_service() {
         TAYGEDO_DEFAULT_SCHEDULE="$default_schedule" \
         TAYGEDO_COIN_TASKS="$coin_tasks" \
         TAYGEDO_CLOUD_DURATION="$cloud_duration" \
-        TAYGEDO_SHARE_PLATFORM="$share_platform"
+        TAYGEDO_SHARE_PLATFORM="$share_platform" \
+        TAYGEDO_NO_AUTH="$no_auth"
     [ -n "$web_password" ] && procd_append_param env TAYGEDO_WEB_PASSWORD="$web_password"
     procd_set_param respawn 3600 5 5
     procd_set_param stdout 1

@@ -3,15 +3,19 @@
 'require uci';
 
 /*
- * 塔吉多自动签到 - LuCI JS 前端
+ * 塔吉多自动签到 - LuCI 独立版
+ *
+ * 本页面为 LuCI 端单独重构版本：不再维护登录态 / token，直接以免鉴权
+ * 模式调用后端 REST API（需后端 TAYGEDO_NO_AUTH=1 / UCI no_auth=1，页面
+ * 进入时通过 /api/meta 探测确认）。若后端未开启免鉴权，页面给出提示并
+ * 提供「打开外部 WebUI」入口，跳转到独立 WebUI 使用。
+ *
  * 功能与内置 WebUI 一致：账号管理 / 密码或验证码登录 / 每日签到时间 /
  * 立即签到 / 运行日志 / 全局设置 / 修改密码。
+ * 额外提供「打开外部 WebUI」按钮，一键在新窗口打开 :port 独立管理界面。
  *
  * 视觉上完全复用当前 LuCI 主题（aurora）的 CSS 变量，保证与路由后台
  * 观感一致，并随主题自动切换亮/暗色，不额外引入独立配色。
- *
- * LuCI 页面已由 OpenWrt root 鉴权保护，进入后自动静默登录后端
- * （UCI web_password，默认 admin），无需用户二次输入密码。
  */
 
 // ---------------------------------------------------------------------------
@@ -19,9 +23,6 @@
 // ---------------------------------------------------------------------------
 var TGD = (function () {
 	var apiBase = '';
-	// LuCI 页面已由 OpenWrt root 鉴权保护，token 仅存内存、每次进入页面静默登录，
-	// 不持久化到 localStorage（避免旧 token 因后端重启失效而误判为未登录）。
-	var token = '';
 	var pollTimer = null;
 
 	function esc(s) {
@@ -39,26 +40,14 @@ var TGD = (function () {
 		t._t = setTimeout(function () { t.className = 'tgd-toast'; }, 2600);
 	}
 
-	function api(path, method, body, _retry) {
+	// 免鉴权模式：直接裸调后端 API，不携带任何 token
+	function api(path, method, body) {
 		var opts = { method: method || 'GET', headers: {} };
-		if (token) opts.headers['Authorization'] = 'Bearer ' + token;
 		if (body !== undefined) {
 			opts.headers['Content-Type'] = 'application/json';
 			opts.body = JSON.stringify(body);
 		}
 		return fetch(apiBase + path, opts).then(function (r) {
-			if (r.status === 401 && !_retry) {
-				// token 失效：静默重新登录后端后重试一次
-				token = '';
-				return autoLogin().then(function () {
-					return api(path, method, body, true);
-				});
-			}
-			if (r.status === 401) {
-				token = '';
-				showLogin();
-				throw new Error('未登录或登录已过期');
-			}
 			return r.json().catch(function () { return {}; }).then(function (data) {
 				if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
 				return data;
@@ -72,10 +61,12 @@ var TGD = (function () {
 		apiBase = 'http://' + location.hostname + ':' + port;
 	}
 
+	function openWebUI() {
+		window.open(apiBase + '/', '_blank');
+	}
+
 	return {
-		esc: esc, toast: toast, api: api, initApiBase: initApiBase,
-		getToken: function () { return token; },
-		setToken: function (t) { token = t || ''; },
+		esc: esc, toast: toast, api: api, initApiBase: initApiBase, openWebUI: openWebUI,
 		getApiBase: function () { return apiBase; }
 	};
 })();
@@ -155,12 +146,15 @@ var TGD_CSS = [
 	'.tgd-root .tgd-log-line.tgd-warn .tgd-lv { color: var(--warning); }',
 	'.tgd-root .tgd-log-empty { color: var(--text-muted); }',
 	'.tgd-root .tgd-login-wrap { display: flex; align-items: center; justify-content: center; padding: 30px 16px; }',
-	'.tgd-root .tgd-login-card { width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--hairline);',
+	'.tgd-root .tgd-login-card { width: 100%; max-width: 400px; background: var(--surface); border: 1px solid var(--hairline);',
 	'  border-radius: var(--radius-base); box-shadow: var(--app-shadow-lg); padding: 32px 28px; text-align: center; }',
 	'.tgd-root .tgd-login-card .tgd-logo { width: 52px; height: 52px; border-radius: 16px; margin: 0 auto 14px;',
 	'  background: var(--brand); color: var(--on-brand, #fff); display: flex; align-items: center; justify-content: center; }',
 	'.tgd-root .tgd-login-card h1 { font-size: 19px; font-weight: 800; color: var(--text); }',
-	'.tgd-root .tgd-login-card .tgd-sub { font-size: 13px; color: var(--text-subtle); margin: 6px 0 20px; }',
+	'.tgd-root .tgd-login-card .tgd-sub { font-size: 13px; color: var(--text-subtle); margin: 6px 0 20px; line-height: 1.7; }',
+	'.tgd-root .tgd-login-card .tgd-hint { font-size: 12px; color: var(--text-muted); margin-top: 14px; line-height: 1.7; text-align: left;',
+	'  background: var(--surface-sunken); border: 1px solid var(--hairline); border-radius: var(--radius-base); padding: 10px 12px; }',
+	'.tgd-root .tgd-login-card .tgd-hint code { font-family: var(--font-mono); font-size: 11.5px; color: var(--brand); }',
 	'.tgd-root .tgd-input { border: 1px solid var(--hairline); border-radius: var(--radius-base); padding: 10px 12px; font-size: 14px;',
 	'  background: var(--control-bg); color: var(--text); outline: none; transition: border-color .15s; width: 100%; min-height: 42px; }',
 	'.tgd-root .tgd-input:focus { border-color: var(--brand); }',
@@ -212,7 +206,8 @@ var ICONS = {
 	signin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>',
 	del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
 	refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>',
-	gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'
+	gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+	external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>'
 };
 
 // ---------------------------------------------------------------------------
@@ -226,6 +221,7 @@ function mainHtml() {
 		'    <div><h1>塔吉多自动签到</h1><p>多账号 · 每日定时 · 云游戏时长</p></div>',
 		'  </div>',
 		'  <div class="tgd-hdr-actions">',
+		'    <button class="tgd-btn" id="tgd-webui" title="在新窗口打开独立 WebUI">' + ICONS.external + ' 外部 WebUI</button>',
 		'    <button class="tgd-btn" id="tgd-settings" title="设置">' + ICONS.gear + '</button>',
 		'    <button class="tgd-btn tgd-primary" id="tgd-add">＋ 添加账号</button>',
 		'  </div>',
@@ -246,16 +242,16 @@ function mainHtml() {
 	].join('');
 }
 
-function loginHtml() {
+// 后端未开启免鉴权时的提示页：LuCI 版不承载登录态，引导跳转外部 WebUI
+function noAuthHtml() {
 	return [
 		'<div class="tgd-login-wrap">',
 		'  <div class="tgd-login-card">',
 		'    <div class="tgd-logo">' + ICONS.logo + '</div>',
 		'    <h1>塔吉多自动签到</h1>',
-		'    <div class="tgd-sub">请输入签到服务的账号密码</div>',
-		'    <div class="tgd-field"><label>账号</label><input class="tgd-input" id="tgd-login-user" value="admin" autocomplete="username"></div>',
-		'    <div class="tgd-field"><label>密码</label><input class="tgd-input" id="tgd-login-pwd" type="password" autocomplete="current-password"></div>',
-		'    <button class="tgd-btn tgd-primary" id="tgd-login-btn" style="width:100%;min-height:44px;font-size:15px">登 录</button>',
+		'    <div class="tgd-sub">LuCI 独立版需要后端开启免鉴权才能直接管理账号</div>',
+		'    <button class="tgd-btn tgd-primary" id="tgd-noauth-webui" style="width:100%;min-height:44px;font-size:15px">' + ICONS.external + ' 打开外部 WebUI</button>',
+		'    <div class="tgd-hint">如需在 LuCI 内直接使用，请在路由器执行：<br><code>uci set taygedo.main.no_auth=1</code><br><code>uci commit taygedo && /etc/init.d/taygedo restart</code></div>',
 		'  </div>',
 		'</div>'
 	].join('');
@@ -310,56 +306,6 @@ function settingsModalHtml() {
 // ---------------------------------------------------------------------------
 // 视图逻辑
 // ---------------------------------------------------------------------------
-function showLogin() {
-	var root = document.getElementById('tgd-root');
-	if (!root) return;
-	root.innerHTML = '<style>' + TGD_CSS + '</style>' + loginHtml() + '<div class="tgd-toast"></div>';
-	var btn = document.getElementById('tgd-login-btn');
-	btn.addEventListener('click', function () { doLogin(); });
-	var pwd = document.getElementById('tgd-login-pwd');
-	pwd.addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
-}
-
-// LuCI 页面已由 OpenWrt root 鉴权保护，无需用户再次输入签到服务密码。
-// 每次进入页面都强制用 UCI web_password（默认 admin）静默登录后端拿新 token，
-// 仅当后端密码与 UCI 不同步时才兜底显示登录框。
-function autoLogin() {
-	var pwd = 'admin';
-	try {
-		var wp = uci.get('taygedo', 'main', 'web_password');
-		if (wp) pwd = wp;
-	} catch (e) {}
-	return fetch(TGD.getApiBase() + '/api/login', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ username: 'admin', password: pwd })
-	}).then(function (r) { return r.json().catch(function () { return {}; }); }).then(function (j) {
-		if (!j.ok) throw new Error(j.error || '登录失败');
-		TGD.setToken(j.token);
-	});
-}
-
-function doLogin() {
-	var user = document.getElementById('tgd-login-user').value.trim() || 'admin';
-	var pwd = document.getElementById('tgd-login-pwd').value;
-	if (!pwd) { TGD.toast('请输入密码', 'tgd-err'); return; }
-	var btn = document.getElementById('tgd-login-btn');
-	btn.disabled = true; btn.textContent = '登录中...';
-	fetch(TGD.getApiBase() + '/api/login', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ username: user, password: pwd })
-	}).then(function (r) { return r.json().catch(function () { return {}; }); }).then(function (j) {
-		if (!j.ok) throw new Error(j.error || '登录失败');
-		TGD.setToken(j.token);
-		renderMain();
-		TGD.toast('登录成功', 'tgd-ok');
-	}).catch(function (e) {
-		TGD.toast(e.message, 'tgd-err');
-		btn.disabled = false; btn.textContent = '登 录';
-	});
-}
-
 function renderMain() {
 	var root = document.getElementById('tgd-root');
 	root.innerHTML = '<style>' + TGD_CSS + '</style>' + mainHtml() +
@@ -370,7 +316,14 @@ function renderMain() {
 	startPoll();
 }
 
+function renderNoAuth() {
+	var root = document.getElementById('tgd-root');
+	root.innerHTML = '<style>' + TGD_CSS + '</style>' + noAuthHtml() + '<div class="tgd-toast"></div>';
+	document.getElementById('tgd-noauth-webui').addEventListener('click', TGD.openWebUI);
+}
+
 function bindMainEvents() {
+	document.getElementById('tgd-webui').addEventListener('click', TGD.openWebUI);
 	document.getElementById('tgd-settings').addEventListener('click', openSettings);
 	document.getElementById('tgd-add').addEventListener('click', function () { openAddModal('password'); });
 	document.getElementById('tgd-refresh-logs').addEventListener('click', loadLogs);
@@ -567,7 +520,7 @@ function changePassword() {
 function startPoll() {
 	if (pollTimer) { clearInterval(pollTimer); }
 	pollTimer = setInterval(function () {
-		if (TGD.getToken()) { loadLogs(); }
+		loadLogs();
 	}, 3000);
 }
 
@@ -583,8 +536,8 @@ return view.extend({
 		TGD.initApiBase();
 		var root = E('div', { 'id': 'tgd-root', 'class': 'tgd-root' });
 
-		// 免鉴权模式（后端 TAYGEDO_NO_AUTH=1）直接进入主界面；
-		// 否则静默自动登录后端，仅当后端密码与 UCI 不同步时才兜底显示登录框。
+		// 先探测后端免鉴权状态：no_auth=true 直接渲染主界面；
+		// 否则渲染提示页（提供打开外部 WebUI 入口，不承载登录态）。
 		root.innerHTML = '<style>' + TGD_CSS + '</style><div class="tgd-login-wrap"><div class="tgd-login-card"><div class="tgd-logo">' +
 			ICONS.logo + '</div><h1>塔吉多自动签到</h1><div class="tgd-sub">正在连接签到服务…</div></div></div><div class="tgd-toast"></div>';
 
@@ -595,18 +548,9 @@ return view.extend({
 				renderMain();
 				return;
 			}
-			return autoLogin().then(function () {
-				renderMain();
-			}).catch(function () {
-				showLogin();
-			});
+			renderNoAuth();
 		}).catch(function () {
-			// 探测失败：退回原静默登录流程
-			autoLogin().then(function () {
-				renderMain();
-			}).catch(function () {
-				showLogin();
-			});
+			renderNoAuth();
 		});
 
 		return root;

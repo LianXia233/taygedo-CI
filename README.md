@@ -2,6 +2,8 @@
 
 基于 Rust 重写的塔吉多（幻塔 / 异环等）每日自动签到工具，附带一个现代化、**带登录鉴权**、**手机/PC 自适应**的 WebUI 管理界面，并支持 **OpenWrt 主线**集成（含 LuCI）。
 
+> 📦 各平台安装包见 [Releases](https://github.com/LianXia233/taygedo-CI/releases)，详细安装教程见 [INSTALL.md](INSTALL.md)。
+
 > 上游参考：[zzstar101/taygedo-auto-attendance](https://github.com/zzstar101/taygedo-auto-attendance)（TypeScript 版）。本版将其核心逻辑用 Rust 重写。
 
 ## 功能特性

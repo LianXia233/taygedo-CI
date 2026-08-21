@@ -24,6 +24,8 @@
   --radius: 14px;
   --shadow: 0 1px 3px rgba(16,24,40,.06), 0 1px 2px rgba(16,24,40,.04);
   --shadow-lg: 0 10px 30px rgba(16,24,40,.10);
+  --bg-mask: rgba(245, 247, 251, 0.88);
+  --panel-translucent: rgba(255, 255, 255, 0.82);
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
 }
 [data-theme="dark"] {
@@ -43,6 +45,8 @@
   --amber-soft: #2a2410;
   --shadow: 0 1px 3px rgba(0,0,0,.4);
   --shadow-lg: 0 10px 30px rgba(0,0,0,.5);
+  --bg-mask: rgba(13, 17, 23, 0.9);
+  --panel-translucent: rgba(22, 27, 34, 0.84);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 body {
@@ -240,6 +244,25 @@ header {
   .stat .num { font-size: 21px; }
   .logs { height: 300px; }
   .card-actions .btn { font-size: 12.5px; }
+}
+
+/* ---- 背景壁纸 + 毛玻璃 ---- */
+body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--bg-mask), var(--bg-mask)),
+    url('https://files.seeusercontent.com/2026/06/29/uu4H/bg1.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+header, .card, .stat, .panel, .modal, .login-card {
+  background: var(--panel-translucent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.panel-head, .modal-head {
+  background: transparent;
 }
 </style>
 </head>

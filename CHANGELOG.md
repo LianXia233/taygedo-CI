@@ -4,6 +4,16 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] - 2026-08-21
+
+### 新增
+- WebUI 背景壁纸（毛玻璃卡片 + 深浅色遮罩自适应）。
+- LuCI 配置对齐 WebUI：金币任务、云异环时长、分享平台等开关。
+- LuCI 新增「打开 WebUI」菜单项与状态页跳转按钮。
+
+### 变更
+- Rust 支持从环境变量初始化全局配置（`TAYGEDO_DEFAULT_SCHEDULE` / `TAYGEDO_COIN_TASKS` / `TAYGEDO_CLOUD_DURATION` / `TAYGEDO_SHARE_PLATFORM`），供 OpenWrt init.d 从 UCI 传入。
+
 ## [0.2.0] - 2026-08-21
 
 ### 新增

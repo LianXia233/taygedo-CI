@@ -30,6 +30,24 @@ impl AppState {
         let accounts = store.load_accounts();
         let mut config = store.load_config();
 
+        // 环境变量覆盖（OpenWrt/LuCI 通过 init.d 传入，与 WebUI 全局设置对齐）
+        if let Ok(v) = std::env::var("TAYGEDO_DEFAULT_SCHEDULE") {
+            if !v.trim().is_empty() {
+                config.default_schedule = v.trim().to_string();
+            }
+        }
+        if let Ok(v) = std::env::var("TAYGEDO_COIN_TASKS") {
+            config.coin_tasks = parse_bool_env(&v);
+        }
+        if let Ok(v) = std::env::var("TAYGEDO_CLOUD_DURATION") {
+            config.cloud_duration = parse_bool_env(&v);
+        }
+        if let Ok(v) = std::env::var("TAYGEDO_SHARE_PLATFORM") {
+            if !v.trim().is_empty() {
+                config.share_platform = v.trim().to_string();
+            }
+        }
+
         // 首次启动若没有凭据密钥，立即落盘
         if config.credential_key.is_empty() {
             config.credential_key = crate::crypto::generate_credential_key();
@@ -145,6 +163,10 @@ fn now_unix() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+fn parse_bool_env(v: &str) -> bool {
+    matches!(v.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on")
 }
 
 /// 执行签到（手动触发或调度触发）。`only` 为 None 时运行全部账号。

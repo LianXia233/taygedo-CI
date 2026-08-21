@@ -17,11 +17,30 @@ o = s:option(Value, "data_dir", translate("数据目录"),
 o.default = "/etc/taygedo"
 
 o = s:option(Value, "web_password", translate("Web 登录密码"),
-	translate("WebUI 登录密码。留空则首次启动自动生成随机密码（见系统日志）。"))
+	translate("WebUI 登录密码。留空则使用默认账号密码 admin / admin。"))
 o.password = true
 
-o = s:option(Value, "default_schedule", translate("默认签到时间"),
+s2 = m:section(TypedSection, "taygedo", translate("签到设置（与 WebUI 全局设置一致）"))
+s2.anonymous = true
+
+o = s2:option(Value, "default_schedule", translate("默认签到时间"),
 	translate("每天自动签到的时间（HH:MM，北京时间）。"))
 o.default = "06:10"
+o.datatype = "time"
+
+o = s2:option(Flag, "coin_tasks", translate("金币任务"),
+	translate("每日执行金币任务（签到 / 浏览 / 点赞 / 分享）。"))
+o.default = "1"
+
+o = s2:option(Flag, "cloud_duration", translate("云异环时长"),
+	translate("每日领取云异环时长。"))
+o.default = "1"
+
+o = s2:option(ListValue, "share_platform", translate("分享平台"),
+	translate("金币任务分享所用的平台。"))
+o:value("qq", "QQ")
+o:value("wechat", "微信")
+o:value("weibo", "微博")
+o.default = "qq"
 
 return m

@@ -144,6 +144,16 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: bin
+      - name: Install apk-tools 3.x (for v3 ADB packaging)
+        run: |
+          # OpenWrt 24.10+ 的 apk 包是 v3 ADB 格式，必须用 apk-tools 3.0 的 mkpkg 生成。
+          # 下载 Alpine 的 apk-tools-static（静态 x86_64 二进制，可交叉打包任意架构）。
+          curl -fsSL -o apk-tools-static.apk \
+            "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/apk-tools-static-3.0.7-r0.apk"
+          mkdir -p apkstatic
+          tar xzf apk-tools-static.apk -C apkstatic
+          install -m755 apkstatic/sbin/apk.static /usr/local/bin/apk
+          apk --version
       - name: Package ipk + apk
         run: |
           VERSION="${GITHUB_REF_NAME#v}"

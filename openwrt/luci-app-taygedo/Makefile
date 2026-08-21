@@ -10,13 +10,13 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-taygedo
-PKG_VERSION:=0.2.0
+PKG_VERSION:=0.2.4
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=LianXia233
 
 # 预编译二进制发布仓库与版本（需与 .github/workflows/build.yml 的 tag 一致）
-TAYGEDO_REPO:=https://github.com/LianXia233/taygedo-auto-attendance-rs
+TAYGEDO_REPO:=https://github.com/LianXia233/taygedo-CI
 TAYGEDO_VER:=v$(PKG_VERSION)
 
 include $(INCLUDE_DIR)/package.mk

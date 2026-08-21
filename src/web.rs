@@ -13,9 +13,10 @@ use serde::Deserialize;
 use crate::service::{self, AppState};
 
 pub fn router(state: Arc<AppState>) -> Router {
-    // 公开路由：首页 + 登录
+    // 公开路由：首页 + 鉴权信息 + 登录
     let public = Router::new()
         .route("/", get(index))
+        .route("/api/auth", get(auth_info))
         .route("/api/login", post(login_api));
 
     // 受保护路由：所有业务 API
@@ -72,16 +73,26 @@ async fn cors_middleware(req: axum::extract::Request, next: Next) -> Result<Resp
 }
 
 /// 鉴权中间件：校验 Bearer token 或 cookie。
+/// 当 `TAYGEDO_DISABLE_AUTH=1`（OpenWrt 受信任环境）时直接放行。
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     req: axum::extract::Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    if state.disable_auth {
+        return Ok(next.run(req).await);
+    }
     if state.validate_token(&extract_token(&req)) {
         Ok(next.run(req).await)
     } else {
         Err(StatusCode::UNAUTHORIZED)
     }
+}
+
+/// 公开接口：返回当前是否需要 WebUI 登录鉴权。
+/// 前端据此决定是直接进主界面、还是展示登录框。
+async fn auth_info(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "no_auth": state.disable_auth }))
 }
 
 fn extract_token(req: &axum::extract::Request) -> String {
@@ -186,6 +197,11 @@ async fn login_api(
     State(state): State<Arc<AppState>>,
     Json(req): Json<LoginReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // 免鉴权模式（OpenWrt）：直接返回一次性 token，前端无需真正校验密码。
+    if state.disable_auth {
+        let token = state.issue_token();
+        return Ok(Json(serde_json::json!({ "ok": true, "token": token })));
+    }
     if state.verify_login(&req.username, &req.password).await {
         let token = state.issue_token();
         Ok(Json(serde_json::json!({ "ok": true, "token": token })))
@@ -201,6 +217,12 @@ async fn change_password(
     State(state): State<Arc<AppState>>,
     Json(req): Json<PasswordReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if state.disable_auth {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "当前为免鉴权模式（OpenWrt），不支持修改登录密码" })),
+        ));
+    }
     if req.new_password.len() < 6 {
         return Err(err("新密码至少 6 位"));
     }

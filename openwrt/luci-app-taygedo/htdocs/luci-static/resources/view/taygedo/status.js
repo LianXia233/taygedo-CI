@@ -22,6 +22,7 @@ var TGD = (function () {
 	// LuCI 页面已由 OpenWrt root 鉴权保护，token 仅存内存、每次进入页面静默登录，
 	// 不持久化到 localStorage（避免旧 token 因后端重启失效而误判为未登录）。
 	var token = '';
+	var noAuth = false;
 	var pollTimer = null;
 
 	function esc(s) {
@@ -41,20 +42,20 @@ var TGD = (function () {
 
 	function api(path, method, body, _retry) {
 		var opts = { method: method || 'GET', headers: {} };
-		if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+		if (token && !noAuth) opts.headers['Authorization'] = 'Bearer ' + token;
 		if (body !== undefined) {
 			opts.headers['Content-Type'] = 'application/json';
 			opts.body = JSON.stringify(body);
 		}
 		return fetch(apiBase + path, opts).then(function (r) {
-			if (r.status === 401 && !_retry) {
+			if (r.status === 401 && !noAuth && !_retry) {
 				// token 失效：静默重新登录后端后重试一次
 				token = '';
 				return autoLogin().then(function () {
 					return api(path, method, body, true);
 				});
 			}
-			if (r.status === 401) {
+			if (r.status === 401 && !noAuth) {
 				token = '';
 				showLogin();
 				throw new Error('未登录或登录已过期');
@@ -76,7 +77,9 @@ var TGD = (function () {
 		esc: esc, toast: toast, api: api, initApiBase: initApiBase,
 		getToken: function () { return token; },
 		setToken: function (t) { token = t || ''; },
-		getApiBase: function () { return apiBase; }
+		getApiBase: function () { return apiBase; },
+		getNoAuth: function () { return noAuth; },
+		setNoAuth: function (v) { noAuth = !!v; }
 	};
 })();
 
@@ -296,11 +299,13 @@ function settingsModalHtml() {
 		'      <div class="tgd-field"><label>分享平台</label><input class="tgd-input" id="tgd-cfg-share" placeholder="qq / wechat / weibo"></div>',
 		'      <button class="tgd-btn tgd-primary" id="tgd-cfg-save" style="width:100%">保存</button>',
 		'      <hr class="tgd-divider">',
+		'      <div id="tgd-pwd-section">',
 		'      <div class="tgd-section-title">修改登录账号密码</div>',
 		'      <div class="tgd-field"><label>账号</label><input class="tgd-input" id="tgd-old-user" value="admin" autocomplete="username"></div>',
 		'      <div class="tgd-field"><label>原密码</label><input class="tgd-input" id="tgd-old-pwd" type="password" autocomplete="current-password"></div>',
 		'      <div class="tgd-field"><label>新密码（至少 6 位）</label><input class="tgd-input" id="tgd-new-pwd" type="password" autocomplete="new-password"></div>',
 		'      <button class="tgd-btn" id="tgd-pwd-save" style="width:100%">修改账号密码</button>',
+		'      </div>',
 		'    </div>',
 		'  </div>',
 		'</div>'
@@ -535,6 +540,9 @@ function openSettings() {
 		document.getElementById('tgd-old-user').value = 'admin';
 		document.getElementById('tgd-old-pwd').value = '';
 		document.getElementById('tgd-new-pwd').value = '';
+		// 免鉴权模式（OpenWrt）：隐藏修改密码区块
+		var ps = document.getElementById('tgd-pwd-section');
+		if (ps) ps.style.display = TGD.getNoAuth() ? 'none' : '';
 		document.getElementById('tgd-settings-modal').classList.add('tgd-show');
 	}).catch(function (e) { TGD.toast(e.message, 'tgd-err'); });
 }
@@ -583,14 +591,34 @@ return view.extend({
 		TGD.initApiBase();
 		var root = E('div', { 'id': 'tgd-root', 'class': 'tgd-root' });
 
-		// 默认静默自动登录后端，直接进入主界面；仅当后端密码与 UCI 不同步时才兜底显示登录框。
 		root.innerHTML = '<style>' + TGD_CSS + '</style><div class="tgd-login-wrap"><div class="tgd-login-card"><div class="tgd-logo">' +
 			ICONS.logo + '</div><h1>塔吉多自动签到</h1><div class="tgd-sub">正在连接签到服务…</div></div></div><div class="tgd-toast"></div>';
 
-		autoLogin().then(function () {
-			renderMain();
+		// 先探测后端是否需要登录鉴权（OpenWrt 免鉴权模式下 no_auth=true）。
+		fetch(TGD.getApiBase() + '/api/auth').then(function (r) {
+			return r.json().catch(function () { return {}; });
+		}).then(function (j) {
+			if (j.no_auth) {
+				// 免鉴权：直接进入主界面，不弹登录框、不读/写 token。
+				TGD.setNoAuth(true);
+				TGD.setToken('');
+				renderMain();
+				return;
+			}
+			// 需要鉴权：默认静默自动登录后端，直接进入主界面；
+			// 仅当后端密码与 UCI 不同步时才兜底显示登录框。
+			autoLogin().then(function () {
+				renderMain();
+			}).catch(function () {
+				showLogin();
+			});
 		}).catch(function () {
-			showLogin();
+			// 探测失败按需要鉴权处理
+			autoLogin().then(function () {
+				renderMain();
+			}).catch(function () {
+				showLogin();
+			});
 		});
 
 		return root;

@@ -28,6 +28,7 @@ start_service() {
     procd_set_param env \
         TAYGEDO_LISTEN="0.0.0.0:${port}" \
         TAYGEDO_DATA_DIR="$data_dir" \
+        TAYGEDO_DISABLE_AUTH="1" \
         TAYGEDO_DEFAULT_SCHEDULE="$default_schedule" \
         TAYGEDO_COIN_TASKS="$coin_tasks" \
         TAYGEDO_CLOUD_DURATION="$cloud_duration" \

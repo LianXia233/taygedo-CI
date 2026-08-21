@@ -9,3 +9,10 @@ index = "https://rsproxy.cn/crates.io-index"
 
 [net]
 git-fetch-with-cli = true
+
+# 本地 Windows 交叉编译 aarch64 musl（路由器）用的链接配置：
+# 直接用 rust 自带的 rust-lld，避免缺少 aarch64-linux-musl-gcc 交叉链接器。
+# 注意：GitHub Actions 的 Linux runner 会先 `rm -f .cargo/config.toml` 再构建，此段不影响 CI。
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "link-self-contained=yes", "-C", "linker-flavor=ld.lld"]

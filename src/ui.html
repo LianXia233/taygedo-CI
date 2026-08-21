@@ -411,6 +411,7 @@ header, .card, .stat, .panel, .modal, .login-card {
       <button class="btn primary" id="cfgSave">保存</button>
 
       <hr class="divider">
+      <div id="pwdSection">
       <div class="section-title">修改登录账号密码</div>
       <div class="field">
         <label>账号</label>
@@ -425,6 +426,7 @@ header, .card, .stat, .panel, .modal, .login-card {
         <input class="input" type="password" id="newPwd" autocomplete="new-password">
       </div>
       <button class="btn" id="pwdSave">修改账号密码</button>
+      </div>
 
       <hr class="divider">
       <button class="btn danger" id="logoutBtn">退出登录</button>
@@ -438,6 +440,7 @@ header, .card, .stat, .panel, .modal, .login-card {
 const $ = (id) => document.getElementById(id);
 let currentMode = 'password';
 let token = localStorage.getItem('taygedo_token') || '';
+let noAuth = false;
 let sendCodeTimer = null;
 
 function toast(msg, type) {
@@ -459,13 +462,13 @@ function showMain() {
 
 async function api(path, method, body) {
   const opts = { method, headers: {} };
-  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  if (token && !noAuth) opts.headers['Authorization'] = 'Bearer ' + token;
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
   const r = await fetch(path, opts);
-  if (r.status === 401) { showLogin(); throw new Error('未登录或登录已过期'); }
+  if (r.status === 401 && !noAuth) { showLogin(); throw new Error('未登录或登录已过期'); }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
   return data;
@@ -684,6 +687,9 @@ async function openSettings() {
     $('cfgCloud').checked = !!loadedCfg.cloud_duration;
     $('cfgShare').value = loadedCfg.share_platform || 'qq';
     $('oldUser').value = 'admin'; $('oldPwd').value = ''; $('newPwd').value = '';
+    // 免鉴权模式（OpenWrt）：隐藏修改密码与退出登录
+    $('pwdSection').style.display = noAuth ? 'none' : '';
+    $('logoutBtn').style.display = noAuth ? 'none' : '';
     openModal('settingsModal');
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -741,6 +747,19 @@ $('loginForm').addEventListener('submit', doLogin);
 
 /* init */
 (async function init() {
+  // 先探测后端是否需要登录鉴权
+  try {
+    const r = await fetch('/api/auth');
+    const j = await r.json().catch(() => ({}));
+    noAuth = !!j.no_auth;
+  } catch (e) { noAuth = false; }
+
+  if (noAuth) {
+    showMain();
+    loadAccounts();
+    loadLogs();
+    return;
+  }
   if (!token) { showLogin(); return; }
   try {
     await api('/api/accounts', 'GET');
@@ -756,10 +775,10 @@ let pollTimer = null;
 function startPoll() {
   if (pollTimer) return;
   pollTimer = setInterval(() => {
-    if (token) { loadLogs(); }
+    if (token || noAuth) { loadLogs(); }
   }, 3000);
 }
-setInterval(() => { if (token && $('mainScreen').style.display !== 'none') loadAccounts(); }, 10000);
+setInterval(() => { if ((token || noAuth) && $('mainScreen').style.display !== 'none') loadAccounts(); }, 10000);
 startPoll();
 </script>
 </body>

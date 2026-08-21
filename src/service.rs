@@ -22,6 +22,8 @@ pub struct AppState {
     pub run_lock: Mutex<()>,
     /// 登录会话：token -> 过期 unix 秒。
     pub sessions: std::sync::Mutex<HashMap<String, i64>>,
+    /// OpenWrt 等受信任环境：禁用 WebUI 二次鉴权，由外层（LuCI / 系统）统一保护。
+    pub disable_auth: bool,
 }
 
 impl AppState {
@@ -72,6 +74,8 @@ impl AppState {
         }
         store.save_config(&config);
 
+        let disable_auth = parse_bool_env(&std::env::var("TAYGEDO_DISABLE_AUTH").unwrap_or_default());
+
         let state = store.load_state();
         let app = Arc::new(Self {
             api: Api::new(),
@@ -83,9 +87,13 @@ impl AppState {
             pending_devices: std::sync::Mutex::new(HashMap::new()),
             run_lock: Mutex::new(()),
             sessions: std::sync::Mutex::new(HashMap::new()),
+            disable_auth,
         });
 
-        if let Some(pwd) = initial_password {
+        if app.disable_auth {
+            app.push_log("warn", "WebUI 鉴权已禁用（TAYGEDO_DISABLE_AUTH=1）：所有 API 无需登录即可访问".to_string());
+            println!("[taygedo-rs] WebUI 鉴权已禁用（TAYGEDO_DISABLE_AUTH=1）");
+        } else if let Some(pwd) = initial_password {
             app.push_log("warn", format!("已初始化 WebUI 登录账号：admin / {pwd}（登录后请在设置中修改）"));
             println!("[taygedo-rs] WebUI 默认登录账号：admin / {pwd}");
         }

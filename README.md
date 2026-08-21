@@ -1,6 +1,9 @@
 # 塔吉多自动签到 (Rust 版)
 
-基于 Rust 重写的塔吉多（幻塔 / 异环等）每日自动签到工具，附带一个现代化、**带登录鉴权**、**手机/PC 自适应**的 WebUI 管理界面，并支持 **OpenWrt 主线**集成（含 LuCI）。
+基于 Rust 重写的塔吉多（幻塔 / 异环等）每日自动签到工具，附带一个现代化、**手机/PC 自适应**的 WebUI 管理界面，并支持 **OpenWrt 主线**集成（含 LuCI）。
+
+- **Windows / Debian / 其他平台**：WebUI 与所有 API 需要账号密码登录（默认 `admin / admin`）。
+- **OpenWrt（路由器）**：由 LuCI 后台统一鉴权，**默认免登录**直接进入，不再二次弹登录框。
 
 > 📦 各平台安装包见 [Releases](https://github.com/LianXia233/taygedo-CI/releases)
 
@@ -18,7 +21,8 @@
 - **完整签到链路**：APP 签到、逐游戏签到（幻塔 1256 / 异环 1289 等，显示中文游戏名）、金币任务（签到/浏览/点赞/分享）、云异环时长。
 - **幽灵角色修复**：优先使用战绩卡（`getGameRecordCards`）作为角色↔游戏权威映射，避免 `getGameRoles` 返回幽灵角色导致整账号 `code=5050` 失败。
 - **会话自动续期**：`accessToken` 失效时自动 `refreshToken` → 失效再走 `laohuToken` 重建 → 有密码则密码重登。
-- **登录鉴权**：WebUI 与所有 API 需要账号密码登录（默认 `admin / admin`，`sha256` 加盐哈希），token 有效期 7 天，支持在线修改账号密码。
+- **登录鉴权（Windows / Debian / 其他平台）**：WebUI 与所有 API 需要账号密码登录（默认 `admin / admin`，`sha256` 加盐哈希），token 有效期 7 天，支持在线修改账号密码。
+- **OpenWrt 免鉴权**：路由器上由 LuCI 后台统一保护，后端以 `TAYGEDO_DISABLE_AUTH=1` 运行，WebUI / LuCI 进入即直接用，不再二次登录、也不展示修改密码入口。
 - **响应式界面**：手机 / PC 自适应布局，深浅色主题，背景壁纸（毛玻璃卡片）。
 - **实时日志**：WebUI 内置带时间戳的详细运行日志。
 
@@ -169,14 +173,16 @@ apk add /tmp/luci-app-taygedo_0.2.3-r1_x86_64.apk
 - 启用服务：勾选。
 - 监听端口：默认 8787。
 - 数据目录：默认 `/etc/taygedo`。
-- Web 登录密码：留空用默认 `admin/admin`。
+- Web 登录密码：留空用默认 `admin/admin`（仅 Windows / Debian 等需要登录的平台生效；OpenWrt 下后端以免鉴权模式运行，此项错误忽略）。
 - 默认签到时间、金币任务、云异环时长、分享平台：按需。
 
 保存并应用，服务自动重启。
 
+> **免鉴权说明**：OpenWrt 下 `init.d` 会注入 `TAYGEDO_DISABLE_AUTH=1`，后端所有 API 无需登录即可访问，由 LuCI 后台统一保护。因此进入「塔吉多签到」页面即直接使用，不会弹出登录框，设置里也不再有「修改密码」入口。如果你确实需要 OpenWrt 上也启用独立登录，可手动改 `init.d/taygedo` 去掉该行并重启服务。
+
 **4. 打开 WebUI**
 
-LuCI 菜单点「**打开 WebUI**」，或浏览器访问 `http://<路由器IP>:8787`，用 `admin / admin` 登录。
+LuCI 菜单点「**打开 WebUI**」，或浏览器访问 `http://<路由器IP>:8787`，**OpenWrt 下免登录直接进入**；Windows / Debian 等平台用 `admin / admin` 登录。
 
 **5. 命令行管理（可选）**
 
@@ -300,12 +306,13 @@ openwrt/luci-app-taygedo/
 
 ## API 一览
 
-除 `/api/login` 外，所有 API 需携带 `Authorization: Bearer <token>`（或 `Cookie: taygedo_token=<token>`）。
+除 `/api/login` 外，所有 API 需携带 `Authorization: Bearer <token>`（或 `Cookie: taygedo_token=<token>`）。**OpenWrt 免鉴权模式下（`TAYGEDO_DISABLE_AUTH=1`）所有 API 均无需 token。**
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| GET | `/api/auth` | 公开接口，返回 `{ no_auth: bool }`，前端据此决定是否需要登录 |
 | POST | `/api/login` | 登录 `{username, password}` → `{token}` |
-| POST | `/api/password` | 修改账号密码 `{username?, old_password, new_password}` |
+| POST | `/api/password` | 修改账号密码 `{username?, old_password, new_password}`（免鉴权模式下返回 403） |
 | GET | `/api/accounts` | 账号列表（敏感字段已脱敏） |
 | POST | `/api/accounts` | 登录账号 `{phone, mode, password?, captcha?, name?}` |
 | DELETE | `/api/accounts/{id}` | 删除账号 |
@@ -341,6 +348,17 @@ scripts/package.sh          # deb / ipk / apk 打包脚本
 ---
 
 ## 更新日志 (Changelog)
+
+### [0.2.6] - 2026-08-22
+
+**新增 / 变更**
+- **OpenWrt 免鉴权**：路由器上后端以 `TAYGEDO_DISABLE_AUTH=1` 运行，所有 API 无需登录即可访问，由 LuCI 后台统一保护。进入「塔吉多签到」页面或访问 `:8787` WebUI **直接进入**，不再弹登录框，设置里也不再有「修改密码 / 退出登录」入口。
+- 新增公开接口 `GET /api/auth` 返回 `{ no_auth: bool }`，WebUI 与 LuCI 据此自动判断是否跳过登录。
+- WebUI / LuCI 前端：检测到 `no_auth` 时直接进入主界面；免鉴权模式下隐藏修改密码区块与退出登录按钮。
+- Windows / Debian / 其他平台**鉴权逻辑不变**，仍默认 `admin / admin` 登录。
+
+**说明**
+- 若要为 OpenWrt 也启用独立登录，手动编辑 `openwrt/luci-app-taygedo/root/etc/init.d/taygedo`，去掉 `TAYGEDO_DISABLE_AUTH="1"` 这一行并重启服务即可。
 
 ### [0.2.5] - 2026-08-21
 

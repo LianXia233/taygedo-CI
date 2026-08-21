@@ -25,13 +25,14 @@ start_service() {
 
     procd_open_instance
     procd_set_param command "$PROG"
-    procd_set_param env TAYGEDO_LISTEN "0.0.0.0:${port}"
-    procd_set_param env TAYGEDO_DATA_DIR "$data_dir"
-    [ -n "$web_password" ] && procd_set_param env TAYGEDO_WEB_PASSWORD "$web_password"
-    procd_set_param env TAYGEDO_DEFAULT_SCHEDULE "$default_schedule"
-    procd_set_param env TAYGEDO_COIN_TASKS "$coin_tasks"
-    procd_set_param env TAYGEDO_CLOUD_DURATION "$cloud_duration"
-    procd_set_param env TAYGEDO_SHARE_PLATFORM "$share_platform"
+    procd_set_param env \
+        TAYGEDO_LISTEN="0.0.0.0:${port}" \
+        TAYGEDO_DATA_DIR="$data_dir" \
+        TAYGEDO_DEFAULT_SCHEDULE="$default_schedule" \
+        TAYGEDO_COIN_TASKS="$coin_tasks" \
+        TAYGEDO_CLOUD_DURATION="$cloud_duration" \
+        TAYGEDO_SHARE_PLATFORM="$share_platform"
+    [ -n "$web_password" ] && procd_append_param env TAYGEDO_WEB_PASSWORD="$web_password"
     procd_set_param respawn 3600 5 5
     procd_set_param stdout 1
     procd_set_param stderr 1

@@ -23,7 +23,6 @@
 // ---------------------------------------------------------------------------
 var TGD = (function () {
 	var apiBase = '';
-	var pollTimer = null;
 
 	function esc(s) {
 		return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -379,6 +378,7 @@ function openAddModal(mode) {
 function closeModal(id) { document.getElementById(id).classList.remove('tgd-show'); }
 
 var sendCodeTimer = null;
+var pollTimer = null;      // 日志轮询定时器（startPoll 使用，须在模块作用域）
 var allAccounts = [];       // 全局账号列表，用于日志按账号筛选
 var allLogsRaw = [];        // 原始日志（未筛选）
 var currentLogFilter = 'all'; // 当前日志筛选：'all' 或 account.id
@@ -618,13 +618,22 @@ return view.extend({
 		root.innerHTML = '<style>' + TGD_CSS + '</style><div class="tgd-login-wrap"><div class="tgd-login-card"><div class="tgd-logo">' +
 			ICONS.logo + '</div><h1>塔吉多自动签到</h1><div class="tgd-sub">正在连接签到服务…</div></div></div><div class="tgd-toast"></div>';
 
-		fetch(TGD.getApiBase() + '/api/config', { method: 'GET' }).then(function (r) {
+		var probe = fetch(TGD.getApiBase() + '/api/config', { method: 'GET' }).then(function (r) {
 			if (!r.ok) throw new Error('HTTP ' + r.status);
 			return r.json();
-		}).then(function () {
-			renderMain();
-		}).catch(function () {
+		});
+
+		// 探测失败（后端不可达 / 未开免鉴权）→ 渲染引导页
+		probe.catch(function (e) {
+			console.error('taygedo probe:', e);
 			renderNoAuth();
+		});
+
+		// 探测成功 → 主界面；渲染异常单独记录，不再误判为“未开免鉴权”
+		probe.then(function () {
+			renderMain();
+		}).catch(function (e) {
+			console.error('taygedo renderMain:', e);
 		});
 
 		return root;

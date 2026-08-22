@@ -613,19 +613,16 @@ return view.extend({
 		TGD.initApiBase();
 		var root = E('div', { 'id': 'tgd-root', 'class': 'tgd-root' });
 
-		// 先探测后端免鉴权状态：no_auth=true 直接渲染主界面；
-		// 否则渲染提示页（提供打开外部 WebUI 入口，不承载登录态）。
+		// 探测后端是否可用：用 /api/config 做健康检查（兼容所有版本）。
+		// 能返回合法 JSON 即认为后端正常，直接渲染主界面（UCI no_auth 由服务启动时读取）。
 		root.innerHTML = '<style>' + TGD_CSS + '</style><div class="tgd-login-wrap"><div class="tgd-login-card"><div class="tgd-logo">' +
 			ICONS.logo + '</div><h1>塔吉多自动签到</h1><div class="tgd-sub">正在连接签到服务…</div></div></div><div class="tgd-toast"></div>';
 
-		fetch(TGD.getApiBase() + '/api/meta').then(function (r) {
-			return r.json().catch(function () { return {}; });
-		}).then(function (meta) {
-			if (meta.no_auth) {
-				renderMain();
-				return;
-			}
-			renderNoAuth();
+		fetch(TGD.getApiBase() + '/api/config', { method: 'GET' }).then(function (r) {
+			if (!r.ok) throw new Error('HTTP ' + r.status);
+			return r.json();
+		}).then(function () {
+			renderMain();
 		}).catch(function () {
 			renderNoAuth();
 		});

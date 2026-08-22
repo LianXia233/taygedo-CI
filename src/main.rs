@@ -35,11 +35,32 @@ async fn main() {
         .await
         .expect("绑定端口失败");
 
-    println!("===============================================");
-    println!("  塔吉多自动签到 (Rust) 已启动");
-    println!("  访问地址: http://{}", bind_addr);
-    println!("  数据目录: {}", data_dir);
-    println!("===============================================");
+    // 计算可点击的访问地址：若绑定 0.0.0.0 则展示 localhost/127.0.0.1
+    let display_url = if bind_addr.ip().is_unspecified() {
+        format!("http://127.0.0.1:{}", bind_addr.port())
+    } else {
+        format!("http://{}", bind_addr)
+    };
+    let listen_note = if bind_addr.ip().is_unspecified() {
+        format!("监听所有接口 0.0.0.0:{}", bind_addr.port())
+    } else {
+        format!("监听 {}", bind_addr)
+    };
+
+    let auth_note = if state.no_auth {
+        "免鉴权模式 (无需登录)".to_string()
+    } else {
+        "默认账号: admin / admin".to_string()
+    };
+
+    println!("╔════════════════════════════════════════════╗");
+    println!("║  塔吉多自动签到 (Rust) 已启动               ║");
+    println!("║                                              ║");
+    println!("║  访问地址: {:<34} ║", display_url);
+    println!("║  {}{:.<39}║", listen_note, "");
+    println!("║  鉴权: {:<38} ║", auth_note);
+    println!("║  数据目录: {:<35} ║", data_dir);
+    println!("╚════════════════════════════════════════════╝");
 
     axum::serve(listener, app).await.expect("服务运行失败");
 }

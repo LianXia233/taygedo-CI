@@ -95,7 +95,6 @@ impl AppState {
 
         if let Some(pwd) = initial_password {
             app.push_log("warn", format!("已初始化 WebUI 登录账号：admin / {pwd}（登录后请在设置中修改）"));
-            println!("[taygedo-rs] WebUI 默认登录账号：admin / {pwd}");
         }
         app
     }

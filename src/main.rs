@@ -62,5 +62,36 @@ async fn main() {
     println!("║  数据目录: {:<35} ║", data_dir);
     println!("╚════════════════════════════════════════════╝");
 
+    // Windows 桌面端：启动后自动用默认浏览器打开 WebUI。
+    // 服务器 / OpenWrt / Docker 无桌面环境，仅在 Windows 下执行，避免无意义弹窗。
+    #[cfg(target_os = "windows")]
+    {
+        let open_url = display_url.clone();
+        tokio::spawn(async move {
+            // 稍等，确保 axum 已开始监听，避免浏览器首请求连不上
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            let status = std::process::Command::new("cmd")
+                .args(["/C", "start", "", open_url.as_str()])
+                .status();
+            match status {
+                Ok(code) if code.success() => {
+                    state.push_log("info", format!("已自动打开 WebUI：{}", open_url));
+                }
+                Ok(code) => {
+                    state.push_log(
+                        "warn",
+                        format!("自动打开 WebUI 失败（退出码 {}），请手动访问 {}", code, open_url),
+                    );
+                }
+                Err(e) => {
+                    state.push_log(
+                        "warn",
+                        format!("自动打开 WebUI 失败（{}），请手动访问 {}", e, open_url),
+                    );
+                }
+            }
+        });
+    }
+
     axum::serve(listener, app).await.expect("服务运行失败");
 }

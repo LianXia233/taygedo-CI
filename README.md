@@ -178,11 +178,11 @@ apk add /tmp/luci-app-taygedo_0.2.3-r1_x86_64.apk
 
 保存并应用，服务自动重启。
 
-> **免鉴权说明**：OpenWrt 下 `init.d` 会注入 `TAYGEDO_DISABLE_AUTH=1`，后端所有 API 无需登录即可访问，由 LuCI 后台统一保护。因此进入「塔吉多签到」页面即直接使用，不会弹出登录框，设置里也不再有「修改密码」入口。如果你确实需要 OpenWrt 上也启用独立登录，可手动改 `init.d/taygedo` 去掉该行并重启服务。
+> **免鉴权说明**：OpenWrt 下 `init.d` 会注入 `TAYGEDO_DISABLE_AUTH=1`，后端所有 API 无需登录即可访问，由 LuCI 后台统一保护。LuCI 前端为**独立免鉴权页面**，进入「塔吉多签到」即直接使用，没有任何登录框或密码修改入口。如果你确实需要 OpenWrt 上也启用独立登录，可手动改 `init.d/taygedo` 去掉该行并重启服务。
 
 **4. 打开 WebUI**
 
-LuCI 菜单点「**打开 WebUI**」，或浏览器访问 `http://<路由器IP>:8787`，**OpenWrt 下免登录直接进入**；Windows / Debian 等平台用 `admin / admin` 登录。
+在「塔吉多签到」页面右上角点「**WebUI**」按钮，或浏览器直接访问 `http://<路由器IP>:8787`，**OpenWrt 下免登录直接进入**；Windows / Debian 等平台用 `admin / admin` 登录。
 
 **5. 命令行管理（可选）**
 
@@ -348,6 +348,14 @@ scripts/package.sh          # deb / ipk / apk 打包脚本
 ---
 
 ## 更新日志 (Changelog)
+
+### [0.2.7] - 2026-08-22
+
+**变更**
+- **LuCI 前端完全重写，与 WebUI 解耦**：移除所有鉴权逻辑（token / 自动登录 / 登录框 / 修改密码），进入页面直接进入主界面，不再探测 `/api/auth`、不再有任何「需要登录」的回退分支。OpenWrt 上由 LuCI 后台统一保护，彻底无需二次登录。
+- LuCI 头部新增「**跳转 WebUI**」按钮，点击在新标签页打开独立 WebUI（`http://<路由器IP>:8787`）。
+- 功能与 WebUI 对齐：账号管理、密码 / 短信验证码登录、每日签到时间、立即签到、运行日志、全局设置。
+- 视觉继续复用 LuCI 主题（aurora）CSS 变量，随亮 / 暗色主题自适应。
 
 ### [0.2.6] - 2026-08-22
 

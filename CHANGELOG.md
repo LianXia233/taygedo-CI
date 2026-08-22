@@ -2,7 +2,13 @@
 
 本文件记录塔吉多自动签到（Rust 版）的所有版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.4.5`。
+> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.4.6`。
+
+## [0.4.6] - 2026-08-23
+
+### 修复
+- **LuCI 完整界面渲染后被回退为免鉴权引导页**：`startPoll()` 引用了 `TGD` 闭包私有的 `pollTimer` 导致 `ReferenceError`，被探测的 catch 误判为"未开免鉴权"，刚渲染好的主界面立即被引导页覆盖。已将 `pollTimer` 提升至模块作用域，并把探测失败与渲染异常的错误处理拆分为两条链路，渲染异常不再误入引导页。
+- **WebUI 免鉴权探测与 LuCI 同步**：WebUI 启动探测从 `/api/meta` 改为 `/api/config`（免鉴权时裸请求即 200、需鉴权时 401）。部分运行中的二进制没有 `/api/meta` 路由（404），会导致免鉴权模式下 WebUI 误入登录页。
 
 ## [0.4.5] - 2026-08-22
 

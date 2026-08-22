@@ -825,10 +825,13 @@ $('loginForm').addEventListener('submit', doLogin);
 
 /* init */
 (async function init() {
-  // 免鉴权模式（TAYGEDO_NO_AUTH=1）：跳过登录，直接进入主界面
+  // 免鉴权模式（TAYGEDO_NO_AUTH=1）：跳过登录，直接进入主界面。
+  // 探测用 /api/config（所有版本都有该路由）：免鉴权时裸请求即 200，
+  // 需鉴权时返回 401 —— 与 LuCI 版探测方式保持一致（/api/meta 在部分
+  // 运行版本中不存在，会导致免鉴权探测失败而误入登录页）。
   try {
-    const meta = await (await fetch('/api/meta')).json();
-    if (meta.no_auth) {
+    const r = await fetch('/api/config', { method: 'GET' });
+    if (r.ok) {
       showMain();
       loadAccounts();
       loadLogs();

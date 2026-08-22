@@ -14,7 +14,7 @@
 - **两种登录方式**：
   - 密码登录（密码用 `scrypt + AES-256-GCM` 加密后落盘，与上游格式兼容）。
   - 短信验证码登录（WebUI 一键「发送验证码」→ 输入 → 登录）。
-- **每日定时签到**：每个账号可单独设置每天的签到时间（`HH:MM`，北京时间），也可设置全局默认时间。
+- **每日定时签到**：每个账号可单独设置每天的签到时间（`HH:MM`），也可设置全局默认时间。调度器固定使用**北京时间（UTC+8）**，与设备系统时区无关 —— Windows / Linux / OpenWrt 各平台行为完全一致；若进程在设定时间之后才启动（开机、重启），会自动**补签**，不会错过当天任务；每账号每天只触发一次，已签到的账号自动跳过，不会重复签到。
 - **完整签到链路**：APP 签到、逐游戏签到（幻塔 1256 / 异环 1289 等，显示中文游戏名）、金币任务（签到/浏览/点赞/分享）、云异环时长。
 - **幽灵角色修复**：优先使用战绩卡（`getGameRecordCards`）作为角色↔游戏权威映射，避免 `getGameRoles` 返回幽灵角色导致整账号 `code=5050` 失败。
 - **会话自动续期**：`accessToken` 失效时自动 `refreshToken` → 失效再走 `laohuToken` 重建 → 有密码则密码重登。
@@ -28,7 +28,7 @@
 访问 `http://<host>:8787`，默认账号密码 **`admin / admin`**（登录后请在「设置」中修改）：
 
 - 顶部统计：总账号 / 今日已签 / 待签到。
-- 账号卡片：显示游戏角色、每日签到时间（可改）、「立即签到」「删除」。
+- 账号卡片：自定义头像、**平台昵称**（无昵称时回退备注名）、每日签到时间（可改）、「立即签到」「删除」。
 - 「添加账号」弹窗：密码 / 验证码两种登录。
 - 「全局设置」：默认签到时间、金币任务、云时长开关、分享平台、修改密码、退出登录。
 - 右侧实时运行日志。
@@ -95,8 +95,9 @@ netsh advfirewall firewall add rule name="taygedo" dir=in action=allow protocol=
 **1. 下载安装**
 
 ```bash
-wget https://github.com/LianXia233/taygedo-CI/releases/download/v0.2.3/taygedo-rs_0.2.3_amd64.deb
-sudo dpkg -i taygedo-rs_0.2.3_amd64.deb
+# 到 Releases 页面下载最新 deb（文件名带版本号，如 taygedo-rs_0.4.8_amd64.deb）
+# https://github.com/LianXia233/taygedo-CI/releases/latest
+sudo dpkg -i taygedo-rs_<版本>_amd64.deb
 sudo apt-get install -f    # 若有依赖缺失（本项目基本无依赖，通常不需要）
 ```
 
@@ -156,28 +157,24 @@ sudo journalctl -u taygedo-rs -f
 **2. 安装**
 
 ```sh
-# opkg（23.05 及以下）
-opkg install /tmp/luci-app-taygedo_0.2.3-1_x86_64.ipk
+# opkg（23.05 及以下），文件名带版本号，如 luci-app-taygedo_0.4.8-1_x86_64.ipk
+opkg install /tmp/luci-app-taygedo_<版本>-1_x86_64.ipk
 
-# apk（24.10 及以上）
-apk add /tmp/luci-app-taygedo_0.2.3-r1_x86_64.apk
+# apk（24.10 及以上），如 luci-app-taygedo_0.4.8-r1_x86_64.apk
+apk add /tmp/luci-app-taygedo_<版本>-r1_x86_64.apk
 ```
 
-**3. LuCI 界面配置**
+**3. LuCI 页面**
 
-浏览器打开路由器 LuCI → **服务 → 塔吉多签到** → 「配置」页：
+浏览器打开路由器 LuCI → **服务 → 塔吉多签到**，单页即完整管理界面（账号卡片 / 统计 / 运行日志 / 添加账号 / 全局设置），与 WebUI 功能、视觉保持同步。
 
-- 启用服务：勾选。
-- 监听端口：默认 8787。
-- 数据目录：默认 `/etc/taygedo`。
-- Web 登录密码：留空用默认 `admin/admin`。
-- 默认签到时间、金币任务、云异环时长、分享平台：按需。
-
-保存并应用，服务自动重启。
+- **免鉴权模式**（UCI 默认 `option no_auth '1'`）：LuCI 页面免登录直连后端 API，直接管理账号。
+- **未开免鉴权**：页面显示引导页，点右上「**外部 WebUI**」按钮跳转 `:8787` 独立管理界面（或在路由器执行 `uci set taygedo.main.no_auth=1 && uci commit taygedo && /etc/init.d/taygedo restart` 开启免鉴权）。
+- 基础服务配置（启用 / 监听端口 / 数据目录 / Web 登录密码 / 默认签到时间等）通过 UCI（`/etc/config/taygedo`）或下方命令行管理。
 
 **4. 打开 WebUI**
 
-LuCI 菜单点「**打开 WebUI**」，或浏览器访问 `http://<路由器IP>:8787`，用 `admin / admin` 登录。
+LuCI 页面右上「**外部 WebUI**」按钮，或浏览器直接访问 `http://<路由器IP>:8787`。免鉴权模式直接进入；未开启时用 `admin / admin` 登录。
 
 **5. 命令行管理（可选）**
 

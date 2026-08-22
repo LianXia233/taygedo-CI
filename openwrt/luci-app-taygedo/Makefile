@@ -13,7 +13,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-taygedo
-PKG_VERSION:=0.4.2
+PKG_VERSION:=0.4.3
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=LianXia233

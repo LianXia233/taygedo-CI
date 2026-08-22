@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
-use axum::response::{Html, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -114,8 +114,10 @@ fn extract_token(req: &axum::extract::Request) -> String {
     String::new()
 }
 
-async fn index() -> Html<&'static str> {
-    Html(include_str!("ui.html"))
+async fn index() -> Response {
+    // no-cache：WebUI 随二进制编译内嵌（include_str!），升级后若浏览器仍用
+    // 启发式缓存的旧页面，会出现“新旧界面元素不一致/功能不同步”的假象。
+    ([(header::CACHE_CONTROL, "no-cache")], Html(include_str!("ui.html"))).into_response()
 }
 
 /// 服务元信息：供前端判断是否处于免鉴权模式。

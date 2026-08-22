@@ -108,16 +108,28 @@ var TGD_CSS = [
 	'@media (min-width: 960px) { .tgd-root .tgd-main { grid-template-columns: 1.25fr 1fr; align-items: start; } }',
 	'.tgd-root .tgd-accounts { display: grid; grid-template-columns: 1fr; gap: 12px; }',
 	'@media (min-width: 640px) { .tgd-root .tgd-accounts { grid-template-columns: repeat(2, 1fr); } }',
-	'.tgd-root .tgd-card { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-base);',
+	'.tgd-root .tgd-card { position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-base);',
 	'  padding: 16px; box-shadow: var(--app-shadow-sm); display: flex; flex-direction: column; gap: 12px;',
 	'  transition: box-shadow .15s, border-color .15s; }',
 	'.tgd-root .tgd-card:hover { box-shadow: var(--app-shadow-md); border-color: var(--brand); }',
+	'.tgd-root .tgd-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;',
+	'  background: linear-gradient(90deg, var(--brand), var(--brand-hover, var(--brand))); opacity: 0; transition: opacity .2s; }',
+	'.tgd-root .tgd-card:hover::before { opacity: 1; }',
 	'.tgd-root .tgd-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }',
-	'.tgd-root .tgd-avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--brand-subtle); color: var(--brand);',
-	'  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; flex: none; }',
+	'.tgd-root .tgd-avatar { width: 46px; height: 46px; border-radius: 14px; flex: none;',
+	'  background: linear-gradient(135deg, var(--brand), var(--brand-hover, var(--brand))); color: var(--on-brand, #fff);',
+	'  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px;',
+	'  box-shadow: 0 4px 12px rgba(0,0,0,.2); }',
 	'.tgd-root .tgd-card-info { flex: 1; min-width: 0; }',
-	'.tgd-root .tgd-card-info .tgd-name { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--text); }',
-	'.tgd-root .tgd-card-info .tgd-sub { font-size: 12px; color: var(--text-subtle); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+	'.tgd-root .tgd-card-info .tgd-name-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }',
+	'.tgd-root .tgd-card-info .tgd-name { font-weight: 700; font-size: 15.5px; letter-spacing: .3px; color: var(--text); }',
+	'.tgd-root .tgd-card-info .tgd-meta-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }',
+	'.tgd-root .tgd-meta-tag { font-size: 11.5px; padding: 2px 8px; border-radius: 6px; background: var(--surface-sunken);',
+	'  color: var(--text-subtle); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; max-width: 160px;',
+	'  overflow: hidden; text-overflow: ellipsis; }',
+	'.tgd-root .tgd-meta-tag svg { width: 12px; height: 12px; flex: none; opacity: .65; }',
+	'.tgd-root .tgd-meta-tag.tgd-uid { font-family: var(--font-mono); font-size: 11px; }',
+	'.tgd-root .tgd-meta-tag.tgd-role { background: var(--brand-subtle); color: var(--brand); }',
 	'.tgd-root .tgd-badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px; flex: none; }',
 	'.tgd-root .tgd-badge.tgd-ok { background: var(--success-surface); color: var(--success); }',
 	'.tgd-root .tgd-badge.tgd-wait { background: var(--warning-surface); color: var(--warning); }',
@@ -145,6 +157,13 @@ var TGD_CSS = [
 	'.tgd-root .tgd-log-line.tgd-error .tgd-lv { color: var(--danger); }',
 	'.tgd-root .tgd-log-line.tgd-warn .tgd-lv { color: var(--warning); }',
 	'.tgd-root .tgd-log-empty { color: var(--text-muted); }',
+	'.tgd-root .tgd-log-tabs { display: flex; gap: 4px; padding: 10px 14px 0; background: var(--surface-sunken);',
+	'  border-bottom: 1px solid var(--hairline); overflow-x: auto; scrollbar-width: none; }',
+	'.tgd-root .tgd-log-tabs::-webkit-scrollbar { display: none; }',
+	'.tgd-root .tgd-log-tab { padding: 5px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;',
+	'  white-space: nowrap; border: 1px solid transparent; background: none; color: var(--text-subtle); transition: all .15s; }',
+	'.tgd-root .tgd-log-tab:hover { background: var(--surface); color: var(--text); }',
+	'.tgd-root .tgd-log-tab.tgd-active { background: var(--brand-subtle); color: var(--brand); border-color: var(--brand); }',
 	'.tgd-root .tgd-login-wrap { display: flex; align-items: center; justify-content: center; padding: 30px 16px; }',
 	'.tgd-root .tgd-login-card { width: 100%; max-width: 400px; background: var(--surface); border: 1px solid var(--hairline);',
 	'  border-radius: var(--radius-base); box-shadow: var(--app-shadow-lg); padding: 32px 28px; text-align: center; }',
@@ -207,7 +226,10 @@ var ICONS = {
 	del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
 	refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>',
 	gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
-	external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>'
+	external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>',
+	phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.18 4.18 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+	user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+	dot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 12h.01"/></svg>'
 };
 
 // ---------------------------------------------------------------------------
@@ -236,6 +258,7 @@ function mainHtml() {
 		'  <div class="tgd-panel">',
 		'    <div class="tgd-panel-head"><h2>' + ICONS.clock + ' 运行日志</h2>',
 		'      <button class="tgd-btn" id="tgd-refresh-logs" title="刷新">' + ICONS.refresh + '</button></div>',
+		'    <div class="tgd-log-tabs" id="tgd-log-tabs"><button class="tgd-log-tab tgd-active" data-filter="all">全部</button></div>',
 		'    <div class="tgd-logs" id="tgd-logs"><div class="tgd-log-empty">暂无日志</div></div>',
 		'  </div>',
 		'</div>'
@@ -355,6 +378,9 @@ function openAddModal(mode) {
 function closeModal(id) { document.getElementById(id).classList.remove('tgd-show'); }
 
 var sendCodeTimer = null;
+var allAccounts = [];       // 全局账号列表，用于日志按账号筛选
+var allLogsRaw = [];        // 原始日志（未筛选）
+var currentLogFilter = 'all'; // 当前日志筛选：'all' 或 account.id
 function sendCode() {
 	var phone = document.getElementById('tgd-phone').value.trim();
 	if (!phone) { TGD.toast('请输入手机号', 'tgd-err'); return; }
@@ -402,10 +428,13 @@ function addAccount() {
 function loadAccounts() {
 	TGD.api('/api/accounts', 'GET').then(function (data) {
 		var list = data.accounts || [];
+		allAccounts = list;
 		document.getElementById('tgd-stat-total').textContent = list.length;
 		document.getElementById('tgd-stat-done').textContent = list.filter(function (a) { return a.signed_today; }).length;
 		document.getElementById('tgd-stat-pending').textContent = list.filter(function (a) { return !a.signed_today; }).length;
 		renderAccounts(list);
+		buildLogTabs(list);
+		if (allLogsRaw.length) renderLogs();
 	}).catch(function (e) { console.error(e); });
 }
 
@@ -420,8 +449,14 @@ function renderAccounts(list) {
 		return '<div class="tgd-card" data-id="' + TGD.esc(a.id) + '">' +
 			'<div class="tgd-card-top">' +
 			'<div class="tgd-avatar">' + TGD.esc(a.name).charAt(0).toUpperCase() + '</div>' +
-			'<div class="tgd-card-info"><div class="tgd-name">' + TGD.esc(a.name) + ' ' + badge + '</div>' +
-			'<div class="tgd-sub">' + (a.phone || '未绑定手机') + ' · UID ' + TGD.esc(a.uid || '-') + (a.role_name ? ' · ' + TGD.esc(a.role_name) : '') + '</div></div>' +
+			'<div class="tgd-card-info">' +
+			'<div class="tgd-name-row"><div class="tgd-name">' + TGD.esc(a.name) + '</div>' + badge + '</div>' +
+			'<div class="tgd-meta-tags">' +
+			(a.phone ? '<span class="tgd-meta-tag">' + ICONS.phone + TGD.esc(a.phone) + '</span>' : '') +
+			'<span class="tgd-meta-tag tgd-uid">' + ICONS.dot + 'UID ' + TGD.esc(a.uid || '-') + '</span>' +
+			(a.role_name ? '<span class="tgd-meta-tag tgd-role">' + ICONS.user + TGD.esc(a.role_name) + '</span>' : '') +
+			'</div>' +
+			'</div>' +
 			'</div>' +
 			'<div class="tgd-row"><span class="tgd-lab">' + ICONS.clock + ' 每日签到时间</span>' +
 			'<input class="tgd-input tgd-time" type="time" value="' + TGD.esc(a.schedule) + '" data-schedule="' + TGD.esc(a.id) + '"></div>' +
@@ -467,16 +502,57 @@ function renderAccounts(list) {
 
 function loadLogs() {
 	TGD.api('/api/logs?limit=200', 'GET').then(function (data) {
-		var logs = data.logs || [];
-		var box = document.getElementById('tgd-logs');
-		if (!box) return;
-		if (!logs.length) { box.innerHTML = '<div class="tgd-log-empty">暂无日志</div>'; return; }
-		box.innerHTML = logs.map(function (l) {
-			var lv = (l.level || 'info').toUpperCase().padEnd(5, ' ');
-			return '<div class="tgd-log-line tgd-' + TGD.esc(l.level || 'info') + '"><span class="tgd-ts">' + TGD.esc(l.ts) + '</span><span class="tgd-lv">' + TGD.esc(lv) + '</span>' + TGD.esc(l.message) + '</div>';
-		}).join('');
-		box.scrollTop = box.scrollHeight;
+		allLogsRaw = data.logs || [];
+		renderLogs();
 	}).catch(function (e) { console.error(e); });
+}
+
+// 按当前 currentLogFilter 筛选并渲染日志（各账号独立显示）
+function renderLogs() {
+	var box = document.getElementById('tgd-logs');
+	if (!box) return;
+	var logs = allLogsRaw;
+	if (currentLogFilter !== 'all') {
+		var acc = null;
+		for (var i = 0; i < allAccounts.length; i++) {
+			if (allAccounts[i].id === currentLogFilter) { acc = allAccounts[i]; break; }
+		}
+		if (acc) {
+			var keywords = [acc.name, acc.id, acc.uid].filter(function (k) { return k; });
+			logs = logs.filter(function (l) {
+				var msg = l.message || '';
+				return keywords.some(function (k) { return msg.indexOf(k) !== -1; });
+			});
+		}
+	}
+	if (!logs.length) {
+		box.innerHTML = '<div class="tgd-log-empty">' + (currentLogFilter === 'all' ? '暂无日志' : '该账号暂无日志') + '</div>';
+		return;
+	}
+	box.innerHTML = logs.map(function (l) {
+		var lv = (l.level || 'info').toUpperCase().padEnd(5, ' ');
+		return '<div class="tgd-log-line tgd-' + TGD.esc(l.level || 'info') + '"><span class="tgd-ts">' + TGD.esc(l.ts) + '</span><span class="tgd-lv">' + TGD.esc(lv) + '</span>' + TGD.esc(l.message) + '</div>';
+	}).join('');
+	box.scrollTop = box.scrollHeight;
+}
+
+// 构建日志筛选标签栏：全部 + 每个账号
+function buildLogTabs(accounts) {
+	var wrap = document.getElementById('tgd-log-tabs');
+	if (!wrap) return;
+	var html = '<button class="tgd-log-tab' + (currentLogFilter === 'all' ? ' tgd-active' : '') + '" data-filter="all">全部</button>';
+	accounts.forEach(function (a) {
+		html += '<button class="tgd-log-tab' + (currentLogFilter === a.id ? ' tgd-active' : '') + '" data-filter="' + TGD.esc(a.id) + '">' + TGD.esc(a.name) + '</button>';
+	});
+	wrap.innerHTML = html;
+	wrap.querySelectorAll('.tgd-log-tab').forEach(function (tab) {
+		tab.addEventListener('click', function () {
+			wrap.querySelectorAll('.tgd-log-tab').forEach(function (t) { t.classList.remove('tgd-active'); });
+			tab.classList.add('tgd-active');
+			currentLogFilter = tab.getAttribute('data-filter');
+			renderLogs();
+		});
+	});
 }
 
 function openSettings() {

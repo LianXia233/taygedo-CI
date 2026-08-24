@@ -1,10 +1,10 @@
 config taygedo 'main'
+	# 服务级配置（LuCI 与 WebUI 解耦：UCI 只管服务本身）
 	option enabled '0'
 	option port '8787'
 	option data_dir '/etc/taygedo'
 	option web_password ''
+	# 免鉴权模式（OpenWrt 专享）：LuCI 页面直接调用后端 REST API 需要开启。
+	# 业务配置（默认签到时间/金币任务/云时长/分享平台）统一在 config.json 中管理，
+	# LuCI 页面与独立 WebUI 均通过 /api/config 读写，二者数据互通、互不覆盖。
 	option no_auth '1'
-	option default_schedule '06:10'
-	option coin_tasks '1'
-	option cloud_duration '1'
-	option share_platform 'qq'

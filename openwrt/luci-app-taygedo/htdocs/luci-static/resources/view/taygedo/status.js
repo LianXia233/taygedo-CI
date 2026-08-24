@@ -315,11 +315,13 @@ function settingsModalHtml() {
 		'      <div class="tgd-field"><label>分享平台</label><input class="tgd-input" id="tgd-cfg-share" placeholder="qq / wechat / weibo"></div>',
 		'      <button class="tgd-btn tgd-primary" id="tgd-cfg-save" style="width:100%">保存</button>',
 		'      <hr class="tgd-divider">',
+		'      <div id="tgd-pwd-section">',
 		'      <div class="tgd-section-title">修改登录账号密码</div>',
 		'      <div class="tgd-field"><label>账号</label><input class="tgd-input" id="tgd-old-user" value="admin" autocomplete="username"></div>',
 		'      <div class="tgd-field"><label>原密码</label><input class="tgd-input" id="tgd-old-pwd" type="password" autocomplete="current-password"></div>',
 		'      <div class="tgd-field"><label>新密码（至少 6 位）</label><input class="tgd-input" id="tgd-new-pwd" type="password" autocomplete="new-password"></div>',
 		'      <button class="tgd-btn" id="tgd-pwd-save" style="width:100%">修改账号密码</button>',
+		'      </div>',
 		'    </div>',
 		'  </div>',
 		'</div>'
@@ -556,6 +558,13 @@ function buildLogTabs(accounts) {
 }
 
 function openSettings() {
+	// 免鉴权模式（OpenWrt 专享）下后端拒绝改密，隐藏改密区块，避免误导
+	TGD.api('/api/meta', 'GET').then(function (meta) {
+		var pwdSection = document.getElementById('tgd-pwd-section');
+		if (pwdSection && meta && meta.no_auth) {
+			pwdSection.style.display = 'none';
+		}
+	}).catch(function () {});
 	TGD.api('/api/config', 'GET').then(function (cfg) {
 		document.getElementById('tgd-cfg-schedule').value = cfg.default_schedule;
 		document.getElementById('tgd-cfg-coin').checked = !!cfg.coin_tasks;

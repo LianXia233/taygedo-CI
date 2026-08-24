@@ -27,7 +27,7 @@ pub fn spawn(state: Arc<AppState>) {
 
             let config = state.config.read().await.clone();
             let accounts = state.accounts.read().await.clone();
-            let default_time = normalize_hhmm(&config.default_schedule);
+            let default_time = crate::time::normalize_hhmm(&config.default_schedule);
 
             // 找出"到时间且今天还没签到"的账号
             let due: Vec<String> = accounts
@@ -39,7 +39,7 @@ pub fn spawn(state: Arc<AppState>) {
                     let t = config
                         .schedules
                         .get(&acc.id)
-                        .map(|s| normalize_hhmm(s))
+                        .map(|s| crate::time::normalize_hhmm(s))
                         .unwrap_or(default_time.clone());
                     match t {
                         Some(t) => now_hhmm >= t, // 设定时间已过或正好到达
@@ -68,18 +68,3 @@ pub fn spawn(state: Arc<AppState>) {
     });
 }
 
-/// 将 "H:M" / "HH:MM" 归一化为零填充的 "HH:MM"；非法或空返回 None。
-/// 归一化后可用字符串字典序直接比较时间先后。
-fn normalize_hhmm(s: &str) -> Option<String> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-    let (h, m) = s.split_once(':')?;
-    let h: u32 = h.trim().parse().ok()?;
-    let m: u32 = m.trim().parse().ok()?;
-    if h > 23 || m > 59 {
-        return None;
-    }
-    Some(format!("{:02}:{:02}", h, m))
-}

@@ -95,7 +95,7 @@ netsh advfirewall firewall add rule name="taygedo" dir=in action=allow protocol=
 **1. 下载安装**
 
 ```bash
-# 到 Releases 页面下载最新 deb（文件名带版本号，如 taygedo-rs_0.4.8_amd64.deb）
+# 到 Releases 页面下载最新 deb（文件名带版本号，如 taygedo-rs_0.4.9_amd64.deb）
 # https://github.com/LianXia233/taygedo-CI/releases/latest
 sudo dpkg -i taygedo-rs_<版本>_amd64.deb
 sudo apt-get install -f    # 若有依赖缺失（本项目基本无依赖，通常不需要）
@@ -160,7 +160,7 @@ sudo journalctl -u taygedo-rs -f
 # opkg（23.05 及以下），文件名带版本号，如 luci-app-taygedo_0.4.8-1_x86_64.ipk
 opkg install /tmp/luci-app-taygedo_<版本>-1_x86_64.ipk
 
-# apk（24.10 及以上），如 luci-app-taygedo_0.4.8-r1_x86_64.apk
+# apk（24.10 及以上），如 luci-app-taygedo_0.4.9-r1_x86_64.apk
 apk add /tmp/luci-app-taygedo_<版本>-r1_x86_64.apk
 ```
 
@@ -168,9 +168,9 @@ apk add /tmp/luci-app-taygedo_<版本>-r1_x86_64.apk
 
 浏览器打开路由器 LuCI → **服务 → 塔吉多签到**，单页即完整管理界面（账号卡片 / 统计 / 运行日志 / 添加账号 / 全局设置），与 WebUI 功能、视觉保持同步。
 
-- **免鉴权模式**（UCI 默认 `option no_auth '1'`）：LuCI 页面免登录直连后端 API，直接管理账号。
+- **免鉴权模式**（UCI 默认 `option no_auth '1'`，**OpenWrt 专享**）：LuCI 页面免登录直连后端 API，直接管理账号。
 - **未开免鉴权**：页面显示引导页，点右上「**外部 WebUI**」按钮跳转 `:8787` 独立管理界面（或在路由器执行 `uci set taygedo.main.no_auth=1 && uci commit taygedo && /etc/init.d/taygedo restart` 开启免鉴权）。
-- 基础服务配置（启用 / 监听端口 / 数据目录 / Web 登录密码 / 默认签到时间等）通过 UCI（`/etc/config/taygedo`）或下方命令行管理。
+- **职责划分（LuCI 与 WebUI 解耦）**：UCI（`/etc/config/taygedo`）只管理**服务级**配置（启用 / 监听端口 / 数据目录 / Web 登录密码 / 免鉴权开关）；**业务级**配置（默认签到时间 / 金币任务 / 云时长 / 分享平台）统一由 `config.json` 管理，LuCI 页面与独立 WebUI 均通过「全局设置」读写同一份数据，二者**数据互通、相互独立、互不影响**——重启服务不会用 UCI 旧值覆盖 WebUI 的修改。
 
 **4. 打开 WebUI**
 
@@ -179,10 +179,13 @@ LuCI 页面右上「**外部 WebUI**」按钮，或浏览器直接访问 `http:/
 **5. 命令行管理（可选）**
 
 ```sh
+# 服务级配置（UCI）
 uci set taygedo.main.enabled=1
 uci set taygedo.main.port=8787
-uci set taygedo.main.default_schedule=06:10
 uci commit taygedo
+
+# 业务级配置（默认签到时间 / 金币任务 / 云时长 / 分享平台）
+# 在 LuCI 页面或 WebUI 的「全局设置」中修改，统一写入 config.json，无需操作 UCI
 
 /etc/init.d/taygedo start|stop|restart|status
 logread | grep taygedo
@@ -266,9 +269,10 @@ cargo +stable-x86_64-pc-windows-gnu build --release
 
 `openwrt/luci-app-taygedo/` 提供完整 LuCI 包，安装后可在 **LuCI → 服务 → 塔吉多签到** 里：
 
-- **功能与 WebUI 完全一致**：账号管理、密码/短信验证码登录、每日签到时间、立即签到、运行日志、全局设置、修改密码。
-- LuCI 页面已由 OpenWrt root 鉴权保护，进入后**自动静默登录后端**（UCI `web_password`，默认 `admin`），无需二次输入密码。
-- 配置项（UCI `config taygedo`）：启用开关、监听端口、数据目录、Web 登录密码、默认签到时间、金币任务、云时长、分享平台。
+- **功能与 WebUI 一致**：账号管理、密码/短信验证码登录、每日签到时间、立即签到、运行日志、全局设置（免鉴权模式下隐藏改密）。
+- **与 WebUI 解耦**：LuCI 页面不维护后端登录态/token，直连后端 REST API（依赖免鉴权模式，UCI 默认 `no_auth '1'`）；未开免鉴权时显示引导页并提供「外部 WebUI」跳转。
+- **服务级配置**（UCI `config taygedo`）：启用开关、监听端口、数据目录、Web 登录密码、免鉴权开关。
+- **业务级配置**（默认签到时间、金币任务、云时长、分享平台）：统一由 `config.json` 管理，LuCI 页面与独立 WebUI 通过 `/api/config` 读写同一份数据，数据互通、互不覆盖。
 - init.d 脚本（procd）自动拉起/守护 `taygedo-rs`，支持 reload。
 
 ```

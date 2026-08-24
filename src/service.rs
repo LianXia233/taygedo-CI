@@ -18,12 +18,18 @@ pub struct AppState {
     pub config: RwLock<Config>,
     pub state: RwLock<HashMap<String, String>>,
     pub logs: std::sync::Mutex<Vec<LogEntry>>,
-    pub pending_devices: std::sync::Mutex<HashMap<String, DeviceIdentity>>,
+    /// 验证码设备身份：phone -> (identity, 发送时间 unix 秒)。带 TTL，防内存泄漏。
+    pub pending_devices: std::sync::Mutex<HashMap<String, (DeviceIdentity, i64)>>,
     pub run_lock: Mutex<()>,
     /// 登录会话：token -> 过期 unix 秒。
     pub sessions: std::sync::Mutex<HashMap<String, i64>>,
-    /// 免鉴权模式：为 true 时所有 API 无需登录即可访问（内网自用场景）。
+    /// WebUI 登录失败计数：username -> (失败次数, 锁定截止 unix 秒)。防暴力破解。
+    pub login_fails: std::sync::Mutex<HashMap<String, (u32, i64)>>,
+    /// 免鉴权模式：为 true 时所有 API 无需登录即可访问。
+    /// **仅 OpenWrt 平台（LuCI 配套使用）生效**，非 OpenWrt 环境即使设置环境变量也会被强制关闭。
     pub no_auth: bool,
+    /// 当前运行平台是否 OpenWrt。
+    pub is_openwrt: bool,
 }
 
 impl AppState {
@@ -32,7 +38,8 @@ impl AppState {
         let accounts = store.load_accounts();
         let mut config = store.load_config();
 
-        // 环境变量覆盖（OpenWrt/LuCI 通过 init.d 传入，与 WebUI 全局设置对齐）
+        // 环境变量覆盖（向后兼容：高级用户可手动设置覆盖 config.json；
+        // OpenWrt/LuCI 的 init.d 已不再传入业务配置，业务配置统一由 config.json 管理）
         if let Ok(v) = std::env::var("TAYGEDO_DEFAULT_SCHEDULE") {
             if !v.trim().is_empty() {
                 config.default_schedule = v.trim().to_string();
@@ -72,12 +79,19 @@ impl AppState {
             config.web_password_salt = Some(salt);
             initial_password = Some(password);
         }
-        store.save_config(&config);
+        store.save_config(&config).unwrap_or_else(|e| {
+            eprintln!("[startup] 保存 config 失败: {e}");
+        });
 
-        // 免鉴权模式：环境变量 TAYGEDO_NO_AUTH=1/true/yes/on 时开启
-        let no_auth = std::env::var("TAYGEDO_NO_AUTH")
+        // 免鉴权模式：环境变量 TAYGEDO_NO_AUTH=1/true/yes/on 时开启。
+        // **OpenWrt 专享**：仅 OpenWrt（存在 /etc/openwrt_release）平台生效；
+        // 其他平台（Windows / Linux 服务器 / Docker 等）即使设置环境变量也会被强制关闭，
+        // 避免免鉴权被误开在公网环境造成安全风险。
+        let openwrt = is_openwrt();
+        let no_auth_env = std::env::var("TAYGEDO_NO_AUTH")
             .map(|v| parse_bool_env(&v))
             .unwrap_or(false);
+        let no_auth = no_auth_env && openwrt;
 
         let state = store.load_state();
         let app = Arc::new(Self {
@@ -90,11 +104,24 @@ impl AppState {
             pending_devices: std::sync::Mutex::new(HashMap::new()),
             run_lock: Mutex::new(()),
             sessions: std::sync::Mutex::new(HashMap::new()),
+            login_fails: std::sync::Mutex::new(HashMap::new()),
             no_auth,
+            is_openwrt: openwrt,
         });
 
         if let Some(pwd) = initial_password {
             app.push_log("warn", format!("已初始化 WebUI 登录账号：admin / {pwd}（登录后请在设置中修改）"));
+        }
+        if no_auth_env && !openwrt {
+            app.push_log(
+                "warn",
+                "检测到 TAYGEDO_NO_AUTH=1，但当前非 OpenWrt 平台：免鉴权模式已强制关闭，请使用 WebUI 账号密码登录".into(),
+            );
+        } else if no_auth {
+            app.push_log(
+                "warn",
+                "免鉴权模式已开启（OpenWrt 专享）：所有 API 无需登录即可访问，仅限内网使用".into(),
+            );
         }
         app
     }
@@ -141,7 +168,9 @@ impl AppState {
         let salt = crate::crypto::random_hex(8);
         config.web_password_hash = Some(crate::crypto::hash_password(new_password, &salt));
         config.web_password_salt = Some(salt);
-        self.store.save_config(&config);
+        if let Err(e) = self.store.save_config(&config) {
+            self.push_log("error", format!("保存 WebUI 密码失败: {e}"));
+        }
     }
 
     /// 签发登录 token（有效期 7 天）。
@@ -162,6 +191,49 @@ impl AppState {
         sessions.retain(|_, exp| *exp > now);
         sessions.contains_key(token)
     }
+
+    /// 是否处于登录锁定。返回 Some(剩余秒数) 表示已锁定。
+    pub fn login_lock_remaining(&self, username: &str) -> Option<i64> {
+        let now = now_unix();
+        let fails = self.login_fails.lock().unwrap();
+        match fails.get(username) {
+            Some((count, lock_until)) if *count >= MAX_LOGIN_FAILS && *lock_until > now => {
+                Some(*lock_until - now)
+            }
+            _ => None,
+        }
+    }
+
+    /// 记录一次登录失败；连续失败达到阈值后锁定 5 分钟。
+    pub fn record_login_fail(&self, username: &str) {
+        let now = now_unix();
+        let mut fails = self.login_fails.lock().unwrap();
+        let entry = fails.entry(username.to_string()).or_insert((0, 0));
+        entry.0 += 1;
+        if entry.0 >= MAX_LOGIN_FAILS {
+            entry.1 = now + LOGIN_LOCK_SECS;
+        }
+        if entry.0 > MAX_LOGIN_FAILS * 3 {
+            // 防止无限膨胀
+            entry.0 = MAX_LOGIN_FAILS;
+            entry.1 = now + LOGIN_LOCK_SECS;
+        }
+    }
+
+    /// 登录成功后清除失败计数。
+    pub fn reset_login_fails(&self, username: &str) {
+        self.login_fails.lock().unwrap().remove(username);
+    }
+}
+
+/// WebUI 登录连续失败阈值。
+pub const MAX_LOGIN_FAILS: u32 = 5;
+/// 达到阈值后的锁定时长（秒）。
+pub const LOGIN_LOCK_SECS: i64 = 300;
+
+/// 当前是否运行在 OpenWrt（存在 /etc/openwrt_release 即视为 OpenWrt）。
+pub fn is_openwrt() -> bool {
+    std::path::Path::new("/etc/openwrt_release").exists()
 }
 
 fn now_unix() -> i64 {
@@ -196,6 +268,11 @@ pub async fn run_signin(state: &AppState, force: bool, only: Option<&[String]>) 
     let mut updated_accounts = accounts.clone();
     let mut results: Vec<AccountResult> = Vec::new();
     let state_map = state.state.read().await.clone();
+    // id → 索引，避免内层循环 O(n²)
+    let mut updated_by_id: HashMap<&str, usize> = HashMap::new();
+    for (i, a) in updated_accounts.iter().enumerate() {
+        updated_by_id.insert(a.id.as_str(), i);
+    }
 
     for account in &accounts {
         if let Some(ids) = only {
@@ -229,11 +306,8 @@ pub async fn run_signin(state: &AppState, force: bool, only: Option<&[String]>) 
         };
         match runner::run_account(&state.api, account, Some(&credential_key), &opts, &mut cb).await {
             Ok((updated, res)) => {
-                for ua in updated_accounts.iter_mut() {
-                    if ua.id == account.id {
-                        *ua = updated;
-                        break;
-                    }
+                if let Some(&idx) = updated_by_id.get(account.id.as_str()) {
+                    updated_accounts[idx] = updated;
                 }
                 results.push(res);
             }
@@ -266,9 +340,13 @@ pub async fn run_signin(state: &AppState, force: bool, only: Option<&[String]>) 
     }
 
     *state.accounts.write().await = updated_accounts.clone();
-    state.store.save_accounts(&updated_accounts);
+    if let Err(e) = state.store.save_accounts(&updated_accounts) {
+        state.push_log("error", format!("保存账号数据失败: {e}"));
+    }
     *state.state.write().await = new_state.clone();
-    state.store.save_state(&new_state);
+    if let Err(e) = state.store.save_state(&new_state) {
+        state.push_log("error", format!("保存签到状态失败: {e}"));
+    }
 
     let success_count = results.iter().filter(|r| r.status == "success").count();
     let failed_count = results.iter().filter(|r| r.status == "failed").count();
@@ -294,8 +372,26 @@ pub async fn run_signin(state: &AppState, force: bool, only: Option<&[String]>) 
     result
 }
 
+/// 验证码设备身份有效期（秒）。
+const PENDING_DEVICE_TTL: i64 = 600;
+/// 同一手机号验证码重发冷却（秒）。
+const CAPTCHA_COOLDOWN_SECS: i64 = 60;
+
 /// 发送短信验证码。
 pub async fn send_code(state: &AppState, phone: &str) -> Result<(), String> {
+    let now = now_unix();
+    // 冷却 + 过期清理
+    {
+        let mut pending = state.pending_devices.lock().unwrap();
+        pending.retain(|_, (_, sent_at)| now - *sent_at < PENDING_DEVICE_TTL);
+        if let Some((_, sent_at)) = pending.get(phone) {
+            let remaining = CAPTCHA_COOLDOWN_SECS - (now - *sent_at);
+            if remaining > 0 {
+                return Err(format!("验证码发送过于频繁，请 {remaining} 秒后重试"));
+            }
+        }
+    }
+
     let identity = login::generate_device_identity();
     state
         .api
@@ -306,7 +402,7 @@ pub async fn send_code(state: &AppState, phone: &str) -> Result<(), String> {
         .pending_devices
         .lock()
         .unwrap()
-        .insert(phone.to_string(), identity);
+        .insert(phone.to_string(), (identity, now));
     Ok(())
 }
 
@@ -322,12 +418,13 @@ pub async fn login_account(
     let identity = if mode == "password" {
         login::generate_device_identity()
     } else {
-        state
-            .pending_devices
-            .lock()
-            .unwrap()
-            .remove(phone)
-            .ok_or_else(|| "请先发送验证码".to_string())?
+        let mut pending = state.pending_devices.lock().unwrap();
+        let now = now_unix();
+        match pending.remove(phone) {
+            Some((dev, sent_at)) if now - sent_at < PENDING_DEVICE_TTL => dev,
+            Some(_) => return Err("验证码已过期，请重新发送".to_string()),
+            None => return Err("请先发送验证码".to_string()),
+        }
     };
 
     let (token, user_id) = if mode == "password" {
@@ -402,19 +499,37 @@ pub async fn login_account(
             accounts.push(account.clone());
         }
     }
-    state.store.save_accounts(&accounts);
+    state.store.save_accounts(&accounts).unwrap_or_else(|e| {
+        eprintln!("[service] 保存账号数据失败: {e}");
+    });
 
     Ok(account)
 }
 
-/// 删除账号。
+/// 删除账号。同步清理 state.json 签到记录与 config.schedules 定时配置，避免残留幽灵数据。
 pub async fn delete_account(state: &AppState, id: &str) -> bool {
     let mut accounts = state.accounts.write().await;
     let before = accounts.len();
     accounts.retain(|a| a.id != id);
     let changed = accounts.len() != before;
     if changed {
-        state.store.save_accounts(&accounts);
+        if let Err(e) = state.store.save_accounts(&accounts) {
+            state.push_log("error", format!("保存账号数据失败: {e}"));
+        }
+        // 清理签到状态与定时配置
+        let mut state_map = state.state.write().await;
+        if state_map.remove(id).is_some() {
+            if let Err(e) = state.store.save_state(&state_map) {
+                state.push_log("error", format!("保存签到状态失败: {e}"));
+            }
+        }
+        let mut config = state.config.write().await;
+        if config.schedules.remove(id).is_some() {
+            if let Err(e) = state.store.save_config(&config) {
+                state.push_log("error", format!("保存配置失败: {e}"));
+            }
+        }
+        state.push_log("info", format!("已删除账号 {id}（含签到记录与定时配置）"));
     }
     changed
 }
@@ -422,7 +537,7 @@ pub async fn delete_account(state: &AppState, id: &str) -> bool {
 /// 设置账号签到时间。
 pub async fn set_schedule(state: &AppState, id: &str, time: Option<&str>) -> Result<(), String> {
     if let Some(t) = time {
-        if !is_valid_hhmm(t) {
+        if !crate::time::valid_hhmm(t) {
             return Err("时间格式应为 HH:MM".into());
         }
     }
@@ -435,17 +550,6 @@ pub async fn set_schedule(state: &AppState, id: &str, time: Option<&str>) -> Res
             config.schedules.remove(id);
         }
     }
-    state.store.save_config(&config);
+    state.store.save_config(&config).map_err(|e| e)?;
     Ok(())
-}
-
-fn is_valid_hhmm(t: &str) -> bool {
-    let parts: Vec<&str> = t.split(':').collect();
-    if parts.len() != 2 {
-        return false;
-    }
-    match (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-        (Ok(h), Ok(m)) if h < 24 && m < 60 && parts[0].len() == 2 && parts[1].len() == 2 => true,
-        _ => false,
-    }
 }

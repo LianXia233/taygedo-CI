@@ -29,3 +29,32 @@ pub fn shanghai_hhmm() -> String {
 pub fn log_ts() -> String {
     now_shanghai().format("%Y/%m/%d %H:%M:%S").to_string()
 }
+
+/// 校验 "HH:MM"（小时、分钟均为两位数字，且范围合法）。
+/// 统一入口，供 web / service / scheduler 共用，避免多处重复实现。
+pub fn valid_hhmm(t: &str) -> bool {
+    let parts: Vec<&str> = t.split(':').collect();
+    if parts.len() != 2 || parts[0].len() != 2 || parts[1].len() != 2 {
+        return false;
+    }
+    matches!(
+        (parts[0].parse::<u32>(), parts[1].parse::<u32>()),
+        (Ok(h), Ok(m)) if h < 24 && m < 60
+    )
+}
+
+/// 将 "H:M" / "HH:MM" 归一化为零填充的 "HH:MM"；非法或空返回 None。
+/// 归一化后可用字符串字典序直接比较时间先后。
+pub fn normalize_hhmm(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let (h, m) = s.split_once(':')?;
+    let h: u32 = h.trim().parse().ok()?;
+    let m: u32 = m.trim().parse().ok()?;
+    if h > 23 || m > 59 {
+        return None;
+    }
+    Some(format!("{:02}:{:02}", h, m))
+}

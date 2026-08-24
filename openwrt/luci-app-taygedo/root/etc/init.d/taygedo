@@ -7,8 +7,7 @@ USE_PROCD=1
 PROG=/usr/bin/taygedo-rs
 
 start_service() {
-    local enabled port data_dir web_password default_schedule
-    local coin_tasks cloud_duration share_platform no_auth
+    local enabled port data_dir web_password no_auth
     config_load 'taygedo'
     config_get_bool enabled 'main' 'enabled' 0
     [ "$enabled" -eq 0 ] && return 0
@@ -16,23 +15,21 @@ start_service() {
     config_get port 'main' 'port' '8787'
     config_get data_dir 'main' 'data_dir' '/etc/taygedo'
     config_get web_password 'main' 'web_password' ''
-    config_get default_schedule 'main' 'default_schedule' '06:10'
-    config_get_bool coin_tasks 'main' 'coin_tasks' 1
-    config_get_bool cloud_duration 'main' 'cloud_duration' 1
-    config_get share_platform 'main' 'share_platform' 'qq'
-    config_get_bool no_auth 'main' 'no_auth' 0
+    config_get_bool no_auth 'main' 'no_auth' 1
 
     [ -d "$data_dir" ] || mkdir -p "$data_dir"
+
+    # 职责划分（LuCI 与 WebUI 解耦）：
+    # - UCI 只管「服务级」配置：启停 / 端口 / 数据目录 / WebUI 密码 / 免鉴权开关；
+    # - 「业务级」配置（默认签到时间 / 金币任务 / 云时长 / 分享平台）统一由
+    #   config.json 管理，LuCI 页面与独立 WebUI 都通过 /api/config 读写同一份数据，
+    #   二者数据互通、互不覆盖。重启服务不会再用 UCI 旧值覆盖 WebUI 的修改。
 
     procd_open_instance
     procd_set_param command "$PROG"
     procd_set_param env \
         TAYGEDO_LISTEN="0.0.0.0:${port}" \
         TAYGEDO_DATA_DIR="$data_dir" \
-        TAYGEDO_DEFAULT_SCHEDULE="$default_schedule" \
-        TAYGEDO_COIN_TASKS="$coin_tasks" \
-        TAYGEDO_CLOUD_DURATION="$cloud_duration" \
-        TAYGEDO_SHARE_PLATFORM="$share_platform" \
         TAYGEDO_NO_AUTH="$no_auth"
     [ -n "$web_password" ] && procd_append_param env TAYGEDO_WEB_PASSWORD="$web_password"
     procd_set_param respawn 3600 5 5

@@ -209,6 +209,10 @@ async fn change_password(
     State(state): State<Arc<AppState>>,
     Json(req): Json<PasswordReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // 免鉴权模式（OpenWrt 专用）下不提供改密接口，避免公开改密面
+    if state.no_auth {
+        return Err(err("免鉴权模式（OpenWrt 专用）下无需修改密码"));
+    }
     if req.new_password.len() < 6 {
         return Err(err("新密码至少 6 位"));
     }
@@ -338,7 +342,7 @@ async fn update_config(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let mut config = state.config.write().await;
     if let Some(t) = req.default_schedule {
-        if !valid_hhmm(&t) {
+        if !crate::time::valid_hhmm(&t) {
             return Err(err("default_schedule 格式应为 HH:MM"));
         }
         config.default_schedule = t;
@@ -352,7 +356,7 @@ async fn update_config(
     if let Some(v) = req.share_platform {
         config.share_platform = v;
     }
-    state.store.save_config(&config);
+    state.store.save_config(&config).map_err(|e| err(&e))?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -382,15 +386,4 @@ fn mask_phone(p: Option<&str>) -> Option<String> {
             p.to_string()
         }
     })
-}
-
-fn valid_hhmm(t: &str) -> bool {
-    let parts: Vec<&str> = t.split(':').collect();
-    if parts.len() != 2 || parts[0].len() != 2 || parts[1].len() != 2 {
-        return false;
-    }
-    matches!(
-        (parts[0].parse::<u32>(), parts[1].parse::<u32>()),
-        (Ok(h), Ok(m)) if h < 24 && m < 60
-    )
 }

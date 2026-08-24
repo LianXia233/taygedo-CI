@@ -44,16 +44,16 @@ fn is_already_signed(msg: &str) -> bool {
 
 fn is_auth_error(msg: &str) -> bool {
     let lower = msg.to_lowercase();
-    msg.contains("AUTH_EXPIRED")
-        || msg.contains("HTTP 401")
-        || msg.contains("HTTP 402")
-        || msg.contains("HTTP 403")
-        || msg.contains("登录")
-        || msg.contains("token")
-        || msg.contains("未授权")
-        || msg.contains("请先")
-        || msg.contains("过期")
-        || msg.contains("失效")
+    lower.contains("auth_expired")
+        || lower.contains("http 401")
+        || lower.contains("http 402")
+        || lower.contains("http 403")
+        || lower.contains("登录")
+        || lower.contains("token")
+        || lower.contains("未授权")
+        || lower.contains("请先")
+        || lower.contains("过期")
+        || lower.contains("失效")
         || lower.contains("invalid_token")
 }
 
@@ -92,48 +92,74 @@ async fn refresh_or_rebuild_session(
     credential_key: Option<&str>,
     log: &mut (dyn FnMut(String) + Send),
 ) -> Result<(Account, String), ApiError> {
-    // 1. 密码重登（若有手机号+密码）
-    if let (Some(phone), Some(pwd)) = (account.phone.as_deref(), resolve_password(account, credential_key).as_deref())
-    {
-        match api.login_with_password(phone, pwd, &account.device_id).await {
-            Ok((token, user_id)) => {
-                let (at, rt, uid) = api.user_center_login(&token, &user_id, &account.device_id).await?;
-                log(format!("账号 {}：密码重新登录成功", account.id));
-                return Ok((with_session(account, &at, &rt, Some(&uid), Some(&token), Some(&user_id)), at));
-            }
-            Err(e) => {
-                log(format!("账号 {}：密码登录失败（{}），回退 refreshToken", account.id, e.0));
-            }
-        }
-    }
-
-    // 2. refreshToken 刷新
+    // 1. refreshToken 刷新（优先，代价最小、不触发登录风控）
     match api.refresh_token(&account.refresh_token, &account.device_id).await {
         Ok((at, rt, uid)) => {
             log(format!("账号 {}：刷新会话（refreshToken）", account.id));
             return Ok((with_session(account, &at, &rt, uid.as_deref(), None, None), at));
         }
         Err(e) => {
+            log(format!("账号 {}：refreshToken 刷新失败（{}）", account.id, e.0));
             if !e.0.contains("REFRESH_REJECTED_402")
                 || account.laohu_token.is_none()
                 || account.laohu_user_id.is_none()
             {
+                // 非 402 或缺少 laohuToken 时，尝试密码重登兜底，仍失败则返回原始错误
+                if let Some((phone, pwd)) =
+                    (account.phone.as_deref(), resolve_password(account, credential_key).as_deref())
+                {
+                    if let Ok((token, user_id)) =
+                        api.login_with_password(phone, pwd, &account.device_id).await
+                    {
+                        let (at, rt, uid) = api
+                            .user_center_login(&token, &user_id, &account.device_id)
+                            .await?;
+                        log(format!("账号 {}：密码重新登录成功", account.id));
+                        return Ok((
+                            with_session(account, &at, &rt, Some(&uid), Some(&token), Some(&user_id)),
+                            at,
+                        ));
+                    }
+                }
                 return Err(e);
             }
             log(format!("账号 {}：refreshToken 失效，使用 laohuToken 重建会话", account.id));
         }
     }
 
-    // 3. laohuToken 重建
-    let (at, rt, uid) = api
+    // 2. laohuToken 重建
+    match api
         .user_center_login(
             account.laohu_token.as_deref().unwrap(),
             account.laohu_user_id.as_deref().unwrap(),
             &account.device_id,
         )
-        .await?;
-    log(format!("账号 {}：laohuToken 重建会话成功", account.id));
-    Ok((with_session(account, &at, &rt, Some(&uid), None, None), at))
+        .await
+    {
+        Ok((at, rt, uid)) => {
+            log(format!("账号 {}：laohuToken 重建会话成功", account.id));
+            return Ok((with_session(account, &at, &rt, Some(&uid), None, None), at));
+        }
+        Err(e) => {
+            log(format!("账号 {}：laohuToken 重建失败（{}）", account.id, e.0));
+            // 3. 密码重登（最后兜底）
+            if let Some((phone, pwd)) =
+                (account.phone.as_deref(), resolve_password(account, credential_key).as_deref())
+            {
+                let (token, user_id) =
+                    api.login_with_password(phone, pwd, &account.device_id).await?;
+                let (at, rt, uid) = api
+                    .user_center_login(&token, &user_id, &account.device_id)
+                    .await?;
+                log(format!("账号 {}：密码重新登录成功", account.id));
+                return Ok((
+                    with_session(account, &at, &rt, Some(&uid), Some(&token), Some(&user_id)),
+                    at,
+                ));
+            }
+            return Err(e);
+        }
+    }
 }
 
 async fn sign_with_session(
@@ -186,42 +212,63 @@ async fn sign_with_session(
         ));
     }
 
-    // 逐游戏签到
+    // 逐游戏签到：单个游戏失败（非鉴权错误）只记录该游戏失败，不中断其他游戏与后续任务
     let mut game_signins = Vec::new();
+    let mut game_failures: Vec<String> = Vec::new();
     for role in &roles {
-        let already = match api.game_signin(access_token, &role.role_id, &role.game_id).await {
-            Ok(()) => false,
-            Err(e) if is_already_signed(&e.0) => true,
-            Err(e) => return Err(e),
+        let (already, err) = match api.game_signin(access_token, &role.role_id, &role.game_id).await {
+            Ok(()) => (false, None),
+            Err(e) if is_already_signed(&e.0) => (true, None),
+            Err(e) if is_auth_error(&e.0) => return Err(e),
+            Err(e) => {
+                let label = game_label(&role.game_id, role.game_name.as_deref());
+                log(format!(
+                    "账号 {}（{}）：游戏 {} / {} 签到失败：{}",
+                    account.name,
+                    account.id,
+                    label,
+                    role.role_name.as_deref().unwrap_or(&role.role_id),
+                    e.0
+                ));
+                game_failures.push(format!("{label}: {}", e.0));
+                (false, Some(e.0))
+            }
         };
-        let days = api.get_signin_state(access_token, &role.game_id).await?;
-        let rewards = api.get_signin_rewards(access_token, &role.game_id).await?;
-        let reward = rewards
-            .get((days - 1).max(0) as usize)
-            .map(|(n, num)| Reward { name: n.clone(), num: *num });
 
-        log(format!(
-            "账号 {}（{}）：游戏 {} / {}：{}，本月第 {} 天{}",
-            account.name,
-            account.id,
-            game_label(&role.game_id, role.game_name.as_deref()),
-            role.role_name.as_deref().unwrap_or(&role.role_id),
-            if already { "今日已签到" } else { "签到成功" },
-            days,
-            reward
-                .as_ref()
-                .map(|r| format!("，奖励 {} x{}", r.name, r.num))
-                .unwrap_or_default()
-        ));
+        let (days, reward) = if err.is_some() {
+            (None, None)
+        } else {
+            let days = api.get_signin_state(access_token, &role.game_id).await?;
+            let rewards = api.get_signin_rewards(access_token, &role.game_id).await?;
+            let reward = rewards
+                .get((days - 1).max(0) as usize)
+                .map(|(n, num)| Reward { name: n.clone(), num: *num });
+
+            log(format!(
+                "账号 {}（{}）：游戏 {} / {}：{}，本月第 {} 天{}",
+                account.name,
+                account.id,
+                game_label(&role.game_id, role.game_name.as_deref()),
+                role.role_name.as_deref().unwrap_or(&role.role_id),
+                if already { "今日已签到" } else { "签到成功" },
+                days,
+                reward
+                    .as_ref()
+                    .map(|r| format!("，奖励 {} x{}", r.name, r.num))
+                    .unwrap_or_default()
+            ));
+            (Some(days), reward)
+        };
 
         game_signins.push(GameSigninResult {
             game_id: role.game_id.clone(),
             game_name: role.game_name.clone(),
             role_name: role.role_name.clone().unwrap_or_else(|| role.role_id.clone()),
-            days: Some(days),
+            days,
             reward,
             already_signed: Some(already),
-            success: true,
+            success: err.is_none(),
+            error: err,
         });
     }
 
@@ -250,19 +297,31 @@ async fn sign_with_session(
         acc = ca;
     }
 
-    log(format!("账号 {}（{}）：签到全部完成，状态已记录", account.name, account.id));
+    // 状态汇总：APP 签到成功且（无游戏或至少一个游戏成功）视为成功；全部游戏失败则整体 failed
+    let status = if !game_failures.is_empty() && game_signins.iter().all(|g| !g.success) {
+        "failed".into()
+    } else {
+        "success".into()
+    };
+    let error = if game_failures.is_empty() {
+        None
+    } else {
+        Some(format!("游戏签到失败：{}", game_failures.join("；")))
+    };
+
+    log(format!("账号 {}（{}）：签到流程结束，状态：{}", account.name, account.id, status));
 
     Ok((
         acc,
         AccountResult {
             id: account.id.clone(),
             name: account.name.clone(),
-            status: "success".into(),
+            status,
             app_signin: Some(app),
             game_signins,
             coin_tasks,
             cloud_duration,
-            error: None,
+            error,
             skipped_reason: None,
         },
     ))
@@ -475,13 +534,18 @@ async fn run_cloud_duration(
     if laohu_token.is_none() || laohu_user_id.is_none() {
         let password = resolve_password(account, credential_key);
         if account.phone.is_none() || password.is_none() {
+            let reason = if account.phone.is_none() {
+                "账号缺少手机号".to_string()
+            } else {
+                "缺少密码或密码解密失败".to_string()
+            };
             return (
                 Some(CloudDurationResult {
                     status: "skipped".into(),
                     gave: None,
                     remained: None,
                     error: None,
-                    skipped_reason: Some("账号缺少 laohuToken/laohuUserId".into()),
+                    skipped_reason: Some(reason),
                 }),
                 None,
             );
@@ -643,7 +707,13 @@ pub fn summary_text(result: &RunResult) -> String {
         for g in &acc.game_signins {
             let reward = g.reward.as_ref().map(|r| format!("，奖励 {} x{}", r.name, r.num)).unwrap_or_default();
             let days = g.days.map(|d| format!("，本月第 {d} 天")).unwrap_or_default();
-            let status = if g.already_signed == Some(true) { "今日已签到" } else { "签到成功" };
+            let status = if g.already_signed == Some(true) {
+                "今日已签到".to_string()
+            } else if g.success {
+                "签到成功".to_string()
+            } else {
+                format!("签到失败（{}）", g.error.as_deref().unwrap_or("未知错误"))
+            };
             lines.push(format!(
                 "- 游戏 {} / {}：{}{}{}",
                 game_label(&g.game_id, g.game_name.as_deref()),

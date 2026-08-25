@@ -266,17 +266,12 @@ cargo +stable-x86_64-pc-windows-gnu build --release
 
 ## 多平台 / 多架构
 
-使用 musl 静态链接，支持 OpenWrt 主流路由器架构。`.github/workflows/build.yml` 打 tag 或手动触发即自动交叉编译并发布：
+使用 musl 静态链接。`.github/workflows/build.yml` 打 tag 或手动触发即自动交叉编译并发布以下架构：
 
 | OpenWrt 架构 | Rust target | 说明 |
 | --- | --- | --- |
 | x86_64 | `x86_64-unknown-linux-musl` | 软路由 / 虚拟机 |
-| aarch64 (cortex-a53/a72) | `aarch64-unknown-linux-musl` | Rockchip、MT7986 等新平台 |
-| arm_cortex-a7/a9 | `armv7-unknown-linux-musleabihf` | IPQ40xx 等 |
-| mipsel_24kc | `mipsel-unknown-linux-musl` | MT7621（需 `native-tls`） |
-| mips_24kc | `mips-unknown-linux-musl` | MT7620（需 `native-tls`） |
-
-> 默认 TLS 后端为 `rustls`（`aws-lc-rs`），对 x86_64 / aarch64 / arm 支持良好；对 **mips / mipsel**，`aws-lc-rs` 不支持，需将 `Cargo.toml` 中 `reqwest` 改为 `features = ["native-tls"]`（OpenWrt 的 libopenssl）后编译。
+| aarch64 (cortex-a53) | `aarch64-unknown-linux-musl` | Rockchip、MT7986 等新平台 |
 
 ---
 

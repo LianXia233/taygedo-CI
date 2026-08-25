@@ -2,7 +2,16 @@
 
 本文件记录塔吉多自动签到（Rust 版）的所有版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.4.9`。
+> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.4.10`。
+
+## [0.4.10] - 2026-08-25
+
+### 修复
+- **跨平台编译失败修复（v0.4.9 无法构建）**：v0.4.9 在 Windows / Debian / Linux-musl 全平台 `cargo build --release --locked` 均失败（共 5 处 Rust 编译错误），导致 OpenWrt 与 Release 发布任务被跳过。本次修复内容：
+  - **密码重登兜底条件匹配错误（E0308）**：`refreshToken` 失效与 `laohuToken` 重建失败两条兜底路径中，`if let Some((phone, pwd))` 错误匹配了裸元组 `(Option<&str>, Option<&str>)`，实际应匹配 `Option<...>`；改为 `if let (Some(phone), Some(pwd))`，仅在手机号与密码均存在时执行密码重登。
+  - **`GameSigninResult` 缺少 `error` 字段（E0560 / E0609）**：单游戏签到结果结构体未定义 `error` 字段，但构造与结果展示处均在使用；已补充 `error: Option<String>`（序列化时自动省略 `None`，兼容既有 WebUI / LuCI 前端）。
+  - **`updated_accounts` 借用冲突（E0502）**：签到结果写回时，`updated_by_id` 持有 `updated_accounts` 中 `&str` 的不可变借用，与 `updated_accounts[idx] = updated` 的可变写入冲突；索引表 key 改为 `String`（clone id）后解除借用。
+- **版本号同步**：bump 至 `v0.4.10`，`Cargo.toml` / `Cargo.lock` 同步更新。
 
 ## [0.4.9] - 2026-08-25
 

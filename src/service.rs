@@ -269,9 +269,9 @@ pub async fn run_signin(state: &AppState, force: bool, only: Option<&[String]>) 
     let mut results: Vec<AccountResult> = Vec::new();
     let state_map = state.state.read().await.clone();
     // id → 索引，避免内层循环 O(n²)
-    let mut updated_by_id: HashMap<&str, usize> = HashMap::new();
+    let mut updated_by_id: HashMap<String, usize> = HashMap::new();
     for (i, a) in updated_accounts.iter().enumerate() {
-        updated_by_id.insert(a.id.as_str(), i);
+        updated_by_id.insert(a.id.clone(), i);
     }
 
     for account in &accounts {

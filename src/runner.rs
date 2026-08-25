@@ -105,7 +105,7 @@ async fn refresh_or_rebuild_session(
                 || account.laohu_user_id.is_none()
             {
                 // 非 402 或缺少 laohuToken 时，尝试密码重登兜底，仍失败则返回原始错误
-                if let Some((phone, pwd)) =
+                if let (Some(phone), Some(pwd)) =
                     (account.phone.as_deref(), resolve_password(account, credential_key).as_deref())
                 {
                     if let Ok((token, user_id)) =
@@ -143,7 +143,7 @@ async fn refresh_or_rebuild_session(
         Err(e) => {
             log(format!("账号 {}：laohuToken 重建失败（{}）", account.id, e.0));
             // 3. 密码重登（最后兜底）
-            if let Some((phone, pwd)) =
+            if let (Some(phone), Some(pwd)) =
                 (account.phone.as_deref(), resolve_password(account, credential_key).as_deref())
             {
                 let (token, user_id) =

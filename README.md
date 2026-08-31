@@ -3,6 +3,8 @@
 基于 Rust 重写的塔吉多（幻塔 / 异环等）每日自动签到工具，主打**简单易用、零门槛**：下载一个文件、双击运行，剩下的全部在一个现代化、**带登录鉴权**、**手机/PC 自适应**的 WebUI 图形界面里点点鼠标完成 —— 不需要命令行参数、不需要编辑配置文件、不懂技术也能上手，并支持 **OpenWrt 主线**集成（含 LuCI）。
 
 > 📦 各平台安装包见 [Releases](https://github.com/LianXia233/taygedo-CI/releases)
+>
+> Releases 分两条轨道：**正式版**（tag 形如 `v0.4.11`，稳定、推荐生产使用）与 **`nightly`**（滚动预发布，每次手动构建覆盖更新，仅供尝鲜）。日常使用请选正式版，或直接访问 [Latest Release](https://github.com/LianXia233/taygedo-CI/releases/latest)。
 
 > 上游参考：[zzstar101/taygedo-auto-attendance](https://github.com/zzstar101/taygedo-auto-attendance)（TypeScript 版）。本版将其核心逻辑用 Rust 重写。
 
@@ -110,7 +112,7 @@ netsh advfirewall firewall add rule name="taygedo" dir=in action=allow protocol=
 **1. 下载安装**
 
 ```bash
-# 到 Releases 页面下载最新 deb（文件名带版本号，如 taygedo-rs_0.4.9_amd64.deb）
+# 到 Releases 页面下载最新 deb（文件名带版本号，如 taygedo-rs_0.4.11_amd64.deb）
 # https://github.com/LianXia233/taygedo-CI/releases/latest
 sudo dpkg -i taygedo-rs_<版本>_amd64.deb
 sudo apt-get install -f    # 若有依赖缺失（本项目基本无依赖，通常不需要）

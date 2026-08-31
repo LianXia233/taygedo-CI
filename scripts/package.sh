@@ -2,12 +2,18 @@
 # 打包脚本：把编译好的二进制 + LuCI 文件打包成 .deb / .ipk / .apk
 #
 # 用法:
-#   package.sh deb <arch> <二进制路径> <版本> <输出目录>
-#   package.sh ipk <arch> <二进制路径> <版本> <输出目录>
-#   package.sh apk <arch> <二进制路径> <版本> <输出目录>
+#   package.sh deb <arch> <二进制路径> <版本> <输出目录> [release]
+#   package.sh ipk <arch> <二进制路径> <版本> <输出目录> [release]
+#   package.sh apk <arch> <二进制路径> <版本> <输出目录> [release]
 #
 # arch 为 OpenWrt 架构名（x86_64 / aarch64_cortex-a53 / arm_cortex-a7 ...），
 # deb 模式下 arch 映射为 amd64/arm64/armhf。
+#
+# 版本组合规则（各包管理器格式不同，必须分别处理）：
+#   deb -> Version: <ver>                  文件 taygedo-rs_<ver>_<arch>.deb
+#   ipk -> Version: <ver>-<rel>            文件 luci-app-taygedo_<ver>-<rel>_<arch>.ipk
+#   apk -> version: <ver>-r<rel>           文件 luci-app-taygedo_<ver>-r<rel>_<arch>.apk
+# release 缺省为 1。tag 构建传 1，非 tag（手动触发）传 GITHUB_RUN_NUMBER。
 set -euo pipefail
 
 MODE="$1"
@@ -15,11 +21,46 @@ ARCH="$2"
 BIN="$3"
 VER="$4"
 OUT="$5"
+REL="${6:-1}"
 
 PKG_NAME="taygedo-rs"
 LUCI_NAME="luci-app-taygedo"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LUCI_DIR="$ROOT/openwrt/luci-app-taygedo"
+
+# 版本规范化：
+#   1) 去掉 v 前缀；
+#   2) 剔除包管理器不允许的字符，并去掉首尾的点/横杠；
+#   3) 若结果仍不以数字开头（典型：workflow_dispatch 时 GITHUB_REF_NAME=main，
+#      ${GITHUB_REF_NAME#v} 得到 "main"），回退读取 Cargo.toml 的 version；
+#   4) 仍失败则明确报错退出——绝不能再静默产出 main-1 这类废包。
+normalize_version() {
+    local raw="$1" v cv=""
+    v="${raw#v}"
+    v="$(printf '%s' "$v" | sed -E 's/[^0-9A-Za-z.+-]//g; s/^[.-]+//; s/[.-]+$//')"
+    if printf '%s' "$v" | grep -qE '^[0-9]'; then
+        printf '%s' "$v"
+        return 0
+    fi
+    if [ -f "$ROOT/Cargo.toml" ]; then
+        cv="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$ROOT/Cargo.toml" \
+              | sed -E 's/.*"([^"]+)".*/\1/')"
+    fi
+    cv="${cv#v}"
+    if printf '%s' "$cv" | grep -qE '^[0-9]'; then
+        echo "警告: 传入版本 '$raw' 非法，已回退为 Cargo.toml 版本 '$cv'" >&2
+        printf '%s' "$cv"
+        return 0
+    fi
+    echo "错误: 版本号非法（传入 '$raw'，且无法从 Cargo.toml 推断）" >&2
+    exit 1
+}
+
+VER="$(normalize_version "$VER")"
+# release 必须是非负整数，否则回落为 1
+case "$REL" in
+    ''|*[!0-9]*) REL=1 ;;
+esac
 
 [ -x "$BIN" ] || { echo "二进制不存在或不可执行: $BIN"; exit 1; }
 mkdir -p "$OUT"
@@ -121,7 +162,7 @@ EOF
 
         cat > "$CTRLDIR/control" <<EOF
 Package: $LUCI_NAME
-Version: ${VER}-1
+Version: ${VER}-${REL}
 Depends: libc
 Section: luci
 Architecture: $ARCH
@@ -134,10 +175,10 @@ EOF
         (cd "$CTRLDIR" && tar czf "$STAGE/control.tar.gz" .)
         (
             cd "$STAGE"
-            ar rcs "$OUT/${LUCI_NAME}_${VER}-1_${ARCH}.ipk" debian-binary control.tar.gz data.tar.gz
+            ar rcs "$OUT/${LUCI_NAME}_${VER}-${REL}_${ARCH}.ipk" debian-binary control.tar.gz data.tar.gz
         )
         rm -rf "$STAGE"
-        echo "built: $OUT/${LUCI_NAME}_${VER}-1_${ARCH}.ipk"
+        echo "built: $OUT/${LUCI_NAME}_${VER}-${REL}_${ARCH}.ipk"
         ;;
 
     apk)
@@ -160,10 +201,10 @@ EOF
 
         stage_root "$PKGROOT"
 
-        APK="$OUT/${LUCI_NAME}_${VER}-r1_${ARCH}.apk"
+        APK="$OUT/${LUCI_NAME}_${VER}-r${REL}_${ARCH}.apk"
         "$APKBIN" mkpkg \
             --info "name:$LUCI_NAME" \
-            --info "version:${VER}-r1" \
+            --info "version:${VER}-r${REL}" \
             --info "arch:$ARCH" \
             --info "description:Taygedo auto attendance (塔吉多自动签到)" \
             --info "license:MIT" \

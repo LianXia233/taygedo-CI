@@ -6,6 +6,17 @@
 
 ## [未发布]
 
+### 构建 / 发布
+- **修复手动触发（`workflow_dispatch`）时 Debian 与 OpenWrt 打包必失败**：打包步骤用 `${GITHUB_REF_NAME#v}` 取版本号，而该变量**仅在 tag 推送时才是版本号**，手动触发时等于分支名（如 `main`）。结果：
+  - `dpkg-deb` 报 `'Version' field value 'main': version number does not start with digit`，`debian-amd64` 作业失败；
+  - `apk mkpkg` 报 `info field 'version' has invalid value`，`openwrt-*` 作业以退出码 99 失败；
+  - `ipk` 因 opkg 校验宽松而**静默产出废包** `luci-app-taygedo_main-1_<arch>.ipk`，是三者中最隐蔽的一个。
+  修复分两层：
+  1. **工作流层**：`debian` 与 `openwrt` 作业各新增 `Resolve version` 步骤——`GITHUB_REF_NAME` 匹配 `^[0-9]+\.[0-9]+\.[0-9]+` 时才当作版本号（release = 1），否则回退为 `Cargo.toml` 的 `version` 并以 `GITHUB_RUN_NUMBER` 作为 release，保证任何触发方式都能产出合法版本。
+  2. **脚本层（防御性兜底）**：`scripts/package.sh` 新增 `normalize_version`——去 `v` 前缀、剔除包管理器非法字符、结果不以数字开头时回退读 `Cargo.toml`，仍失败则**明确报错退出而非产出废包**。
+- **打包脚本支持 release 号并按包管理器分别组合版本**：`package.sh` 新增第 6 个可选参数 `release`（缺省 1）。三种格式的合法版本写法不同，此前硬编码 `-1` / `-r1`：现为 `deb → <ver>`、`ipk → <ver>-<rel>`、`apk → <ver>-r<rel>`。tag 构建（release=1）的产物命名与此前完全一致，无破坏性变更。
+- **Release 发布作业限定仅 tag 推送触发**：`release` 作业此前无 `if` 条件，手动触发时 `softprops/action-gh-release` 会以分支名 `main` 当 tag 建 Release，产出脏数据。现加 `if: startsWith(github.ref, 'refs/tags/v')`；手动构建的产物仍可从 Actions 运行页直接下载。
+
 ### 文档
 - **README 突出简单易用、零门槛**：导语改为强调「下载即用 + WebUI 图形化操作」的产品定位；新增「三步上手（零门槛）」章节，以表格给出 Windows / Debian / OpenWrt 三平台的下载 → 运行 → 使用最小路径（双击运行、两条命令、装包启用），并说明全程仅需浏览器操作、无需命令行与配置文件；功能特性列表新增「开箱即用，零门槛」条目。内容均按现有实际功能描述，未涉及代码变更。
 - **README 移除未实际发布的架构描述**：「多平台 / 多架构」表格删除 `arm_cortex-a7/a9`（armv7 musl）、`mipsel_24kc`、`mips_24kc` 三行及 mips/mipsel 需改用 `native-tls` 的说明——CI 实际仅构建并发布 x86_64 与 aarch64 两个 musl 架构，文档与实际发布物保持一致。

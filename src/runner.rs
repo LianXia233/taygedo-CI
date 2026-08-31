@@ -65,11 +65,25 @@ pub async fn run_account(
     opts: &RunOptions,
     log: &mut (dyn FnMut(String) + Send),
 ) -> Result<(Account, AccountResult), ApiError> {
-    let (start_account, access_token) = if let Some(at) = account.access_token.as_deref() {
-        (account.clone(), at.to_string())
-    } else {
-        refresh_or_rebuild_session(api, account, credential_key, log).await?
-    };
+    // 修复：原逻辑「本地已有 accessToken 就直接使用」，而 accessToken 会过期。
+    // 过期后网关层（istio-envoy）对部分端点直接返回 HTTP 401（空响应体），
+    // 且并非所有失败都会命中 is_auth_error，导致当天签到永久失败。
+    // 改为签到前主动续期（refreshToken 代价最小、不触发风控）；
+    // 续期失败时回退复用现有会话，由后续失败重试兜底，避免弱网下误伤。
+    let (start_account, access_token) =
+        match refresh_or_rebuild_session(api, account, credential_key, log).await {
+            Ok(v) => v,
+            Err(e) => {
+                log(format!(
+                    "账号 {}：会话预刷新失败（{}），回退复用现有会话",
+                    account.id, e.0
+                ));
+                match account.access_token.as_deref() {
+                    Some(at) => (account.clone(), at.to_string()),
+                    None => return Err(e),
+                }
+            }
+        };
 
     match sign_with_session(api, &start_account, &access_token, credential_key, opts, log).await {
         Ok(res) => Ok(res),
@@ -199,17 +213,32 @@ async fn sign_with_session(
     }
 
     // APP 签到
-    let app = sign_app_idempotently(api, access_token, account).await?;
-    if app.already_signed == Some(true) {
-        log(format!("账号 {}（{}）：APP 签到：今日已签到", account.name, account.id));
-    } else {
-        log(format!(
-            "账号 {}（{}）：APP 签到：获得 {} 金币，{} 经验",
-            account.name,
-            account.id,
-            app.gold_coin.unwrap_or(0.0),
-            app.exp.unwrap_or(0.0)
-        ));
+    // 修复：原实现用 `?` 传播错误，APP 签到这一独立子任务失败会中断整轮，
+    // 导致游戏签到、金币任务、云时长全部不执行。改为降级记录、继续执行。
+    let mut app_error: Option<String> = None;
+    let app = match sign_app_idempotently(api, access_token, account).await {
+        Ok(a) => Some(a),
+        Err(e) => {
+            log(format!(
+                "账号 {}（{}）：APP 签到失败：{}（继续执行游戏签到）",
+                account.name, account.id, e.0
+            ));
+            app_error = Some(e.0);
+            None
+        }
+    };
+    if let Some(a) = &app {
+        if a.already_signed == Some(true) {
+            log(format!("账号 {}（{}）：APP 签到：今日已签到", account.name, account.id));
+        } else {
+            log(format!(
+                "账号 {}（{}）：APP 签到：获得 {} 金币，{} 经验",
+                account.name,
+                account.id,
+                a.gold_coin.unwrap_or(0.0),
+                a.exp.unwrap_or(0.0)
+            ));
+        }
     }
 
     // 逐游戏签到：单个游戏失败（非鉴权错误）只记录该游戏失败，不中断其他游戏与后续任务
@@ -297,16 +326,27 @@ async fn sign_with_session(
         acc = ca;
     }
 
-    // 状态汇总：APP 签到成功且（无游戏或至少一个游戏成功）视为成功；全部游戏失败则整体 failed
-    let status = if !game_failures.is_empty() && game_signins.iter().all(|g| !g.success) {
+    // 状态汇总：全部游戏失败，或 APP 签到失败且无任何游戏成功，才判为 failed；
+    // 其余情况视为 success（部分失败信息通过 error 字段透出，供前端展示）。
+    let all_games_failed = !game_signins.is_empty() && game_signins.iter().all(|g| !g.success);
+    let no_game_succeeded = !game_signins.iter().any(|g| g.success);
+    let status = if all_games_failed || (app_error.is_some() && no_game_succeeded) {
         "failed".into()
     } else {
         "success".into()
     };
-    let error = if game_failures.is_empty() {
+
+    let mut failures: Vec<String> = Vec::new();
+    if let Some(e) = &app_error {
+        failures.push(format!("APP签到：{}", e));
+    }
+    if !game_failures.is_empty() {
+        failures.push(format!("游戏签到：{}", game_failures.join("；")));
+    }
+    let error = if failures.is_empty() {
         None
     } else {
-        Some(format!("游戏签到失败：{}", game_failures.join("；")))
+        Some(failures.join("；"))
     };
 
     log(format!("账号 {}（{}）：签到流程结束，状态：{}", account.name, account.id, status));
@@ -317,7 +357,7 @@ async fn sign_with_session(
             id: account.id.clone(),
             name: account.name.clone(),
             status,
-            app_signin: Some(app),
+            app_signin: app,
             game_signins,
             coin_tasks,
             cloud_duration,

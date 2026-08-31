@@ -393,20 +393,20 @@ impl Api {
         uid: &str,
         device_id: &str,
     ) -> Result<(f64, f64)> {
-        let mut headers = HeaderMap::new();
-        headers.insert("authorization", HeaderValue::from_str(access_token).unwrap());
-        headers.insert("uid", HeaderValue::from_str(uid).unwrap());
-        headers.insert("deviceid", HeaderValue::from_str(device_id).unwrap());
-        headers.insert("appversion", HeaderValue::from_static("1.1.0"));
-        headers.insert("Content-Type", HeaderValue::from_static("application/x-www-form-urlencoded"));
-        headers.insert("User-Agent", HeaderValue::from_static(NATIVE_USER_AGENT));
-
+        // 修复：本端点要求 native 通道的 `ds` 签名头，缺失时上游恒返回
+        // `code=22 invalid request`（HTTP 200，业务层拒绝）。此处与同一端点的
+        // `bbs_signin`（communityId=2）统一复用 native_common_headers，
+        // 不再手工拼装残缺请求头。
+        let (headers, url) = native_request_with_body(
+            access_token,
+            uid,
+            device_id,
+            "POST",
+            "/apihub/api/signin",
+            &[("communityId", "1")],
+        );
         let (status, text) = self
-            .post_form(
-                &format!("{TAYGEDO_BASE_URL}/apihub/api/signin"),
-                headers,
-                "communityId=1".into(),
-            )
+            .post_form(&url, headers, "communityId=1".into())
             .await?;
         let (code, msg, full) = parse_body(&text, "appSignin", status)?;
 

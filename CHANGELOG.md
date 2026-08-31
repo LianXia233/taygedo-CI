@@ -2,13 +2,23 @@
 
 本文件记录塔吉多自动签到（Rust 版）的所有版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.4.10`。
+> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.4.11`。
 
 ## [未发布]
 
 ### 文档
 - **README 突出简单易用、零门槛**：导语改为强调「下载即用 + WebUI 图形化操作」的产品定位；新增「三步上手（零门槛）」章节，以表格给出 Windows / Debian / OpenWrt 三平台的下载 → 运行 → 使用最小路径（双击运行、两条命令、装包启用），并说明全程仅需浏览器操作、无需命令行与配置文件；功能特性列表新增「开箱即用，零门槛」条目。内容均按现有实际功能描述，未涉及代码变更。
 - **README 移除未实际发布的架构描述**：「多平台 / 多架构」表格删除 `arm_cortex-a7/a9`（armv7 musl）、`mipsel_24kc`、`mips_24kc` 三行及 mips/mipsel 需改用 `native-tls` 的说明——CI 实际仅构建并发布 x86_64 与 aarch64 两个 musl 架构，文档与实际发布物保持一致。
+
+## [0.4.11] - 2026-08-31
+
+### 修复
+- **APP 签到恒失败（`appSignin：invalid request`，HTTP 200 / code=22）**：`app_signin` 此前手工拼装了一套残缺的 native 请求头（`appversion: 1.1.0`，缺 `ds`、`platform`、`Accept`）。实测确认本端点**强制要求 `ds` 签名头**——缺失时上游一律返回 `code=22 invalid request`，而补齐 `ds` 后立即返回 `code=0`；`appversion` / `platform` / `Accept` 均非必需项。现已与同一端点的 `bbs_signin`（`communityId=2`）统一复用 `native_common_headers`，不再手工构造。该失败会导致整轮签到判定为 `failed`。
+- **会话过期导致部分端点被网关直接拒签（HTTP 401）**：原逻辑「本地已有 `accessToken` 就直接使用」，而 `accessToken` 会过期；过期后网关层（istio-envoy）对 `getUserTasks`、`/apihub/awapi/*`、`/bbs/api/post/*` 等端点直接返回 HTTP 401（空响应体、1ms 内返回，未达后端），而 `code=22` 这类业务错误又不会命中 `is_auth_error`，导致当天签到永久失败且无自愈路径。现改为签到前**主动续期**（`refreshToken` 代价最小、不触发风控），续期失败时回退复用现有会话并由后续重试兜底，避免弱网下误伤。
+
+### 变更
+- **APP 签到失败不再中断整轮**：原实现用 `?` 传播 `app_signin` 的错误，导致这一独立子任务失败后，游戏签到、金币任务、云时长全部不执行（故障放大器）。现改为降级记录并继续执行；`app_signin` 字段在无结果时为 `null`，失败原因合入 `error` 字段。状态判定：全部游戏失败，或 APP 签到失败且无任何游戏成功时，才判为 `failed`。
+- **版本号同步**：bump 至 `v0.4.11`，`Cargo.toml` / `Cargo.lock` 同步更新。
 
 ## [0.4.10] - 2026-08-25
 

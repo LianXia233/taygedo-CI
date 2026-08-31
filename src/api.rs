@@ -534,7 +534,13 @@ impl Api {
         let (status, text) = self.get_text(&url, headers).await?;
         let (code, msg, full) = parse_body(&text, "getRecommendPostList", status)?;
 
+        // 修复：上游实际返回 `data` 为对象、帖子位于 `data.posts`
+        // （形如 {"code":0,"data":{"hasMore":true,"page":2,"posts":[...],...}}）。
+        // 原实现仅识别 `data.list` 或 `data` 本身为数组，导致解析恒为 None，
+        // 进而令金币任务中的浏览 / 点赞 / 分享子任务全部无法执行。
+        // 此处按 list → posts → data 的顺序依次尝试，兼容多种响应形态。
         let raw = full.get("data").and_then(|d| d.get("list")).and_then(|l| l.as_array())
+            .or_else(|| full.get("data").and_then(|d| d.get("posts")).and_then(|l| l.as_array()))
             .or_else(|| full.get("data").and_then(|d| d.as_array()));
         if !is_ok(status) || code != 0 || raw.is_none() {
             return Err(api_error("getRecommendPostList", status, code, &msg));

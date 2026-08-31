@@ -15,7 +15,12 @@
   1. **工作流层**：`debian` 与 `openwrt` 作业各新增 `Resolve version` 步骤——`GITHUB_REF_NAME` 匹配 `^[0-9]+\.[0-9]+\.[0-9]+` 时才当作版本号（release = 1），否则回退为 `Cargo.toml` 的 `version` 并以 `GITHUB_RUN_NUMBER` 作为 release，保证任何触发方式都能产出合法版本。
   2. **脚本层（防御性兜底）**：`scripts/package.sh` 新增 `normalize_version`——去 `v` 前缀、剔除包管理器非法字符、结果不以数字开头时回退读 `Cargo.toml`，仍失败则**明确报错退出而非产出废包**。
 - **打包脚本支持 release 号并按包管理器分别组合版本**：`package.sh` 新增第 6 个可选参数 `release`（缺省 1）。三种格式的合法版本写法不同，此前硬编码 `-1` / `-r1`：现为 `deb → <ver>`、`ipk → <ver>-<rel>`、`apk → <ver>-r<rel>`。tag 构建（release=1）的产物命名与此前完全一致，无破坏性变更。
-- **Release 发布作业限定仅 tag 推送触发**：`release` 作业此前无 `if` 条件，手动触发时 `softprops/action-gh-release` 会以分支名 `main` 当 tag 建 Release，产出脏数据。现加 `if: startsWith(github.ref, 'refs/tags/v')`；手动构建的产物仍可从 Actions 运行页直接下载。
+- **Release 发布策略重做（双轨：正式版 tag + 滚动 nightly）**：`release` 作业此前无 `tag_name`，完全依赖 `softprops/action-gh-release` 的默认行为取 `github.ref`——tag 推送时正确，手动触发（`workflow_dispatch`）时 `github.ref` 是 `refs/heads/main`，会创建名为 `main` 的脏 Release。此前本喵以 `if: startsWith(github.ref, 'refs/tags/v')` 门控规避，但副作用是**手动构建编译完成却不上传 Release**。现改为按触发方式分流：
+  - **tag 推送 `vX.Y.Z`** → 正式版：`tag_name=vX.Y.Z`，标题 `Taygedo vX.Y.Z`，非预发布；
+  - **手动触发** → 滚动 nightly：固定 `tag_name=nightly`，标题 `Taygedo Nightly v<版本> (build <构建号>)`，标记 `prerelease=true`，每次覆盖更新，tag 数量恒定不膨胀。
+  - nightly 发布前先清空该 Release 的全部旧资产（版本号变动会留下历史文件），保证始终只有一份最新产物；`target_commitish` 指向当前 commit，使 nightly tag 跟随最新构建。
+- **Release 说明改为结构化正文**：用 `generate_release_notes` 自动生成的提交列表可读性差，改为自生成 `notes.md`，含「构建信息」表（版本 / 提交 / 构建号 / 触发方式 / 流水线链接）与「产物清单」表（文件名 + 大小），nightly 版本额外标注滚动预发布提示。
+- **打包 release 号恒为 1**：此前非 tag 构建以 `GITHUB_RUN_NUMBER` 作为 release 号，导致每次构建的 ipk/apk 文件名都不同、nightly 资产只增不减。现统一为 1，资产名稳定可覆盖，构建号改由 Release 标题承载。
 
 ### 文档
 - **README 突出简单易用、零门槛**：导语改为强调「下载即用 + WebUI 图形化操作」的产品定位；新增「三步上手（零门槛）」章节，以表格给出 Windows / Debian / OpenWrt 三平台的下载 → 运行 → 使用最小路径（双击运行、两条命令、装包启用），并说明全程仅需浏览器操作、无需命令行与配置文件；功能特性列表新增「开箱即用，零门槛」条目。内容均按现有实际功能描述，未涉及代码变更。

@@ -115,22 +115,22 @@ jobs:
       # 版本号解析：${GITHUB_REF_NAME#v} 仅在 tag 推送时才是版本号；
       # workflow_dispatch / 分支推送时得到的是分支名（如 main），
       # 而 dpkg-deb 与 apk mkpkg 都要求版本号以数字开头，否则直接失败。
-      # 非 tag 构建回退为 Cargo.toml 版本 + 运行号，保证恒可打包。
+      # 非 tag 构建回退为 Cargo.toml 版本，保证恒可打包。
+      # release 号恒为 1：nightly 是滚动发布，资产名必须稳定才能被覆盖更新，
+      # 构建号改由 Release 标题承载（见 release 作业的 Release target 步骤）。
       - name: Resolve version
         id: ver
         run: |
           RAW="${GITHUB_REF_NAME#v}"
           if printf '%s' "$RAW" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
             VER="$RAW"
-            REL=1
           else
             VER="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
             VER="${VER#v}"
-            REL="$GITHUB_RUN_NUMBER"
           fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "release=$REL" >> "$GITHUB_OUTPUT"
-          echo "resolved version=$VER release=$REL (ref=${GITHUB_REF_NAME})"
+          echo "release=1" >> "$GITHUB_OUTPUT"
+          echo "resolved version=$VER release=1 (ref=${GITHUB_REF_NAME})"
       - name: Package .deb
         run: |
           bash scripts/package.sh deb x86_64 target/release/taygedo-rs \
@@ -178,15 +178,13 @@ jobs:
           RAW="${GITHUB_REF_NAME#v}"
           if printf '%s' "$RAW" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
             VER="$RAW"
-            REL=1
           else
             VER="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
             VER="${VER#v}"
-            REL="$GITHUB_RUN_NUMBER"
           fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "release=$REL" >> "$GITHUB_OUTPUT"
-          echo "resolved version=$VER release=$REL (ref=${GITHUB_REF_NAME})"
+          echo "release=1" >> "$GITHUB_OUTPUT"
+          echo "resolved version=$VER release=1 (ref=${GITHUB_REF_NAME})"
       - name: Package ipk + apk
         run: |
           BIN="$(find bin -type f -name 'taygedo-rs' | head -1)"
@@ -208,11 +206,9 @@ jobs:
     name: release
     needs: [build, debian, openwrt]
     runs-on: ubuntu-latest
-    # 仅 tag 推送才发 Release。手动触发（workflow_dispatch）时 github.ref 是分支，
-    # softprops/action-gh-release 会以分支名当 tag 建 Release，产出脏数据；
-    # 手动构建的产物直接从 Actions 运行页下载即可。
-    if: startsWith(github.ref, 'refs/tags/v')
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -224,8 +220,87 @@ jobs:
           find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.deb' -o -name '*.ipk' -o -name '*.apk' \) \
             -exec cp {} dist/ \;
 
+      # 发布目标解析（两种触发方式走两条路径）：
+      #   push tag vX.Y.Z  -> 正式版：tag=vX.Y.Z，标题 "Taygedo vX.Y.Z"，非预发布
+      #   workflow_dispatch-> 滚动 nightly：固定 tag=nightly，标题带构建号，标记预发布。
+      # 之所以不按分支名当 tag：手动触发时 github.ref 是 refs/heads/main，
+      # 直接交给 action 会创建名为 main 的 Release，属于脏数据。
+      - name: Resolve release target
+        id: rel
+        run: |
+          case "${GITHUB_REF}" in
+            refs/tags/v*)
+              TAG="${GITHUB_REF#refs/tags/}"
+              VER="${TAG#v}"
+              echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+              echo "name=Taygedo $TAG" >> "$GITHUB_OUTPUT"
+              echo "prerelease=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              VER="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+              VER="${VER#v}"
+              echo "tag=nightly" >> "$GITHUB_OUTPUT"
+              echo "name=Taygedo Nightly v${VER} (build ${GITHUB_RUN_NUMBER})" >> "$GITHUB_OUTPUT"
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      # nightly 是滚动 tag：资产名固定时会被同名覆盖，但版本号变动会留下历史文件，
+      # 因此发布前先清空该 Release 的全部旧资产，保证始终只有一份最新产物。
+      - name: Clean previous nightly assets
+        if: steps.rel.outputs.tag == 'nightly'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view nightly --repo "${GITHUB_REPOSITORY}" --json assets \
+            --jq '.assets[].name' > old_assets.txt 2>/dev/null || :
+          if [ -s old_assets.txt ]; then
+            while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              echo "removing old asset: $f"
+              gh release delete-asset nightly "$f" --repo "${GITHUB_REPOSITORY}" --yes || true
+            done < old_assets.txt
+          else
+            echo "nightly release 尚不存在或无历史资产，跳过清理"
+          fi
+
+      - name: Build release notes
+        run: |
+          {
+            echo "## 构建信息"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 版本 | \`${{ steps.rel.outputs.version }}\` |"
+            echo "| 提交 | \`${{ steps.rel.outputs.sha }}\` |"
+            echo "| 构建号 | \`${{ github.run_number }}\` |"
+            echo "| 触发方式 | \`${{ github.event_name }}\` |"
+            echo "| 流水线 | [Run \`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "## 产物清单"
+            echo ""
+            echo "| 文件 | 大小 |"
+            echo "| --- | ---: |"
+            for f in dist/*; do
+              echo "| \`$(basename "$f")\` | $(du -h "$f" | cut -f1) |"
+            done
+            echo ""
+            if [ "${{ steps.rel.outputs.prerelease }}" = "true" ]; then
+              echo "> 本 Release 为 nightly 滚动预发布，每次手动构建覆盖更新，仅保留最新产物。"
+              echo "> 生产环境请使用正式版 tag（形如 \`vX.Y.Z\`）对应的 Release。"
+            fi
+          } > notes.md
+          cat notes.md
+
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.rel.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.rel.outputs.name }}
+          body_path: notes.md
+          prerelease: ${{ steps.rel.outputs.prerelease }}
           files: dist/*
-          generate_release_notes: true
+          generate_release_notes: false

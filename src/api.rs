@@ -256,13 +256,13 @@ impl Api {
 
     // ---- 签到相关 ----
 
-    pub async fn refresh_token(&self, refresh_token: &str, device_id: &str) -> Result<(String, String, Option<String>)> {
-        let mut headers = HeaderMap::new();
-        headers.insert("authorization", HeaderValue::from_str(refresh_token).unwrap());
-        headers.insert("deviceid", HeaderValue::from_str(device_id).unwrap());
-        headers.insert("appversion", HeaderValue::from_static("1.1.0"));
-        headers.insert("Content-Type", HeaderValue::from_static("application/x-www-form-urlencoded"));
-        headers.insert("User-Agent", HeaderValue::from_static(NATIVE_USER_AGENT));
+    pub async fn refresh_token(&self, refresh_token: &str, device_id: &str    ) -> Result<(String, String, Option<String>)> {
+        // 修复：本端点与 app_signin 同源——同样要求 native 通道的 `ds` 签名头。
+        // 缺失时上游恒返回 `code=22 invalid request`，该错误不含 "REFRESH_REJECTED_402"，
+        // 会令 refresh_or_rebuild_session 误判为「非 402」而跳过 laohuToken 重建、直接失败。
+        // 补齐 ds 后，refreshToken 失效时上游正确返回 402，进而落到 laohuToken 重建路径。
+        // 直接复用 native_common_headers，把 refreshToken 当作 authorization 传入（uid 传 "0"）。
+        let headers = native_common_headers(refresh_token, "0", device_id);
 
         let (status, text) = self
             .post_form(&format!("{TAYGEDO_BASE_URL}/usercenter/api/refreshToken"), headers, String::new())

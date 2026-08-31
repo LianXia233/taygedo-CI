@@ -14,6 +14,7 @@
 
 ### 修复
 - **APP 签到恒失败（`appSignin：invalid request`，HTTP 200 / code=22）**：`app_signin` 此前手工拼装了一套残缺的 native 请求头（`appversion: 1.1.0`，缺 `ds`、`platform`、`Accept`）。实测确认本端点**强制要求 `ds` 签名头**——缺失时上游一律返回 `code=22 invalid request`，而补齐 `ds` 后立即返回 `code=0`；`appversion` / `platform` / `Accept` 均非必需项。现已与同一端点的 `bbs_signin`（`communityId=2`）统一复用 `native_common_headers`，不再手工构造。该失败会导致整轮签到判定为 `failed`。
+- **会话续期接口同源失效（`refreshToken` 缺 `ds` → code=22，阻断 laohuToken 兜底）**：`refresh_token` 同样手工拼装残缺头（缺 `ds`），上游恒返回 `code=22 invalid request`。该错误文案不含 `REFRESH_REJECTED_402`，导致 `refresh_or_rebuild_session` 将其误判为「非 402」而跳过 `laohuToken` 重建、直接失败。补齐 `ds` 后，refreshToken 失效时上游正确返回 `402`，进而落到 `laohuToken` 重建路径（已实测 `user_center_login` 可用）。手工头中的 `appversion: 1.1.0` 一并改为 `native_common_headers` 的 `1.2.5`。
 - **会话过期导致部分端点被网关直接拒签（HTTP 401）**：原逻辑「本地已有 `accessToken` 就直接使用」，而 `accessToken` 会过期；过期后网关层（istio-envoy）对 `getUserTasks`、`/apihub/awapi/*`、`/bbs/api/post/*` 等端点直接返回 HTTP 401（空响应体、1ms 内返回，未达后端），而 `code=22` 这类业务错误又不会命中 `is_auth_error`，导致当天签到永久失败且无自愈路径。现改为签到前**主动续期**（`refreshToken` 代价最小、不触发风控），续期失败时回退复用现有会话并由后续重试兜底，避免弱网下误伤。
 
 ### 变更

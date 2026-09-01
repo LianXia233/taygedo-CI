@@ -6,7 +6,7 @@
 >
 > Releases 分两条轨道：**正式版**（tag 形如 `v0.4.11`，稳定、推荐生产使用）与 **`nightly`**（滚动预发布，每次手动构建覆盖更新，仅供尝鲜）。日常使用请选正式版，或直接访问 [Latest Release](https://github.com/LianXia233/taygedo-CI/releases/latest)。
 
-> 上游参考：[zzstar101/taygedo-auto-attendance](https://github.com/zzstar101/taygedo-auto-attendance)（TypeScript 版）。本版将其核心逻辑用 Rust 重写。
+> 上游参考：[zzstar101/taygedo-auto-attendance](https://github.com/zzstar101/taygedo-auto-attendance)（TypeScript 版，**MIT 许可**）。本版将其核心逻辑用 Rust 重写，上游的 MIT 版权与许可声明保留在 [`src/upstream/`](./src/upstream/)；本项目自身代码以 **GPL-2.0** 发布，详见文末[许可证](#许可证)。
 
 ---
 
@@ -381,3 +381,17 @@ scripts/package.sh          # deb / ipk / apk 打包脚本
 ## 免责声明
 
 本项目仅供学习与个人自用，请遵守相关平台的服务条款。使用本工具产生的任何后果由使用者自行承担。
+
+
+---
+
+## 许可证
+
+| 范围 | 许可证 | 位置 |
+| :--- | :--- | :--- |
+| 本项目 Rust 实现、WebUI 与 OpenWrt / LuCI 集成 | **GPL-2.0** | 根目录 [`LICENSE`](./LICENSE) |
+| 上游 TypeScript 实现（逻辑参考来源） | **MIT** | [`src/upstream/LICENSE-MIT`](./src/upstream/LICENSE-MIT)，Copyright (c) 2026 zzstar101 |
+
+- 本项目为上游 [zzstar101/taygedo-auto-attendance](https://github.com/zzstar101/taygedo-auto-attendance)（MIT）的 Rust 重写版本，新增与改写的代码整体以 **GPL-2.0** 授权。
+- 上游是宽松的 MIT 许可，允许其代码被并入 GPL 项目，因此两层许可可以并存：上游归属与 MIT 声明完整保留，不因本项目改用 GPL 而改变。
+- 若你只使用上游的原始 TypeScript 版本，请以该项目的 MIT 许可为准；使用本项目（Rust 版）及其衍生代码时，需遵循 GPL-2.0。

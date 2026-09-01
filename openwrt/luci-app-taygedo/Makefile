@@ -15,7 +15,8 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=luci-app-taygedo
 PKG_VERSION:=0.4.9
 PKG_RELEASE:=1
-PKG_LICENSE:=MIT
+PKG_LICENSE:=GPL-2.0
+PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=LianXia233
 
 # 预编译二进制发布仓库与版本（需与 .github/workflows/build.yml 的 tag 一致）

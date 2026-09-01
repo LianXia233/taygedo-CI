@@ -207,7 +207,7 @@ EOF
             --info "version:${VER}-r${REL}" \
             --info "arch:$ARCH" \
             --info "description:Taygedo auto attendance (塔吉多自动签到)" \
-            --info "license:MIT" \
+            --info "license:GPL-2.0-only" \
             --info "maintainer:LianXia233" \
             --info "url:https://github.com/LianXia233/taygedo-CI" \
             --info "origin:$LUCI_NAME" \

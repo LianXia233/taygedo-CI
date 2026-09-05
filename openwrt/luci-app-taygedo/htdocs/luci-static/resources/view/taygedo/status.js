@@ -280,6 +280,30 @@ function noAuthHtml() {
 	].join('');
 }
 
+// 后端服务未启动时的提示页：fetch 连接建立失败（网络层 TypeError）时渲染，
+// 与「后端在跑但未开免鉴权」（renderNoAuth）区分开，避免误导用户去改 no_auth。
+function serviceDownHtml() {
+	return [
+		'<div class="tgd-login-wrap">',
+		'  <div class="tgd-login-card">',
+		'    <div class="tgd-logo">' + ICONS.logo + '</div>',
+		'    <h1>塔吉多自动签到</h1>',
+		'    <div class="tgd-sub">签到服务未运行（端口 8787 无响应）</div>',
+		'    <button class="tgd-btn tgd-primary" id="tgd-retry-btn" style="width:100%;min-height:44px;font-size:15px">' + ICONS.external + ' 重试连接</button>',
+		'    <div class="tgd-hint">0.4.12 起安装包会自动注册开机自启并启动服务。若仍显示此页，请在路由器 SSH 执行：<br><code>/etc/init.d/taygedo enable</code><br><code>/etc/init.d/taygedo start</code></div>',
+		'  </div>',
+		'</div>'
+	].join('');
+}
+
+function renderServiceDown() {
+	var root = document.getElementById('tgd-root');
+	root.innerHTML = '<style>' + TGD_CSS + '</style>' + serviceDownHtml() + '<div class="tgd-toast"></div>';
+	document.getElementById('tgd-retry-btn').addEventListener('click', function () {
+		window.location.reload();
+	});
+}
+
 function addModalHtml() {
 	return [
 		'<div class="tgd-modal-mask" id="tgd-add-modal">',
@@ -631,10 +655,13 @@ return view.extend({
 			return r.json();
 		});
 
-		// 探测失败（后端不可达 / 未开免鉴权）→ 渲染引导页
+		// 探测失败 → 渲染引导页：
+		//   fetch 连接失败（TypeError）= 服务根本没在跑 → 服务未运行引导页；
+		//   HTTP 非 2xx = 服务在跑但返回异常（如未开免鉴权被 401 拒绝）→ 免鉴权引导页。
 		probe.catch(function (e) {
 			console.error('taygedo probe:', e);
-			renderNoAuth();
+			if (e instanceof TypeError) { renderServiceDown(); }
+			else { renderNoAuth(); }
 		});
 
 		// 探测成功 → 主界面；渲染异常单独记录，不再误判为“未开免鉴权”

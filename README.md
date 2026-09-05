@@ -17,7 +17,7 @@
 | 步骤 | Windows | Debian / Ubuntu | OpenWrt |
 | --- | --- | --- | --- |
 | ① 下载 | 到 [Releases](https://github.com/LianXia233/taygedo-CI/releases) 下载 zip 并解压 | 下载 `.deb` | 下载对应架构的 `.ipk` / `.apk` |
-| ② 运行 | **双击 `taygedo-rs.exe`**（自动打开浏览器） | `sudo dpkg -i taygedo-rs_*.deb && sudo systemctl enable --now taygedo-rs` | 安装后到 LuCI → 服务 → 塔吉多签到 启用 |
+| ② 运行 | **双击 `taygedo-rs.exe`**（自动打开浏览器） | `sudo dpkg -i taygedo-rs_*.deb && sudo systemctl enable --now taygedo-rs` | `opkg install` / `apk add` 安装后自动注册开机自启并启动服务（0.4.12 起）；若服务未运行，执行 `/etc/init.d/taygedo enable && /etc/init.d/taygedo start` |
 | ③ 使用 | 浏览器打开 `http://127.0.0.1:8787`，默认账号密码 `admin / admin` 登录，点「添加账号」即可 | 同左（把地址换成服务器 IP） | LuCI 页面直接管理 |
 
 就这么多 —— 之后每天会在你设定的时间自动签到，无需任何人工干预；手机浏览器同样可以打开管理界面。
@@ -177,7 +177,7 @@ sudo journalctl -u taygedo-rs -f
 # opkg（23.05 及以下），文件名带版本号，如 luci-app-taygedo_0.4.8-1_x86_64.ipk
 opkg install /tmp/luci-app-taygedo_<版本>-1_x86_64.ipk
 
-# apk（24.10 及以上），如 luci-app-taygedo_0.4.9-r1_x86_64.apk
+# apk（24.10 及以上），如 luci-app-taygedo_0.4.12-r1_x86_64.apk
 apk add /tmp/luci-app-taygedo_<版本>-r1_x86_64.apk
 ```
 

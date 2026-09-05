@@ -170,6 +170,20 @@ Maintainer: LianXia233
 Description: Taygedo auto attendance (塔吉多自动签到)
 EOF
 
+        # opkg 支持 control 中的 postinst（需可执行位）：安装后注册开机自启
+        # 并启动服务，避免「装完包 LuCI 页面打不开」—— 服务默认 enabled=1，
+        # 但 opkg/apk 不会自动 enable /etc/init.d 下的脚本。
+        cat > "$CTRLDIR/postinst" <<'POSTINST'
+#!/bin/sh
+[ -x /etc/init.d/taygedo ] || exit 0
+/etc/init.d/taygedo enable
+if [ "$(uci -q get taygedo.main.enabled)" != "0" ]; then
+    /etc/init.d/taygedo start 2>/dev/null
+fi
+exit 0
+POSTINST
+        chmod 755 "$CTRLDIR/postinst"
+
         printf '2.0\n' > "$STAGE/debian-binary"
         (cd "$PKGROOT" && tar czf "$STAGE/data.tar.gz" .)
         (cd "$CTRLDIR" && tar czf "$STAGE/control.tar.gz" .)
@@ -201,6 +215,20 @@ EOF
 
         stage_root "$PKGROOT"
 
+        # apk mkpkg 的 --script 会把脚本写入包 metadata（APKv3），安装时执行。
+        # 作用同 ipk 的 postinst：注册开机自启 + 启动服务（服务默认 enabled=1，
+        # 但 apk 不会自动 enable /etc/init.d 下的脚本）。
+        cat > "$STAGE/post-install" <<'POSTINST'
+#!/bin/sh
+[ -x /etc/init.d/taygedo ] || exit 0
+/etc/init.d/taygedo enable
+if [ "$(uci -q get taygedo.main.enabled)" != "0" ]; then
+    /etc/init.d/taygedo start 2>/dev/null
+fi
+exit 0
+POSTINST
+        chmod 755 "$STAGE/post-install"
+
         APK="$OUT/${LUCI_NAME}_${VER}-r${REL}_${ARCH}.apk"
         "$APKBIN" mkpkg \
             --info "name:$LUCI_NAME" \
@@ -212,6 +240,7 @@ EOF
             --info "url:https://github.com/LianXia233/taygedo-CI" \
             --info "origin:$LUCI_NAME" \
             --files "$PKGROOT" \
+            --script "post-install:$STAGE/post-install" \
             --output "$APK"
         rm -rf "$STAGE"
         echo "built: $APK"

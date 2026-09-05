@@ -4,6 +4,20 @@
 
 > 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.4.11`。
 
+## [0.4.12] - 2026-09-06
+
+### 修复
+
+- **OpenWrt 安装后 LuCI 页面不可用（实机复现）**：UCI 默认配置 `enabled '0'` 且 `opkg` / `apk` 安装时**不会**自动 enable `/etc/init.d` 下的脚本，导致装完包后服务既未启动也未注册开机自启，LuCI 页面对 8787 端口 API 的 fetch 全部失败，表现为「无法使用」。三处修复：
+  1. 默认配置改为 `enabled '1'`（本包定位即 LuCI 集成服务，`no_auth` 默认 1 与之配套）；
+  2. `scripts/package.sh` 的 ipk 分支新增 `postinst`（opkg 在 control.tar.gz 中执行）、apk 分支新增 `--script post-install`（APKv3 metadata 携带）：安装时自动 `/etc/init.d/taygedo enable`，并在 `taygedo.main.enabled != 0` 时立即 `start`——用户显式停用的场景不受影响；
+  3. LuCI 页面探测失败时区分两种情况：fetch 连接失败（TypeError）= 服务未运行 → 新增「服务未运行」引导页（含重试按钮与 SSH 启用命令）；HTTP 非 2xx（如未开免鉴权被拒）→ 维持原「免鉴权」引导页，不再误导用户去改 `no_auth`。
+
+### 变更
+
+- 新增 `.gitattributes` 强制 LF 行尾：`package.sh` 在 CI/OpenWrt 上运行，CRLF 会导致 shebang 失效与 apk 脚本解析失败，从源头杜绝 Windows checkout 造成的行尾问题。
+- `openwrt/luci-app-taygedo/Makefile` 的 `PKG_VERSION` 从 `0.4.9` 对齐到 `0.4.11`（预编译二进制下载指向当前已发布 tag）。
+
 ## [0.4.11] - 2026-08-31
 
 ### 修复

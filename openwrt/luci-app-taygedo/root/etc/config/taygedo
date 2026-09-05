@@ -1,6 +1,8 @@
 config taygedo 'main'
 	# 服务级配置（LuCI 与 WebUI 解耦：UCI 只管服务本身）
-	option enabled '0'
+	# 默认启用：本包为 LuCI 集成服务，安装后由 post-install 自动 enable + start。
+	# 如需停用：uci set taygedo.main.enabled=0 && uci commit taygedo
+	option enabled '1'
 	option port '8787'
 	option data_dir '/etc/taygedo'
 	option web_password ''

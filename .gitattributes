@@ -1,0 +1,7 @@
+# 统一 LF 行尾：打包脚本（package.sh）在 CI 与 OpenWrt 上运行，
+# CRLF 会导致 shebang 失效（#!/bin/sh\r）与 apk mkpkg 脚本解析失败。
+* text=auto eol=lf
+
+# Windows 侧专用文件保留 CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf

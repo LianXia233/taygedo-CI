@@ -8,6 +8,7 @@ PROG=/usr/bin/taygedo-rs
 
 start_service() {
     local enabled port data_dir web_password no_auth
+    local crypto_policy lan_cidrs lan_no_auth
     config_load 'taygedo'
     config_get_bool enabled 'main' 'enabled' 0
     [ "$enabled" -eq 0 ] && return 0
@@ -16,11 +17,18 @@ start_service() {
     config_get data_dir 'main' 'data_dir' '/etc/taygedo'
     config_get web_password 'main' 'web_password' ''
     config_get_bool no_auth 'main' 'no_auth' 1
+    config_get crypto_policy 'main' 'crypto_policy' 'auto'
+    config_get lan_cidrs 'main' 'lan_cidrs' ''
+    config_get_bool lan_no_auth 'main' 'lan_no_auth' 1
 
     [ -d "$data_dir" ] || mkdir -p "$data_dir"
+    # 密钥目录权限：长期身份私钥落在此目录，必须仅 root 可读。
+    # overlayfs 上首次创建时补设 700，避免升级/重建后继承宽松权限。
+    chmod 700 "$data_dir" 2>/dev/null
 
     # 职责划分（LuCI 与 WebUI 解耦）：
-    # - UCI 只管「服务级」配置：启停 / 端口 / 数据目录 / WebUI 密码 / 免鉴权开关；
+    # - UCI 只管「服务级」配置：启停 / 端口 / 数据目录 / WebUI 密码 /
+    #   免鉴权开关 / 加密策略与内网网段；
     # - 「业务级」配置（默认签到时间 / 金币任务 / 云时长 / 分享平台）统一由
     #   config.json 管理，LuCI 页面与独立 WebUI 都通过 /api/config 读写同一份数据，
     #   二者数据互通、互不覆盖。重启服务不会再用 UCI 旧值覆盖 WebUI 的修改。
@@ -30,7 +38,11 @@ start_service() {
     procd_set_param env \
         TAYGEDO_LISTEN="0.0.0.0:${port}" \
         TAYGEDO_DATA_DIR="$data_dir" \
-        TAYGEDO_NO_AUTH="$no_auth"
+        TAYGEDO_NO_AUTH="$no_auth" \
+        TAYGEDO_CRYPTO_POLICY="$crypto_policy" \
+        TAYGEDO_LAN_NO_AUTH="$lan_no_auth"
+    # 空值不传，交由后端回落到内置默认网段（避免传空串把白名单清空）
+    [ -n "$lan_cidrs" ] && procd_append_param env TAYGEDO_LAN_CIDRS="$lan_cidrs"
     [ -n "$web_password" ] && procd_append_param env TAYGEDO_WEB_PASSWORD="$web_password"
     procd_set_param respawn 3600 5 5
     procd_set_param stdout 1

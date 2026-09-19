@@ -7,6 +7,7 @@ mod protocol;
 mod runner;
 mod scheduler;
 mod service;
+mod session;
 mod store;
 mod time;
 mod web;
@@ -48,9 +49,17 @@ async fn main() {
     };
 
     let auth_note = if state.no_auth {
-        "免鉴权模式 (无需登录)".to_string()
+        "免鉴权模式 (内网放行)".to_string()
     } else {
-        "默认账号: admin / admin".to_string()
+        "账号密码登录".to_string()
+    };
+
+    // 读取加密策略用于横幅展示（不暴露任何密钥材料）
+    let crypto_policy = state.config.read().await.crypto_policy.clone();
+    let crypto_note = match crypto_policy.as_str() {
+        "always" => "应用层加密: 强制 (X25519+AES-256-GCM)",
+        "never" => "应用层加密: 已关闭",
+        _ => "应用层加密: 内网明文/外网强制",
     };
 
     println!("╔════════════════════════════════════════════╗");
@@ -59,8 +68,24 @@ async fn main() {
     println!("║  访问地址: {:<34} ║", display_url);
     println!("║  {}{:.<39}║", listen_note, "");
     println!("║  鉴权: {:<38} ║", auth_note);
+    println!("║  {}{:.<39}║", crypto_note, "");
     println!("║  数据目录: {:<35} ║", data_dir);
     println!("╚════════════════════════════════════════════╝");
+
+    // 初始随机口令：仅在 stdout 出现一次，**不写入日志缓冲区**（日志可经 API 读取）。
+    if let Some(pwd) = state.initial_password.as_deref() {
+        println!();
+        println!("┌────────────────────────────────────────────────────────────┐");
+        println!("│  首次启动：已生成随机 WebUI 登录口令（请立即记录并妥善保管）  │");
+        println!("│                                                            │");
+        println!("│    账号: admin                                             │");
+        println!("│    口令: {:<48} │", pwd);
+        println!("│                                                            │");
+        println!("│  该口令仅在此处显示一次，不会写入日志或配置文件明文。        │");
+        println!("│  登录后请立即在「设置 → 修改账号密码」中修改。               │");
+        println!("└────────────────────────────────────────────────────────────┘");
+        println!();
+    }
 
     // Windows 桌面端：启动后自动用默认浏览器打开 WebUI。
     // 服务器 / OpenWrt / Docker 无桌面环境，仅在 Windows 下执行，避免无意义弹窗。
@@ -93,5 +118,12 @@ async fn main() {
         });
     }
 
-    axum::serve(listener, app).await.expect("服务运行失败");
+    // 通过 into_make_service_with_connect_info 注入来源地址，
+    // 供免鉴权 LAN 判定与握手限速使用。
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("服务运行失败");
 }

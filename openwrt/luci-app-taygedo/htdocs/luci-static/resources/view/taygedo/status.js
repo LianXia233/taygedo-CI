@@ -339,12 +339,24 @@ function settingsModalHtml() {
 		'      <div class="tgd-field"><label>分享平台</label><input class="tgd-input" id="tgd-cfg-share" placeholder="qq / wechat / weibo"></div>',
 		'      <button class="tgd-btn tgd-primary" id="tgd-cfg-save" style="width:100%">保存</button>',
 		'      <hr class="tgd-divider">',
+		'      <div class="tgd-section-title">传输加密</div>',
+		'      <div class="tgd-field"><label>加密策略</label>',
+		'        <select class="tgd-input" id="tgd-cfg-crypto-policy">',
+		'          <option value="auto">auto - 内网明文、外网强制加密</option>',
+		'          <option value="always">always - 始终强制加密</option>',
+		'          <option value="never">never - 始终明文（仅限可信内网）</option>',
+		'        </select></div>',
+		'      <div class="tgd-field"><label>本机内网网段（逗号分隔 CIDR）</label><input class="tgd-input" id="tgd-cfg-lan-cidrs" placeholder="192.168.0.0/16,10.0.0.0/8"></div>',
+		'      <div class="tgd-switch-row"><span class="tgd-txt">内网免鉴权放行</span><label class="tgd-switch"><input type="checkbox" id="tgd-cfg-lan-noauth"><span class="tgd-slider"></span></label></div>',
+		'      <button class="tgd-btn tgd-primary" id="tgd-crypto-save" style="width:100%">保存加密设置</button>',
+		'      <hr class="tgd-divider">',
 		'      <div id="tgd-pwd-section">',
 		'      <div class="tgd-section-title">修改登录账号密码</div>',
-		'      <div class="tgd-field"><label>账号</label><input class="tgd-input" id="tgd-old-user" value="admin" autocomplete="username"></div>',
-		'      <div class="tgd-field"><label>原密码</label><input class="tgd-input" id="tgd-old-pwd" type="password" autocomplete="current-password"></div>',
-		'      <div class="tgd-field"><label>新密码（至少 6 位）</label><input class="tgd-input" id="tgd-new-pwd" type="password" autocomplete="new-password"></div>',
-		'      <button class="tgd-btn" id="tgd-pwd-save" style="width:100%">修改账号密码</button>',
+		'      <div class="tgd-field"><label>新账号名（留空则不修改）</label><input class="tgd-input" id="tgd-new-user" autocomplete="username" placeholder="至少 3 位，字母/数字/_-."></div>',
+		'      <div class="tgd-field"><label>当前密码</label><input class="tgd-input" id="tgd-old-pwd" type="password" autocomplete="current-password"></div>',
+		'      <div class="tgd-field"><label>新密码（至少 8 位）</label><input class="tgd-input" id="tgd-new-pwd" type="password" autocomplete="new-password"></div>',
+		'      <div class="tgd-field"><label>确认新密码</label><input class="tgd-input" id="tgd-new-pwd2" type="password" autocomplete="new-password"></div>',
+		'      <button class="tgd-btn tgd-danger" id="tgd-pwd-save" style="width:100%">修改后所有会话将失效</button>',
 		'      </div>',
 		'    </div>',
 		'  </div>',
@@ -391,6 +403,7 @@ function bindMainEvents() {
 	document.getElementById('tgd-send-code').addEventListener('click', sendCode);
 	document.getElementById('tgd-login-submit').addEventListener('click', addAccount);
 	document.getElementById('tgd-cfg-save').addEventListener('click', saveConfig);
+	document.getElementById('tgd-crypto-save').addEventListener('click', saveCrypto);
 	document.getElementById('tgd-pwd-save').addEventListener('click', changePassword);
 }
 
@@ -594,9 +607,16 @@ function openSettings() {
 		document.getElementById('tgd-cfg-coin').checked = !!cfg.coin_tasks;
 		document.getElementById('tgd-cfg-cloud').checked = !!cfg.cloud_duration;
 		document.getElementById('tgd-cfg-share').value = cfg.share_platform || 'qq';
-		document.getElementById('tgd-old-user').value = 'admin';
+		var policySel = document.getElementById('tgd-cfg-crypto-policy');
+		if (policySel) policySel.value = cfg.crypto_policy || 'auto';
+		var cidrs = document.getElementById('tgd-cfg-lan-cidrs');
+		if (cidrs) cidrs.value = cfg.lan_cidrs || '';
+		var lna = document.getElementById('tgd-cfg-lan-noauth');
+		if (lna) lna.checked = (cfg.lan_no_auth !== false);
+		document.getElementById('tgd-new-user').value = '';
 		document.getElementById('tgd-old-pwd').value = '';
 		document.getElementById('tgd-new-pwd').value = '';
+		document.getElementById('tgd-new-pwd2').value = '';
 		document.getElementById('tgd-settings-modal').classList.add('tgd-show');
 	}).catch(function (e) { TGD.toast(e.message, 'tgd-err'); });
 }
@@ -614,15 +634,37 @@ function saveConfig() {
 	}).catch(function (e) { TGD.toast(e.message, 'tgd-err'); });
 }
 
+// 加密设置保存：策略变更会使服务端作废全部加密会话，保存后需重新握手
+function saveCrypto() {
+	TGD.api('/api/config', 'POST', {
+		crypto_policy: document.getElementById('tgd-cfg-crypto-policy').value,
+		lan_cidrs: document.getElementById('tgd-cfg-lan-cidrs').value.trim(),
+		lan_no_auth: document.getElementById('tgd-cfg-lan-noauth').checked
+	}).then(function () {
+		TGD.toast('加密设置已保存', 'tgd-ok');
+	}).catch(function (e) { TGD.toast(e.message, 'tgd-err'); });
+}
+
+// 改密：身份由服务端会话解析，前端不再回传用户名（仅回传新账号名作为目标值）
 function changePassword() {
-	var oldUser = document.getElementById('tgd-old-user').value.trim() || 'admin';
+	var newUser = document.getElementById('tgd-new-user').value.trim();
 	var oldPwd = document.getElementById('tgd-old-pwd').value;
 	var newPwd = document.getElementById('tgd-new-pwd').value;
-	if (!oldPwd || !newPwd) { TGD.toast('请输入原密码和新密码', 'tgd-err'); return; }
-	TGD.api('/api/password', 'POST', { username: oldUser, old_password: oldPwd, new_password: newPwd }).then(function () {
-		TGD.toast('账号密码已修改', 'tgd-ok');
+	var newPwd2 = document.getElementById('tgd-new-pwd2').value;
+	if (!oldPwd) { TGD.toast('请输入当前密码', 'tgd-err'); return; }
+	if (!newPwd) { TGD.toast('请输入新密码', 'tgd-err'); return; }
+	if (newPwd.length < 8) { TGD.toast('新密码至少 8 位', 'tgd-err'); return; }
+	if (newPwd !== newPwd2) { TGD.toast('两次输入的新密码不一致', 'tgd-err'); return; }
+	if (newPwd === oldPwd) { TGD.toast('新密码不能与当前密码相同', 'tgd-err'); return; }
+	var body = { old_password: oldPwd, new_password: newPwd };
+	if (newUser) body.new_username = newUser;
+	TGD.api('/api/password', 'POST', body).then(function () {
+		document.getElementById('tgd-new-user').value = '';
 		document.getElementById('tgd-old-pwd').value = '';
 		document.getElementById('tgd-new-pwd').value = '';
+		document.getElementById('tgd-new-pwd2').value = '';
+		closeModal('tgd-settings-modal');
+		TGD.toast('账号密码已修改，请用新凭据重新登录', 'tgd-ok');
 	}).catch(function (e) { TGD.toast(e.message, 'tgd-err'); });
 }
 
@@ -631,6 +673,31 @@ function startPoll() {
 	pollTimer = setInterval(function () {
 		loadLogs();
 	}, 3000);
+}
+
+/*
+ * 应用层加密客户端懒加载。
+ *
+ * LuCI 视图是 ES module，无法用 <script src> 直接引入后端提供的
+ * 全局脚本，故按需动态注入。脚本从后端同源（apiBase + /static/...）
+ * 加载，只有后端确实提供该资源时才会成功，旧版本后端会 404 —— 此时
+ * 保持为 null，调用方自动回退明文（与 crypto_policy=never 语义一致）。
+ *
+ * 安全性：免鉴权（OpenWrt 专享）场景下后端 crypto_policy 通常为 auto
+ * 且来源属内网，脚本加载失败不影响功能；若后端强制加密（always），
+ * 明文请求会被 428 拒绝，此处会给出明确提示而非静默失败。
+ */
+function ensureCryptoClient() {
+	if (window.TaygedoCrypto) { return Promise.resolve(true); }
+	var src = TGD.getApiBase() + '/static/taygedo-crypto.js';
+	return new Promise(function (resolve) {
+		var el = document.createElement('script');
+		el.src = src;
+		el.async = true;
+		el.onload = function () { resolve(!!window.TaygedoCrypto); };
+		el.onerror = function () { resolve(false); };
+		document.head.appendChild(el);
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -659,6 +726,14 @@ return view.extend({
 		//   fetch 连接失败（TypeError）= 服务根本没在跑 → 服务未运行引导页；
 		//   HTTP 非 2xx = 服务在跑但返回异常（如未开免鉴权被 401 拒绝）→ 免鉴权引导页。
 		probe.catch(function (e) {
+			// 428 Precondition Required = 后端强制应用层加密，而明文探测被拒。
+			// 先尝试装载加密客户端再重试，成功则进入主界面；失败才报引导页。
+			if (e && /HTTP 428/.test(e.message || '')) {
+				ensureCryptoClient().then(function (ok) {
+					if (ok) { renderMain(); } else { renderNoAuth(); }
+				});
+				return;
+			}
 			console.error('taygedo probe:', e);
 			if (e instanceof TypeError) { renderServiceDown(); }
 			else { renderNoAuth(); }

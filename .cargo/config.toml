@@ -9,3 +9,39 @@ index = "https://rsproxy.cn/crates.io-index"
 
 [net]
 git-fetch-with-cli = true
+
+# ── AArch64（OpenWrt 路由器）加密加速 ────────────────────────────────────────
+#
+# 背景：`aes` crate 的后端选择是一个**编译期 cfg 门控**（见 aes-0.8.4/src/lib.rs）：
+#
+#     if cfg(all(target_arch = "aarch64", aes_armv8, not(aes_force_soft))) {
+#         mod armv8; mod autodetect;    // ARMv8 AES 指令 + 运行时探测
+#     } else if cfg(any(target_arch = "x86", target_arch = "x86_64"), ...) {
+#         mod autodetect; mod ni;       // x86 默认就走 AES-NI
+#     } else {
+#         pub use soft::*;              // ← aarch64 不开 aes_armv8 就落到这里
+#     }
+#
+# 也就是说：**x86_64 默认自带 AES-NI，而 aarch64 必须显式打开 `aes_armv8`**，
+# 否则 AES-256-GCM 会退化为纯软件查表实现。两个后果：
+#
+#   1. 性能：ARMv8 AES 指令 vs 软件查表，吞吐差距可达一个数量级，
+#      而这是本服务每个请求的必经路径。
+#   2. 安全：`soft` 后端是表驱动实现，查表索引与密钥/数据相关，
+#      存在 cache-timing 侧信道（这正是 AES-NI / ARMv8 AES 指令要消除的）。
+#
+# 打开 `aes_armv8` 后走的是 `armv8 + autodetect` 分支：**运行时**探测
+# CPU 是否支持 AES 指令，不支持则自动回落到软件实现 —— 因此不会出现
+# 非法指令崩溃，对老 CPU 也是安全的。
+#
+# 路由器实测（ImmortalWrt SNAPSHOT / mediatek filogic / aarch64_cortex-a53）：
+#   /proc/cpuinfo 的 Features 含 `aes` 与 `pmull`，硬件加速路径可用。
+#
+# 注意：此处若写了 `[target.<triple>.rustflags]`，cargo 会**忽略**同名环境的
+# RUSTFLAGS（target-specific 配置优先级更高）。若要临时追加其他 flags，
+# 请一并写在这个数组里，不要指望用环境变量叠加。
+[target.aarch64-unknown-linux-musl]
+rustflags = ["--cfg", "aes_armv8"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["--cfg", "aes_armv8"]

@@ -10,3 +10,21 @@ config taygedo 'main'
 	# 业务配置（默认签到时间/金币任务/云时长/分享平台）统一在 config.json 中管理，
 	# LuCI 页面与独立 WebUI 均通过 /api/config 读写，二者数据互通、互不覆盖。
 	option no_auth '1'
+
+	# ---- 应用层加密（X25519 + HKDF-SHA256 + AES-256-GCM）----
+	# 加密策略，三选一：
+	#   auto   —— 内网（见 lan_cidrs）明文直通，非内网来源强制加密（默认，最省 CPU）
+	#   always —— 所有来源都要求加密，未加密请求返回 428
+	#   never  —— 关闭应用层加密（仅排障/兼容旧客户端时使用）
+	# 注意：LuCI 页面走内网，auto 下不会被强制加密，功能不受影响；
+	#       若设为 always，LuCI 页面会自动加载加密客户端后再请求。
+	option crypto_policy 'auto'
+
+	# 内网网段（逗号分隔 CIDR）。用于两处判定：
+	#   1) 免鉴权模式是否放行该来源；2) auto 策略下是否豁免加密。
+	# 留空则回落到内置默认：RFC1918 三段 + loopback + IPv6 ULA/链路本地。
+	option lan_cidrs ''
+
+	# 内网来源是否享受免鉴权放行。设为 0 后即使 no_auth=1，非内网来源也不放行，
+	# 可防止「免鉴权开关误开 + 服务暴露到公网」演变为完全开放。
+	option lan_no_auth '1'

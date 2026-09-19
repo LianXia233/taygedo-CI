@@ -442,20 +442,44 @@ header, .card, .stat, .panel, .modal, .login-card {
       <button class="btn primary" id="cfgSave">保存</button>
 
       <hr class="divider">
-      <div class="section-title">修改登录账号密码</div>
+      <div class="section-title">传输加密</div>
       <div class="field">
-        <label>账号</label>
-        <input class="input" id="oldUser" value="admin" autocomplete="username">
+        <label>加密策略（crypto_policy）</label>
+        <select class="input" id="cfgCryptoPolicy">
+          <option value="auto">auto - 内网明文、外网强制加密</option>
+          <option value="always">always - 始终强制加密</option>
+          <option value="never">never - 始终明文（仅限可信内网）</option>
+        </select>
       </div>
       <div class="field">
-        <label>原密码</label>
+        <label>本机内网网段（lan_cidrs，逗号分隔）</label>
+        <input class="input" id="cfgLanCidrs" placeholder="192.168.0.0/16,10.0.0.0/8">
+      </div>
+      <div class="switch-row">
+        <span class="txt">内网免鉴权放行（lan_no_auth）</span>
+        <label class="switch"><input type="checkbox" id="cfgLanNoAuth"><span class="slider"></span></label>
+      </div>
+      <button class="btn primary" id="cryptoSave">保存加密设置</button>
+
+      <hr class="divider">
+      <div class="section-title">修改登录账号密码</div>
+      <div class="field">
+        <label>新账号名</label>
+        <input class="input" id="newUser" autocomplete="username" placeholder="留空则不修改账号">
+      </div>
+      <div class="field">
+        <label>当前密码</label>
         <input class="input" type="password" id="oldPwd" autocomplete="current-password">
       </div>
       <div class="field">
-        <label>新密码（至少 6 位）</label>
+        <label>新密码（至少 8 位）</label>
         <input class="input" type="password" id="newPwd" autocomplete="new-password">
       </div>
-      <button class="btn" id="pwdSave">修改账号密码</button>
+      <div class="field">
+        <label>确认新密码</label>
+        <input class="input" type="password" id="newPwd2" autocomplete="new-password">
+      </div>
+      <button class="btn danger" id="pwdSave">修改后所有会话将失效</button>
 
       <hr class="divider">
       <button class="btn danger" id="logoutBtn">退出登录</button>
@@ -465,10 +489,14 @@ header, .card, .stat, .panel, .modal, .login-card {
 
 <div class="toast" id="toast"></div>
 
+<script src="/static/taygedo-crypto.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 let currentMode = 'password';
 let token = localStorage.getItem('taygedo_token') || '';
+/* 应用层加密客户端：握手 + 加解密由 static/taygedo-crypto.js 提供 */
+const cryptoClient = (window.TaygedoCrypto ? TaygedoCrypto.create({ baseUrl: '' }) : null);
+let metaInfo = {};
 let sendCodeTimer = null;
 const AVATAR_DATA_URI = 'data:image/png;base64,' +
   'iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAYAAACtWK6eAAAACXBIWXMAAAsTAAALEwEAmpwYAAAg' +
@@ -495,18 +523,50 @@ function showMain() {
   $('mainScreen').style.display = '';
 }
 
+/**
+ * 统一 API 调用。
+ *
+ * - 若存在加密客户端，则交由它处理握手/加解密/序号管理；
+ * - 否则回退为明文 fetch（兼容不支持 WebCrypto 的旧浏览器与内网免加密场景）。
+ * - 401 时统一清理本地 token，避免失效凭据被反复重发。
+ */
 async function api(path, method, body) {
-  const opts = { method, headers: {} };
-  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
-  if (body !== undefined) {
-    opts.headers['Content-Type'] = 'application/json';
-    opts.body = JSON.stringify(body);
+  const headers = {};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+
+  let res;
+  if (cryptoClient) {
+    res = await cryptoClient.request(path, method || 'GET', body, headers);
+  } else {
+    const opts = { method: method || 'GET', headers };
+    if (body !== undefined && method !== 'GET') {
+      headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    const r = await fetch(path, opts);
+    const data = await r.json().catch(() => ({}));
+    res = { ok: r.ok, status: r.status, data };
   }
-  const r = await fetch(path, opts);
-  if (r.status === 401) { showLogin(); throw new Error('未登录或登录已过期'); }
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
-  return data;
+
+  if (res.status === 401) {
+    // 凭据失效：清除本地残留，避免继续携带无效 token
+    clearToken();
+    showLogin();
+    throw new Error('未登录或登录已过期');
+  }
+  if (!res.ok) {
+    const err = new Error((res.data && res.data.error) || ('HTTP ' + res.status));
+    err.data = res.data;
+    throw err;
+  }
+  return res.data;
+}
+
+/** 清除本地登录凭据（含加密会话）。 */
+function clearToken() {
+  token = '';
+  localStorage.removeItem('taygedo_token');
+  if (cryptoClient) cryptoClient.reset();
 }
 
 async function doLogin(e) {
@@ -517,20 +577,36 @@ async function doLogin(e) {
   const btn = $('loginBtn');
   btn.disabled = true; btn.textContent = '登录中...';
   try {
-    const r = await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: user, password: pwd }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || '登录失败');
+    // 登录请求同样走加密通道：口令绝不以明文出网
+    let r, j;
+    if (cryptoClient) {
+      // 依服务端策略决定是否需要握手（内网 auto 模式下可省略）
+      await cryptoClient.ready(false);
+      const res = await cryptoClient.request('/api/login', 'POST', { username: user, password: pwd });
+      r = { ok: res.ok, status: res.status };
+      j = res.data || {};
+      if (!res.ok) throw new Error(j.error || '登录失败');
+    } else {
+      const resp = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: user, password: pwd }),
+      });
+      j = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(j.error || '登录失败');
+    }
     token = j.token;
     localStorage.setItem('taygedo_token', token);
     $('loginPwd').value = '';
+    // 初始随机口令：提示必须修改
+    if (j.must_change_password) {
+      toast('当前为初始随机口令，请前往「设置」修改', 'err');
+    } else {
+      toast('登录成功', 'ok');
+    }
     showMain();
     loadAccounts();
     loadLogs();
-    toast('登录成功', 'ok');
   } catch (err) {
     toast(err.message, 'err');
   }
@@ -766,7 +842,10 @@ async function openSettings() {
     $('cfgCoin').checked = !!loadedCfg.coin_tasks;
     $('cfgCloud').checked = !!loadedCfg.cloud_duration;
     $('cfgShare').value = loadedCfg.share_platform || 'qq';
-    $('oldUser').value = 'admin'; $('oldPwd').value = ''; $('newPwd').value = '';
+    $('oldPwd').value = ''; $('newPwd').value = ''; $('newPwd2').value = ''; $('newUser').value = '';
+    $('cfgCryptoPolicy').value = loadedCfg.crypto_policy || (metaInfo.crypto_policy || 'auto');
+    $('cfgLanCidrs').value = loadedCfg.lan_cidrs || '';
+    $('cfgLanNoAuth').checked = (loadedCfg.lan_no_auth !== false);
     openModal('settingsModal');
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -785,23 +864,51 @@ $('cfgSave').addEventListener('click', async () => {
   } catch (e) { toast(e.message, 'err'); }
 });
 
-/* change password */
-$('pwdSave').addEventListener('click', async () => {
-  const oldUser = $('oldUser').value.trim() || 'admin';
-  const oldPwd = $('oldPwd').value;
-  const newPwd = $('newPwd').value;
-  if (!oldPwd || !newPwd) { toast('请输入原密码和新密码', 'err'); return; }
+/* 加密策略保存：策略变更会重建服务端加密上下文，保存后重新握手 */
+$('cryptoSave').addEventListener('click', async () => {
+  const policy = $('cfgCryptoPolicy').value;
   try {
-    await api('/api/password', 'POST', { username: oldUser, old_password: oldPwd, new_password: newPwd });
-    toast('账号密码已修改', 'ok');
-    $('oldPwd').value = ''; $('newPwd').value = '';
+    await api('/api/config', 'POST', {
+      crypto_policy: policy,
+      lan_cidrs: $('cfgLanCidrs').value.trim(),
+      lan_no_auth: $('cfgLanNoAuth').checked,
+    });
+    toast('加密设置已保存', 'ok');
+    // 策略变更会使服务端作废全部加密会话，本地同步重置并重新握手
+    if (cryptoClient) cryptoClient.reset();
+    await loadMeta();
+    await api('/api/accounts', 'GET');
   } catch (e) { toast(e.message, 'err'); }
 });
 
-/* logout */
-$('logoutBtn').addEventListener('click', () => {
-  token = '';
-  localStorage.removeItem('taygedo_token');
+/* 改密：身份由服务端会话解析，前端不再传 username；成功后所有会话（含加密会话）被吊销 */
+$('pwdSave').addEventListener('click', async () => {
+  const newUser = $('newUser').value.trim();
+  const oldPwd = $('oldPwd').value;
+  const newPwd = $('newPwd').value;
+  const newPwd2 = $('newPwd2').value;
+  if (!oldPwd) { toast('请输入当前密码', 'err'); return; }
+  if (!newPwd) { toast('请输入新密码', 'err'); return; }
+  if (newPwd.length < 8) { toast('新密码至少 8 位', 'err'); return; }
+  if (newPwd !== newPwd2) { toast('两次输入的新密码不一致', 'err'); return; }
+  if (newPwd === oldPwd) { toast('新密码不能与当前密码相同', 'err'); return; }
+  const body = { old_password: oldPwd, new_password: newPwd };
+  if (newUser) body.new_username = newUser;
+  try {
+    await api('/api/password', 'POST', body);
+    $('oldPwd').value = ''; $('newPwd').value = ''; $('newPwd2').value = ''; $('newUser').value = '';
+    closeModal('settingsModal');
+    // 服务端已吊销全部会话：本地凭据必须同步失效，强制重新登录
+    clearToken();
+    showLogin();
+    toast('账号密码已修改，请用新凭据重新登录', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+});
+
+/* logout：先请求服务端吊销会话，再清理本地（服务端不可达也必须清理本地） */
+$('logoutBtn').addEventListener('click', async () => {
+  try { await api('/api/logout', 'POST'); } catch (e) { /* 忽略：退出必须成功 */ }
+  clearToken();
   showLogin();
   toast('已退出登录');
 });
@@ -822,9 +929,24 @@ applyTheme(localStorage.getItem('taygedo-theme') || 'light');
 $('refreshLogsBtn').addEventListener('click', loadLogs);
 $('loginForm').addEventListener('submit', doLogin);
 
+/**
+ * 拉取服务端加密策略与运行状态。
+ *
+ * /api/meta 属免鉴权路由（仅暴露策略开关，不含任何业务数据），
+ * 用于决定是否必须建立加密通道。失败不阻断流程，按 auto 处理。
+ */
+async function loadMeta() {
+  try {
+    const r = await fetch('/api/meta', { method: 'GET' });
+    if (r.ok) metaInfo = await r.json();
+  } catch (e) { /* 旧版本无该路由：按 auto 处理 */ }
+  return metaInfo;
+}
+
 /* init */
 (async function init() {
-  // 免鉴权模式（TAYGEDO_NO_AUTH=1）：跳过登录，直接进入主界面。
+  await loadMeta();
+  // 免鉴权模式（TAYGEDO_NO_AUTH=1 / 内网放行）：跳过登录，直接进入主界面。
   // 探测用 /api/config（所有版本都有该路由）：免鉴权时裸请求即 200，
   // 需鉴权时返回 401 —— 与 LuCI 版探测方式保持一致（/api/meta 在部分
   // 运行版本中不存在，会导致免鉴权探测失败而误入登录页）。
@@ -843,6 +965,9 @@ $('loginForm').addEventListener('submit', doLogin);
     showMain();
     loadAccounts();
     loadLogs();
+    if (metaInfo.must_change_password) {
+      toast('当前为初始随机口令，请前往「设置」修改', 'err');
+    }
   } catch (e) {
     showLogin();
   }

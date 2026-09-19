@@ -1,6 +1,6 @@
 [package]
 name = "taygedo-rs"
-version = "0.4.12"
+version = "0.5.0"
 edition = "2021"
 description = "塔吉多自动签到 - Rust 重写版，带 WebUI 管理界面"
 license = "GPL-3.0-only"
@@ -25,6 +25,11 @@ rand = "0.8"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 url = "2"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+hkdf = "0.12"
+subtle = "2"
+zeroize = { version = "1", features = ["derive"] }
+ipnet = "2"
 
 [profile.release]
 strip = true

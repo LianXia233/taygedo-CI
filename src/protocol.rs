@@ -141,3 +141,81 @@ pub fn now_millis() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
 }
+
+// ---------------------------------------------------------------------------
+// 应用层会话加密原语（X25519 + HKDF-SHA256）
+// ---------------------------------------------------------------------------
+
+/// 生成 X25519 私钥（32 字节密码学随机，clamping 由 dalek 内部完成）。
+pub fn x25519_generate_secret() -> [u8; 32] {
+    use rand::RngCore;
+    let mut buf = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut buf);
+    buf
+}
+
+/// 由私钥推导公钥。
+pub fn x25519_public_from_secret(secret: &[u8; 32]) -> [u8; 32] {
+    use x25519_dalek::{PublicKey, StaticSecret};
+    let sk = StaticSecret::from(*secret);
+    PublicKey::from(&sk).to_bytes()
+}
+
+/// 生成 32 字节随机数据（X25519 私钥等）。
+///
+/// 预留：供需要独立随机源的新协议扩展使用；当前握手路径直接用
+/// `x25519_generate_secret()`，session 层用 `crypto::random_hex` / `random_bytes`。
+#[allow(dead_code)]
+pub fn random_32() -> [u8; 32] {
+    use rand::RngCore;
+    let mut buf = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut buf);
+    buf
+}
+
+/// X25519 ECDH：返回共享密钥。
+///
+/// 结果为全零时返回 `None`——全零共享密钥意味着对端提交了低阶点，
+/// 属主动攻击特征，必须拒绝而非静默使用。
+pub fn x25519_diffie_hellman(
+    our_secret: &[u8; 32],
+    peer_public: &[u8; 32],
+) -> Option<[u8; 32]> {
+    use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
+    let sk = StaticSecret::from(*our_secret);
+    let pk = PublicKey::from(*peer_public);
+    let shared: SharedSecret = sk.diffie_hellman(&pk);
+    if shared.as_bytes().iter().all(|b| *b == 0) {
+        None
+    } else {
+        Some(shared.to_bytes())
+    }
+}
+
+/// HKDF-SHA256 派生指定长度的密钥。
+///
+/// `salt` 必须包含双方公钥（提供会话绑定性，抵御未知密钥共享攻击），
+/// `info` 用作域分隔，保证同一共享密钥派生出不同用途的子密钥。
+pub fn hkdf_sha256(
+    ikm: &[u8],
+    salt: &[u8],
+    info: &[u8],
+    out_len: usize,
+) -> Vec<u8> {
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+    let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
+    let mut out = vec![0u8; out_len];
+    hk.expand(info, &mut out).expect("HKDF 输出长度合法");
+    out
+}
+
+/// 恒定时间比较（转发，便于 protocol 层直接使用）。
+///
+/// 预留：供后续在 protocol 层做密钥/摘要比对时复用；
+/// 当前所有比较都直接走 `crypto::constant_time_eq`。
+#[allow(dead_code)]
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    crate::crypto::constant_time_eq(a, b)
+}
+

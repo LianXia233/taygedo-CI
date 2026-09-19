@@ -18,6 +18,15 @@
 			"ubus": {
 				"service": [ "restart", "reload" ]
 			}
-		}
+		},
+		"note": [
+			"本包不通过 rpcd/ubus 代理任何业务数据：账号、签到状态与日志均由",
+			"taygedo-rs 自己的 HTTP API 提供（LuCI 页面直接 fetch :8787）。",
+			"因此 ACL 只需 UCI 读写（改端口/免鉴权/加密策略）+ service 重启权限。",
+			"刻意**不**授予 /etc/taygedo/** 的文件读写：该目录含 config.json",
+			"（账号与加密后的凭据）与 keyring.json（长期身份私钥），若经 rpcd",
+			"暴露为可读，任何拥有 taygedo ACL 的 LuCI 用户都能导出私钥。",
+			"改口令/改账号请走页面内的 HTTP API（需口令校验），不经文件通道。"
+		]
 	}
 }

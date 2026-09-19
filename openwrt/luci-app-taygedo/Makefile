@@ -13,7 +13,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-taygedo
-PKG_VERSION:=0.4.11
+PKG_VERSION:=0.5.0
 PKG_RELEASE:=1
 PKG_LICENSE:=GPL-3.0
 PKG_LICENSE_FILES:=LICENSE
@@ -53,6 +53,18 @@ define Package/luci-app-taygedo
   URL:=$(TAYGEDO_REPO)
   DEPENDS:=+ca-bundle +luci-base
   PKGARCH:=all
+endef
+
+# 升级保留清单：
+# - /etc/config/taygedo  —— UCI 服务级配置（端口/免鉴权/加密策略等）
+# - /etc/taygedo/*       —— 业务配置 config.json、账号、keyring.json（长期身份私钥）
+#
+# 说明：/etc/taygedo 是运行期数据目录而非包内文件，opkg/apk 默认不会删除
+# 未知文件，因此天然保留。此处显式声明 conffiles 是为了让 **UCI 配置** 在
+# 升级时走"保留用户修改、仅合入新增默认项"的标准流程；否则新版新增的
+# crypto_policy / lan_cidrs 等选项会被安装为默认值而覆盖用户设置。
+define Package/luci-app-taygedo/conffiles
+/etc/config/taygedo
 endef
 
 define Package/luci-app-taygedo/description

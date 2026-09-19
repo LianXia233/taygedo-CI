@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 348" width="100%" role="img">
+<style>
+text{font-family:'PingFang SC','Microsoft YaHei','Noto Sans SC','Hiragino Sans GB',sans-serif}
+@media (prefers-color-scheme: dark){
+g.s-blue>rect,g.s-blue>circle,g.s-blue>polygon{fill:#042C53;stroke:#85B7EB}
+g.s-blue>text{fill:#B5D4F4}
+g.s-teal>rect,g.s-teal>circle,g.s-teal>polygon{fill:#04342C;stroke:#5DCAA5}
+g.s-teal>text{fill:#9FE1CB}
+g.s-amber>rect,g.s-amber>circle,g.s-amber>polygon{fill:#412402;stroke:#EF9F27}
+g.s-amber>text{fill:#FAC775}
+g.s-purple>rect,g.s-purple>circle,g.s-purple>polygon{fill:#26215C;stroke:#AFA9EC}
+g.s-purple>text{fill:#CECBF6}
+g.s-coral>rect,g.s-coral>circle,g.s-coral>polygon{fill:#4A1B0C;stroke:#F0997B}
+g.s-coral>text{fill:#F5C4B3}
+g.s-gray>rect,g.s-gray>circle,g.s-gray>polygon{fill:#2C2C2A;stroke:#B4B2A9}
+g.s-gray>text{fill:#D3D1C7}
+g.s-red>rect,g.s-red>circle,g.s-red>polygon{fill:#501313;stroke:#F09595}
+g.s-red>text{fill:#F7C1C1}
+g.s-green>rect,g.s-green>circle,g.s-green>polygon{fill:#173404;stroke:#97C459}
+g.s-green>text{fill:#C0DD97}
+g.s-pink>rect,g.s-pink>circle,g.s-pink>polygon{fill:#4B1528;stroke:#ED93B1}
+g.s-pink>text{fill:#F4C0D1}
+g.s-neutral>rect{fill:#2C2C2A;stroke:#B4B2A9}
+g.s-neutral>text{fill:#D3D1C7}
+g.s-t1>text{fill:#F1EFE8}
+g.s-t2>text{fill:#B4B2A9}
+g.s-t3>text{fill:#888780}
+g.s-ln>line,g.s-ln>path{stroke:#B4B2A9}
+g.s-div>line{stroke:#444441}
+}
+</style>
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="ah2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#D85A30" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<g class="s-t1"><text x="40" y="30" font-size="15" font-weight="500" fill="#2C2C2A">源码结构：按职责分为五组</text></g>
+<g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">每组职责单一，加密相关逻辑集中在三个文件中。</text></g>
+<g class="s-blue">
+<rect x="40" y="74" width="178" height="96" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="129" y="94" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">入口与调度</text>
+<text x="129" y="114" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">main.rs 启动</text>
+<text x="129" y="132" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">scheduler.rs 定时</text>
+<text x="129" y="148" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">login.rs 设备身份</text>
+</g>
+<g class="s-teal">
+<rect x="251" y="74" width="178" height="96" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="340" y="94" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">业务执行</text>
+<text x="340" y="114" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">runner.rs 签到流程</text>
+<text x="340" y="132" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">api.rs 平台客户端</text>
+<text x="340" y="148" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">protocol.rs 签名</text>
+</g>
+<g class="s-coral">
+<rect x="462" y="74" width="178" height="96" rx="8" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
+<text x="551" y="94" font-size="14" font-weight="500" fill="#712B13" text-anchor="middle" dominant-baseline="central">加密与安全</text>
+<text x="551" y="114" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">session.rs 握手加解密</text>
+<text x="551" y="132" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">protocol.rs 密码学原语</text>
+<text x="551" y="148" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">crypto.rs 口令哈希</text>
+</g>
+<g class="s-purple">
+<rect x="40" y="196" width="178" height="96" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+<text x="129" y="216" font-size="14" font-weight="500" fill="#3C3489" text-anchor="middle" dominant-baseline="central">服务与存储</text>
+<text x="129" y="236" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">service.rs 状态与编排</text>
+<text x="129" y="254" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">store.rs 文件存储</text>
+<text x="129" y="270" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">models.rs 数据模型</text>
+</g>
+<g class="s-amber">
+<rect x="251" y="196" width="178" height="96" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="340" y="216" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">界面与集成</text>
+<text x="340" y="236" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">web.rs 路由与中间件</text>
+<text x="340" y="254" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">ui.html 自包含界面</text>
+<text x="340" y="270" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">static 加密客户端</text>
+</g>
+<g class="s-gray">
+<rect x="462" y="196" width="178" height="96" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+<text x="551" y="216" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">打包与流水线</text>
+<text x="551" y="236" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">workflows 交叉编译</text>
+<text x="551" y="254" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">scripts 打包脚本</text>
+<text x="551" y="270" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">openwrt LuCI 包</text>
+</g>
+<g class="s-t3"><text x="40" y="322" font-size="12" fill="#888780">加密链路的三个关键文件：session.rs 会话与握手、protocol.rs 密码学原语、crypto.rs 口令哈希。</text></g>
+</svg>

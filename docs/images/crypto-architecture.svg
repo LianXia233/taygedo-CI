@@ -1,97 +1,118 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 620" width="880" height="620" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
-  <title>taygedo 应用层端到端加密原理图</title>
-  <desc>展示浏览器前端与后端之间 X25519 密钥交换、HKDF 密钥派生、AES-256-GCM 加密通道的完整流程，以及加密边界所在位置</desc>
-
-  <defs>
-    <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M2 1L8 5L2 9" fill="none" stroke="#5f5e5a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-    <marker id="ar-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M2 1L8 5L2 9" fill="none" stroke="#a32d2d" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-    <marker id="ar-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M2 1L8 5L2 9" fill="none" stroke="#0f6e56" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-  </defs>
-
-  <rect width="880" height="620" fill="#ffffff"/>
-
-  <text x="40" y="46" font-size="21" font-weight="600" fill="#1a1a1a">taygedo 应用层端到端加密原理</text>
-  <text x="40" y="72" font-size="14" fill="#6b6b6b">加密位于「浏览器前端」与「后端服务」之间，两端各自持有明文，链路中间只有密文</text>
-  <line x1="40" y1="88" x2="840" y2="88" stroke="#1a1a1a" stroke-width="2"/>
-
-  <rect x="40" y="112" width="228" height="132" rx="10" fill="#e6f1fb" stroke="#185fa5" stroke-width="1"/>
-  <text x="154" y="139" text-anchor="middle" font-size="15" font-weight="600" fill="#042c53">浏览器前端</text>
-  <text x="154" y="162" text-anchor="middle" font-size="12.5" fill="#185fa5">WebUI / LuCI 页面</text>
-  <text x="154" y="183" text-anchor="middle" font-size="12.5" fill="#185fa5">taygedo-crypto.js</text>
-  <line x1="66" y1="198" x2="242" y2="198" stroke="#85b7eb" stroke-width="0.8"/>
-  <text x="154" y="215" text-anchor="middle" font-size="12" fill="#0c447c">持有：转瞬即逝的会话密钥</text>
-  <text x="154" y="233" text-anchor="middle" font-size="12" font-weight="600" fill="#a32d2d">此框内为明文</text>
-
-  <rect x="612" y="112" width="228" height="132" rx="10" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1"/>
-  <text x="726" y="139" text-anchor="middle" font-size="15" font-weight="600" fill="#04342c">后端服务</text>
-  <text x="726" y="162" text-anchor="middle" font-size="12.5" fill="#0f6e56">taygedo-rs (axum)</text>
-  <text x="726" y="183" text-anchor="middle" font-size="12.5" fill="#0f6e56">src/session.rs</text>
-  <line x1="638" y1="198" x2="814" y2="198" stroke="#5dcaa5" stroke-width="0.8"/>
-  <text x="726" y="215" text-anchor="middle" font-size="12" fill="#085041">持有：长期身份私钥 + 会话密钥</text>
-  <text x="726" y="233" text-anchor="middle" font-size="12" font-weight="600" fill="#a32d2d">此框内为明文</text>
-
-  <line x1="268" y1="150" x2="612" y2="150" stroke="#5f5e5a" stroke-width="1.6" marker-end="url(#ar)" marker-start="url(#ar)"/>
-  <text x="440" y="140" text-anchor="middle" font-size="13" font-weight="600" fill="#2c2c2a">加密通道</text>
-  <line x1="268" y1="196" x2="612" y2="196" stroke="#5f5e5a" stroke-width="1.6" marker-end="url(#ar)" marker-start="url(#ar)"/>
-
-  <rect x="286" y="216" width="308" height="34" rx="6" fill="#fcebeb" stroke="#a32d2d" stroke-width="1"/>
-  <text x="440" y="238" text-anchor="middle" font-size="12.5" font-weight="600" fill="#501313">链路上只有 AES-256-GCM 密文</text>
-
-  <line x1="330" y1="166" x2="330" y2="292" stroke="#b4b2a9" stroke-width="0.9" stroke-dasharray="4 3"/>
-  <line x1="550" y1="166" x2="550" y2="292" stroke="#b4b2a9" stroke-width="0.9" stroke-dasharray="4 3"/>
-  <line x1="330" y1="292" x2="550" y2="292" stroke="#b4b2a9" stroke-width="0.9" stroke-dasharray="4 3"/>
-  <text x="440" y="310" text-anchor="middle" font-size="12" fill="#6b6b6b">加密边界（位于 HTTP 之内，不是 TLS）</text>
-
-  <text x="40" y="364" font-size="15" font-weight="600" fill="#1a1a1a">握手阶段：协商密钥（仅一次）</text>
-
-  <rect x="40" y="382" width="196" height="60" rx="8" fill="#f1efe8" stroke="#888780" stroke-width="1"/>
-  <text x="138" y="406" text-anchor="middle" font-size="13" font-weight="600" fill="#2c2c2a">① 客户端发起</text>
-  <text x="138" y="426" text-anchor="middle" font-size="11.5" fill="#5f5e5a">发送临时公钥 + 随机数</text>
-
-  <line x1="236" y1="412" x2="284" y2="412" stroke="#5f5e5a" stroke-width="1.6" marker-end="url(#ar)"/>
-
-  <rect x="284" y="382" width="212" height="60" rx="8" fill="#e6f1fb" stroke="#185fa5" stroke-width="1"/>
-  <text x="390" y="406" text-anchor="middle" font-size="13" font-weight="600" fill="#042c53">② 服务端生成临时密钥对</text>
-  <text x="390" y="426" text-anchor="middle" font-size="11.5" fill="#185fa5">用完即弃，提供前向保密</text>
-
-  <line x1="496" y1="412" x2="544" y2="412" stroke="#5f5e5a" stroke-width="1.6" marker-end="url(#ar)"/>
-
-  <rect x="544" y="382" width="296" height="60" rx="8" fill="#faeeda" stroke="#854f0b" stroke-width="1"/>
-  <text x="692" y="406" text-anchor="middle" font-size="13" font-weight="600" fill="#412402">③ 双方各自推导同一组密钥</text>
-  <text x="692" y="426" text-anchor="middle" font-size="11.5" fill="#854f0b">X25519 → HKDF-SHA256 → 双向独立子密钥</text>
-
-  <text x="40" y="484" font-size="15" font-weight="600" fill="#1a1a1a">派生关系：域分离，双向密钥互不重叠</text>
-
-  <rect x="40" y="502" width="150" height="46" rx="7" fill="#f1efe8" stroke="#888780" stroke-width="1"/>
-  <text x="115" y="521" text-anchor="middle" font-size="12.5" font-weight="600" fill="#2c2c2a">共享密钥</text>
-  <text x="115" y="538" text-anchor="middle" font-size="11" fill="#5f5e5a">X25519 ECDH</text>
-
-  <line x1="190" y1="525" x2="232" y2="525" stroke="#5f5e5a" stroke-width="1.6" marker-end="url(#ar)"/>
-
-  <rect x="232" y="502" width="164" height="46" rx="7" fill="#faeeda" stroke="#854f0b" stroke-width="1"/>
-  <text x="314" y="521" text-anchor="middle" font-size="12.5" font-weight="600" fill="#412402">主密钥</text>
-  <text x="314" y="538" text-anchor="middle" font-size="11" fill="#854f0b">HKDF · aead</text>
-
-  <line x1="396" y1="514" x2="438" y2="506" stroke="#5f5e5a" stroke-width="1.6" marker-end="url(#ar)"/>
-  <line x1="396" y1="536" x2="438" y2="544" stroke="#5f5e5a" stroke-width="1.6" marker-end="url(#ar)"/>
-
-  <rect x="438" y="480" width="182" height="46" rx="7" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1"/>
-  <text x="529" y="499" text-anchor="middle" font-size="12.5" font-weight="600" fill="#04342c">请求方向密钥</text>
-  <text x="529" y="516" text-anchor="middle" font-size="11" fill="#0f6e56">HKDF · c2s</text>
-
-  <rect x="438" y="534" width="182" height="46" rx="7" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1"/>
-  <text x="529" y="553" text-anchor="middle" font-size="12.5" font-weight="600" fill="#04342c">响应方向密钥</text>
-  <text x="529" y="570" text-anchor="middle" font-size="11" fill="#0f6e56">HKDF · s2c</text>
-
-  <rect x="650" y="480" width="190" height="100" rx="7" fill="#eaf3de" stroke="#3b6d11" stroke-width="1"/>
-  <text x="745" y="503" text-anchor="middle" font-size="12.5" font-weight="600" fill="#173404">每个方向各自独立</text>
-  <text x="745" y="524" text-anchor="middle" font-size="11.5" fill="#3b6d11">密钥不同 · 随机数前缀不同</text>
-  <text x="745" y="544" text-anchor="middle" font-size="11.5" fill="#3b6d11">序号单调递增 · 拒绝重放</text>
-  <text x="745" y="564" text-anchor="middle" font-size="11.5" fill="#3b6d11">密文绑定会话与方向</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 574" width="100%" role="img">
+<style>
+text{font-family:'PingFang SC','Microsoft YaHei','Noto Sans SC','Hiragino Sans GB',sans-serif}
+@media (prefers-color-scheme: dark){
+g.s-blue>rect,g.s-blue>circle,g.s-blue>polygon{fill:#042C53;stroke:#85B7EB}
+g.s-blue>text{fill:#B5D4F4}
+g.s-teal>rect,g.s-teal>circle,g.s-teal>polygon{fill:#04342C;stroke:#5DCAA5}
+g.s-teal>text{fill:#9FE1CB}
+g.s-amber>rect,g.s-amber>circle,g.s-amber>polygon{fill:#412402;stroke:#EF9F27}
+g.s-amber>text{fill:#FAC775}
+g.s-purple>rect,g.s-purple>circle,g.s-purple>polygon{fill:#26215C;stroke:#AFA9EC}
+g.s-purple>text{fill:#CECBF6}
+g.s-coral>rect,g.s-coral>circle,g.s-coral>polygon{fill:#4A1B0C;stroke:#F0997B}
+g.s-coral>text{fill:#F5C4B3}
+g.s-gray>rect,g.s-gray>circle,g.s-gray>polygon{fill:#2C2C2A;stroke:#B4B2A9}
+g.s-gray>text{fill:#D3D1C7}
+g.s-red>rect,g.s-red>circle,g.s-red>polygon{fill:#501313;stroke:#F09595}
+g.s-red>text{fill:#F7C1C1}
+g.s-green>rect,g.s-green>circle,g.s-green>polygon{fill:#173404;stroke:#97C459}
+g.s-green>text{fill:#C0DD97}
+g.s-pink>rect,g.s-pink>circle,g.s-pink>polygon{fill:#4B1528;stroke:#ED93B1}
+g.s-pink>text{fill:#F4C0D1}
+g.s-neutral>rect{fill:#2C2C2A;stroke:#B4B2A9}
+g.s-neutral>text{fill:#D3D1C7}
+g.s-t1>text{fill:#F1EFE8}
+g.s-t2>text{fill:#B4B2A9}
+g.s-t3>text{fill:#888780}
+g.s-ln>line,g.s-ln>path{stroke:#B4B2A9}
+g.s-div>line{stroke:#444441}
+}
+</style>
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="ah2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#D85A30" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<g class="s-t1"><text x="40" y="30" font-size="16" font-weight="500" fill="#2C2C2A">taygedo 应用层端到端加密原理</text></g>
+<g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">加密位于浏览器前端与后端服务之间：两端各自持有明文，链路中间只有密文。</text></g>
+<g class="s-blue">
+<rect x="40" y="74" width="200" height="96" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="140" y="94" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">浏览器前端</text>
+<text x="140" y="114" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">WebUI / LuCI 页面</text>
+<text x="140" y="132" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">持有会话密钥</text>
+<text x="140" y="148" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">此框内为明文</text>
+</g>
+<g class="s-teal">
+<rect x="440" y="74" width="200" height="96" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="540" y="94" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">后端服务</text>
+<text x="540" y="114" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">taygedo-rs（axum）</text>
+<text x="540" y="132" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">持有身份私钥与会话密钥</text>
+<text x="540" y="148" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">此框内为明文</text>
+</g>
+<g class="s-red">
+<rect x="276" y="96" width="128" height="52" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text x="340" y="112" font-size="14" font-weight="500" fill="#501313" text-anchor="middle" dominant-baseline="central">HTTP 链路</text>
+<text x="340" y="132" font-size="12" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">只有密文</text>
+</g>
+<g class="s-ln"><line x1="242" y1="122" x2="274" y2="122" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-ln"><line x1="406" y1="122" x2="438" y2="122" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<line class="s-ln" x1="260" y1="188" x2="420" y2="188" stroke="#B4B2A9" stroke-width="0.9" stroke-dasharray="4 3"/>
+<g class="s-t2"><text x="340" y="206" font-size="12" fill="#5F5E5A">加密边界位于 HTTP 之内，不是 TLS</text></g>
+<g class="s-div"><line x1="40" y1="226" x2="640" y2="226" stroke="#D3D1C7" stroke-width="0.5"/></g>
+<g class="s-t1"><text x="40" y="252" font-size="15" font-weight="500" fill="#2C2C2A">握手阶段：协商密钥，每个会话执行一次</text></g>
+<g class="s-gray">
+<rect x="40" y="268" width="178" height="62" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+<text x="129" y="288" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">① 客户端发起</text>
+<text x="129" y="308" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">临时公钥 + 随机数</text>
+</g>
+<g class="s-ln"><line x1="220" y1="299" x2="249" y2="299" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-blue">
+<rect x="251" y="268" width="178" height="62" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="340" y="288" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">② 服务端应答</text>
+<text x="340" y="308" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">临时密钥对，用完即弃</text>
+</g>
+<g class="s-ln"><line x1="431" y1="299" x2="460" y2="299" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-amber">
+<rect x="462" y="268" width="178" height="62" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="551" y="288" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">③ 双方各自推导</text>
+<text x="551" y="308" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">X25519 得到同一共享秘密</text>
+</g>
+<g class="s-div"><line x1="40" y1="356" x2="640" y2="356" stroke="#D3D1C7" stroke-width="0.5"/></g>
+<g class="s-t1"><text x="40" y="382" font-size="15" font-weight="500" fill="#2C2C2A">密钥派生：域分离，双向材料互不重叠</text></g>
+<g class="s-gray">
+<rect x="40" y="398" width="150" height="52" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+<text x="115" y="414" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">共享秘密</text>
+<text x="115" y="434" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">X25519 ECDH</text>
+</g>
+<g class="s-ln"><line x1="192" y1="424" x2="220" y2="424" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-amber">
+<rect x="222" y="398" width="150" height="52" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="297" y="414" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">主密钥</text>
+<text x="297" y="434" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">HKDF aead</text>
+</g>
+<g class="s-ln"><line x1="374" y1="410" x2="402" y2="410" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-ln"><line x1="374" y1="438" x2="402" y2="438" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-teal">
+<rect x="404" y="386" width="150" height="48" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="479" y="400" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">请求方向密钥</text>
+<text x="479" y="420" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">HKDF c2s</text>
+</g>
+<g class="s-teal">
+<rect x="404" y="444" width="150" height="48" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="479" y="458" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">响应方向密钥</text>
+<text x="479" y="478" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">HKDF s2c</text>
+</g>
+<g class="s-green">
+<rect x="566" y="386" width="74" height="106" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="603" y="412" font-size="14" font-weight="500" fill="#173404" text-anchor="middle" dominant-baseline="central">每方向</text>
+<text x="603" y="432" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">密钥不同</text>
+<text x="603" y="448" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">前缀不同</text>
+<text x="603" y="466" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">序号递增</text>
+</g>
+<g class="s-t3"><text x="40" y="528" font-size="12" fill="#888780">序号仅接受大于上次值，且验签通过后才推进，因此重放同一密文会被拒绝。</text></g>
+<g class="s-t3"><text x="40" y="550" font-size="12" fill="#888780">会话密钥过期或超限即擦除；长期身份私钥不参与派生，历史抓包无法解密。</text></g>
 </svg>

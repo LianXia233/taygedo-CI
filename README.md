@@ -16,6 +16,10 @@
 
 全程只需要浏览器操作：添加账号、设置签到时间、看日志、改配置，都在 WebUI 界面里完成。
 
+![安装路径选择](docs/images/install-path.svg)
+
+*按运行环境选择安装方式与包格式。*
+
 | 步骤 | Windows | Debian / Ubuntu | OpenWrt |
 | --- | --- | --- | --- |
 | ① 下载 | 到 [Releases](https://github.com/LianXia233/taygedo-CI/releases) 下载 zip 并解压 | 下载 `.deb` | 下载对应架构的 `.ipk` / `.apk` |
@@ -31,6 +35,10 @@
 ---
 
 ## 功能特性
+
+![系统架构](docs/images/architecture.svg)
+
+*界面层与执行层通过 REST API 通信；本机数据由执行层独占读写。*
 
 - **开箱即用，零门槛**：单文件程序，解压即用；所有功能都有图形界面，无需配置文件、无需命令行知识。
 - **多账号**：任意数量的游戏账号，各自独立登录态。
@@ -99,7 +107,7 @@
 ```powershell
 $env:TAYGEDO_LISTEN = "0.0.0.0:8787"        # 监听端口（默认 8787）
 $env:TAYGEDO_DATA_DIR = "D:\taygedo-data"    # 数据目录（默认 .\data）
-$env:TAYGEDO_WEB_PASSWORD = "你的密码"         # 初始登录密码（默认 admin）
+$env:TAYGEDO_WEB_PASSWORD = "你的密码"         # 可选：指定初始登录口令（不设则随机生成）
 .\taygedo-rs.exe
 ```
 
@@ -148,7 +156,7 @@ sudo systemctl edit taygedo-rs
 [Service]
 Environment=TAYGEDO_LISTEN=0.0.0.0:8787
 Environment=TAYGEDO_DATA_DIR=/var/lib/taygedo
-Environment=TAYGEDO_WEB_PASSWORD=你的初始密码
+Environment=TAYGEDO_WEB_PASSWORD=你的初始密码   # 可选；不设置则首次启动随机生成
 ```
 
 保存后：
@@ -267,6 +275,10 @@ logread | grep taygedo
 
 **多账号**：重复「添加账号」，每个账号独立登录态与签到时间。
 
+![每日签到执行流程](docs/images/signin-flow.svg)
+
+*调度器按北京时间触发；已完成的账号自动跳过，任一环节失败都会写入日志。*
+
 ---
 
 ## 从源码构建
@@ -293,7 +305,7 @@ cargo run --release
 | --- | --- | --- |
 | `TAYGEDO_LISTEN` | `0.0.0.0:8787` | 监听地址 |
 | `TAYGEDO_DATA_DIR` | `data` | 数据目录 |
-| `TAYGEDO_WEB_PASSWORD` | `admin` | WebUI 初始登录密码（账号默认 `admin`） |
+| `TAYGEDO_WEB_PASSWORD` | 无 | 可选。指定 WebUI 初始登录口令。**不设置时由 CSPRNG 随机生成、仅打印一次**，不存在固定默认口令。仅在首次初始化（`config.json` 中尚无口令哈希）时生效，落地后改此项无效 |
 | `TAYGEDO_DEFAULT_SCHEDULE` | 无 | 覆盖默认签到时间 |
 | `TAYGEDO_COIN_TASKS` | 无 | 覆盖金币任务开关（true/false） |
 | `TAYGEDO_CLOUD_DURATION` | 无 | 覆盖云时长开关（true/false） |
@@ -380,6 +392,10 @@ openwrt/luci-app-taygedo/
 | 防重放 | 每方向单调递增 `seq` | 仅接受 `seq > last_seq`，且**验签通过后**才推进计数 |
 | 密钥销毁 | `zeroize` | 会话过期（30 分钟）或请求数超限（20 万次）即销毁并擦除 |
 
+![密钥派生链](docs/images/key-derivation.svg)
+
+*握手每会话一次；四个方向的材料由同一共享秘密按用途分离，互不通用。*
+
 **为什么选它**：X25519 在 aarch64 cortex-a53 上单次约 50 μs 量级，HKDF 与 AES-GCM 均
 可走硬件加速（ARMv8 有 AES/PMULL 指令）。相比 ChaCha20-Poly1305，二者安全强度等价，
 但 AES-GCM 在支持 AES 指令的 ARM64 路由器上吞吐更高；在不支持 AES 加速的老旧 MIPS 上，
@@ -400,6 +416,10 @@ ChaCha20-Poly1305 反而更快，**但它同时失去硬件卸载优势且改动
 ### `crypto_policy`：何时强制加密
 
 OpenWrt / 内网场景若一刀切强制加密，会破坏免鉴权直连的便利性。因此引入策略开关：
+
+![crypto_policy 加密策略判定](docs/images/crypto-policy.svg)
+
+*判定在服务端中间件内完成，基于真实对端 IP，前端无法绕过或伪造来源。*
 
 | 取值 | 行为 | 适用场景 |
 | --- | --- | --- |
@@ -459,7 +479,8 @@ LuCI 页面走的是 `rpcd`/`ubus` 调用 + `luci-app-taygedo` 自带 ACL，加�
 | `src/store.rs` | `keyring.json` 读写与权限加固 |
 | `src/models.rs` | `Config` 新增 `crypto_policy` / `lan_no_auth` / `lan_cidrs` / `web_password_version` 等字段 |
 | `static/taygedo-crypto.js` | 新增。浏览器端 WebCrypto 加密客户端 |
-| `docs/images/crypto-architecture.svg` | 新增。本文档的原理图 |
+| `docs/images/crypto-architecture.svg` | 新增。本文档的加密原理图 |
+| `docs/images/*.svg` | 新增。README 的架构与流程图形共 7 张 |
 | `src/ui.html` | 设置面板新增加密策略、内网白名单、免鉴权开关；改密支持改账号 |
 | `openwrt/.../status.js` | LuCI 页面同步支持上述配置与改密 |
 
@@ -524,6 +545,10 @@ LuCI 页面走的是 `rpcd`/`ubus` 调用 + `luci-app-taygedo` 自带 ACL，加�
 
 ## 数据与兼容性
 
+![数据目录构成](docs/images/data-files.svg)
+
+*四个文件构成完整状态，全部位于数据目录内；备份该目录即可完整迁移。*
+
 - `data/accounts.json`：账号列表，字段与上游 `accounts.json` 完全兼容。可直接把上游已登录的账号文件复制过来复用（`refreshToken` / `laohuToken` 会自动续期）。
 - `data/config.json`：全局配置（凭据密钥、默认签到时间、各账号签到时间、开关、Web 账号密码哈希）。
 - `data/state.json`：每日签到状态（按「账号 + 日期」去重，避免重复签到）。
@@ -538,6 +563,10 @@ LuCI 页面走的是 `rpcd`/`ubus` 调用 + `luci-app-taygedo` 自带 ACL，加�
 ---
 
 ## API 一览
+
+![请求处理链](docs/images/auth-layers.svg)
+
+*加密闸门决定「能否读懂正文」，鉴权闸门决定「能否执行操作」，两者独立生效。*
 
 除 `/api/login`、`/api/crypto/handshake` 外，所有 API 需携带 `Authorization: Bearer <token>`。
 
@@ -562,6 +591,10 @@ LuCI 页面走的是 `rpcd`/`ubus` 调用 + `luci-app-taygedo` 自带 ACL，加�
 ---
 
 ## 目录结构
+
+![源码结构分组](docs/images/source-map.svg)
+
+*每组职责单一；加密相关逻辑集中在 `session.rs`、`protocol.rs`、`crypto.rs` 三个文件中。*
 
 ```
 src/

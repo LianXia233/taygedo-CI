@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 282" width="100%" role="img">
+<style>
+text{font-family:'PingFang SC','Microsoft YaHei','Noto Sans SC','Hiragino Sans GB',sans-serif}
+@media (prefers-color-scheme: dark){
+g.s-blue>rect,g.s-blue>circle,g.s-blue>polygon{fill:#042C53;stroke:#85B7EB}
+g.s-blue>text{fill:#B5D4F4}
+g.s-teal>rect,g.s-teal>circle,g.s-teal>polygon{fill:#04342C;stroke:#5DCAA5}
+g.s-teal>text{fill:#9FE1CB}
+g.s-amber>rect,g.s-amber>circle,g.s-amber>polygon{fill:#412402;stroke:#EF9F27}
+g.s-amber>text{fill:#FAC775}
+g.s-purple>rect,g.s-purple>circle,g.s-purple>polygon{fill:#26215C;stroke:#AFA9EC}
+g.s-purple>text{fill:#CECBF6}
+g.s-coral>rect,g.s-coral>circle,g.s-coral>polygon{fill:#4A1B0C;stroke:#F0997B}
+g.s-coral>text{fill:#F5C4B3}
+g.s-gray>rect,g.s-gray>circle,g.s-gray>polygon{fill:#2C2C2A;stroke:#B4B2A9}
+g.s-gray>text{fill:#D3D1C7}
+g.s-red>rect,g.s-red>circle,g.s-red>polygon{fill:#501313;stroke:#F09595}
+g.s-red>text{fill:#F7C1C1}
+g.s-green>rect,g.s-green>circle,g.s-green>polygon{fill:#173404;stroke:#97C459}
+g.s-green>text{fill:#C0DD97}
+g.s-pink>rect,g.s-pink>circle,g.s-pink>polygon{fill:#4B1528;stroke:#ED93B1}
+g.s-pink>text{fill:#F4C0D1}
+g.s-neutral>rect{fill:#2C2C2A;stroke:#B4B2A9}
+g.s-neutral>text{fill:#D3D1C7}
+g.s-t1>text{fill:#F1EFE8}
+g.s-t2>text{fill:#B4B2A9}
+g.s-t3>text{fill:#888780}
+g.s-ln>line,g.s-ln>path{stroke:#B4B2A9}
+g.s-div>line{stroke:#444441}
+}
+</style>
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <marker id="ah2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#D85A30" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<g class="s-t1"><text x="40" y="30" font-size="15" font-weight="500" fill="#2C2C2A">每日签到执行流程</text></g>
+<g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">调度器按北京时间触发；已完成的账号自动跳过，不重复执行。</text></g>
+<g class="s-purple">
+<rect x="40" y="74" width="140" height="62" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+<text x="110" y="86" font-size="14" font-weight="500" fill="#3C3489" text-anchor="middle" dominant-baseline="central">定时触发</text>
+<text x="110" y="106" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">北京时间 UTC+8</text>
+<text x="110" y="123" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">支持启动补签</text>
+</g>
+<g class="s-ln"><line x1="182" y1="105" x2="214" y2="105" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-blue">
+<rect x="216" y="74" width="140" height="62" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text x="286" y="86" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">读取签到状态</text>
+<text x="286" y="106" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">按账号 + 日期</text>
+<text x="286" y="123" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">去重判断</text>
+</g>
+<g class="s-ln"><line x1="358" y1="105" x2="390" y2="105" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-teal">
+<rect x="392" y="74" width="140" height="62" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="462" y="94" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">登录态校验</text>
+<text x="462" y="114" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">Token 有效性</text>
+</g>
+<g class="s-ln"><line x1="534" y1="105" x2="566" y2="105" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-gray">
+<rect x="568" y="74" width="72" height="62" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+<text x="604" y="94" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">续期</text>
+<text x="604" y="114" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">三级回退</text>
+</g>
+<g class="s-ln"><line x1="604" y1="138" x2="604" y2="168" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-amber">
+<rect x="500" y="170" width="140" height="62" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text x="570" y="182" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">执行签到</text>
+<text x="570" y="202" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">APP + 逐游戏</text>
+<text x="570" y="219" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">金币 + 云时长</text>
+</g>
+<g class="s-ln"><line x1="498" y1="201" x2="466" y2="201" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-coral">
+<rect x="326" y="170" width="140" height="62" rx="8" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
+<text x="396" y="182" font-size="14" font-weight="500" fill="#712B13" text-anchor="middle" dominant-baseline="central">写回状态</text>
+<text x="396" y="202" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">state.json</text>
+<text x="396" y="219" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">记录日志</text>
+</g>
+<g class="s-ln"><line x1="324" y1="201" x2="292" y2="201" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
+<g class="s-green">
+<rect x="152" y="170" width="140" height="62" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text x="222" y="190" font-size="14" font-weight="500" fill="#173404" text-anchor="middle" dominant-baseline="central">完成</text>
+<text x="222" y="210" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">本日不再触发</text>
+</g>
+<g class="s-t3"><text x="40" y="256" font-size="12" fill="#888780">任一环节失败都会写入日志，可在 WebUI 或 LuCI 页面查看并手动重试。</text></g>
+</svg>

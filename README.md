@@ -1,318 +1,285 @@
+<div align="center">
+
 # 塔吉多自动签到 (Rust 版)
 
-基于 Rust 重写的塔吉多（幻塔 / 异环等）每日自动签到工具，主打**简单易用、零门槛**：下载一个文件、双击运行，剩下的全部在一个现代化、**带登录鉴权**、**手机/PC 自适应**的 WebUI 图形界面里点点鼠标完成 —— 不需要命令行参数、不需要编辑配置文件、不懂技术也能上手，并支持 **OpenWrt 主线**集成（含 LuCI）。
+基于 Rust 重写的塔吉多（幻塔 / 异环等）每日全自动签到工具，主打**简单易用、零门槛运行**。
 
-**并且是端到端加密的**：WebUI / LuCI 与后端之间的请求与响应正文走 **X25519 + HKDF-SHA256 + AES-256-GCM** 应用层加密通道，即使有人在同一网络里抓包，也拿不到你的登录口令、Token 与账号数据。详见[应用层加密](#应用层加密)（含原理图）。
+[![Rust Version](https://img.shields.io/badge/Language-Rust-dea584?style=flat-square&logo=rust)](https://www.rust-lang.org/)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square)](./LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20|%20Linux%20|%20OpenWrt-lightgrey?style=flat-square)](#安装教程)
+[![Security: E2EE](https://img.shields.io/badge/Security-E2EE%20(X25519%20+%20AES--GCM)-green?style=flat-square)](#应用层加密)
+[![Release](https://img.shields.io/badge/Release-v0.5.0-orange?style=flat-square)](https://github.com/LianXia233/taygedo-CI/releases)
 
-> 📦 各平台安装包见 [Releases](https://github.com/LianXia233/taygedo-CI/releases)
->
-> Releases 分两条轨道：**正式版**（tag 形如 `v0.4.11`，稳定、推荐生产使用）与 **`nightly`**（滚动预发布，每次手动构建覆盖更新，仅供尝鲜）。日常使用请选正式版，或直接访问 [Latest Release](https://github.com/LianXia233/taygedo-CI/releases/latest)。
+<p align="center">
+  下载单文件、双击即启，全部操作在现代化、带登录鉴权、自适应的 WebUI 中完成。<br>
+  深度适配 <b>OpenWrt 主线与原生 LuCI</b>，内置端到端应用层加密通道。
+</p>
 
-> 上游参考：[zzstar101/taygedo-auto-attendance](https://github.com/zzstar101/taygedo-auto-attendance)（TypeScript 版，**MIT 许可**）。本版将其核心逻辑用 Rust 重写，上游的 MIT 版权与许可声明保留在 [`src/upstream/`](./src/upstream/)；本项目自身代码以 **GPL-3.0** 发布，详见文末[许可证](#许可证)。
+</div>
+
+---
+
+> [!TIP]
+> **应用层端到端加密保障**  
+> WebUI / LuCI 与后端之间的请求与响应正文传输采用 **X25519 + HKDF-SHA256 + AES-256-GCM** 应用层加密通道。即使在公共网络、镜像端口或共享 Wi-Fi 下被动抓包，攻击者也无法窃取登录口令、Token 与账号隐私数据。详见 [应用层加密](#应用层加密)。
+
+> [!NOTE]
+> **版本发布轨道**  
+> - **正式版**（如 `v0.4.11`、`v0.5.0`）：稳定，推荐生产环境使用。访问 [Latest Release](https://github.com/LianXia233/taygedo-CI/releases/latest)。  
+> - **`nightly` 版**：滚动预发布，每次手动触发构建后覆盖更新，供快速尝鲜。  
+> 
+> 📦 各平台安装包见 [Releases](https://github.com/LianXia233/taygedo-CI/releases)。上游逻辑参考 [zzstar101/taygedo-auto-attendance](https://github.com/zzstar101/taygedo-auto-attendance)（TypeScript 版，MIT 许可）。本项目自身代码以 **GPL-3.0** 发布，详见 [许可证](#许可证)。
 
 ---
 
 ## 三步上手（零门槛）
 
-全程只需要浏览器操作：添加账号、设置签到时间、看日志、改配置，都在 WebUI 界面里完成。
+全程通过浏览器完成：添加账号、设置签到时间、查看审计日志与全局配置均在 Web 界面搞定。
 
-![安装路径选择](docs/images/install-path.svg)
+<div align="center">
+  <img src="docs/images/install-path.svg" alt="安装路径选择" width="800" style="max-width: 100%; height: auto;" />
+  <p><sub>图 1：按运行环境选择安装方式与包格式</sub></p>
+</div>
 
-*按运行环境选择安装方式与包格式。*
+| 步骤 | Windows | Debian / Ubuntu | OpenWrt (软路由 / 硬件路由) |
+| :---: | :--- | :--- | :--- |
+| **① 下载** | 到 [Releases](https://github.com/LianXia233/taygedo-CI/releases) 下载 zip 并解压 | 下载对应架构的 `.deb` 包 | 下载对应架构的 `.ipk` 或 `.apk` |
+| **② 运行** | **双击 `taygedo-rs.exe`**<br>*(自动唤起默认浏览器)* | `sudo dpkg -i taygedo-rs_*.deb`<br>`sudo systemctl enable --now taygedo-rs` | `opkg install` 或 `apk add`<br>*(安装完成后自动注册服务并启动)* |
+| **③ 使用** | 浏览器打开 `http://127.0.0.1:8787`，用**首次启动生成的随机初始口令**登录 | 浏览器打开 `http://<服务器IP>:8787`，输入 `journalctl` 打印的口令登录 | 进入 LuCI 菜单：**服务 → 塔吉多签到**<br>*(默认开启内网免密直连)* |
 
-| 步骤 | Windows | Debian / Ubuntu | OpenWrt |
-| --- | --- | --- | --- |
-| ① 下载 | 到 [Releases](https://github.com/LianXia233/taygedo-CI/releases) 下载 zip 并解压 | 下载 `.deb` | 下载对应架构的 `.ipk` / `.apk` |
-| ② 运行 | **双击 `taygedo-rs.exe`**（自动打开浏览器） | `sudo dpkg -i taygedo-rs_*.deb && sudo systemctl enable --now taygedo-rs` | `opkg install` / `apk add` 安装后自动注册开机自启并启动服务（0.4.12 起）；若服务未运行，执行 `/etc/init.d/taygedo enable && /etc/init.d/taygedo start` |
-| ③ 使用 | 浏览器打开 `http://127.0.0.1:8787`，用**首次启动生成的随机初始口令**登录（见下方说明），点「添加账号」即可 | 同左（把地址换成服务器 IP） | LuCI 页面直接管理 |
-
-> **关于初始口令**：0.5.0 起不再使用固定的 `admin/admin`。首次启动会生成一个高强度随机口令，**只在启动横幅（控制台 / 日志）打印一次**，登录后请立即在「设置」中修改。这样即使把服务暴露到公网，也不存在"默认弱口令"这一现成的攻破口。
-
-> **关于加密**：加密是**默认开启**的（`crypto_policy=auto`）。内网访问走明文直通以省 CPU，一旦来源不在内网白名单内就自动强制加密 —— 你不需要做任何配置，它自己会判断。
-
-就这么多 —— 之后每天会在你设定的时间自动签到，无需任何人工干预；手机浏览器同样可以打开管理界面。
+> [!IMPORTANT]
+> **关键安全须知**
+> - **初始随机口令**：从 `0.5.0` 起彻底弃用固定 `admin/admin`。首次启动会自动生成高强度随机口令，**仅在启动横幅（控制台 / 系统日志）中打印一次**，登录后请立即在「设置」中修改。
+> - **智能自适应加密**：加密默认开启（`crypto_policy=auto`）。局域网访问明文直通以节省嵌入式 CPU 算力，一旦请求来源脱离内网白名单便自动强制端到端加密，无需繁琐配置。
 
 ---
 
 ## 功能特性
 
-![系统架构](docs/images/architecture.svg)
+<div align="center">
+  <img src="docs/images/architecture.svg" alt="系统架构" width="800" style="max-width: 100%; height: auto;" />
+  <p><sub>图 2：系统架构（界面层与执行层通过 REST API 交互，本地状态独占落盘）</sub></p>
+</div>
 
-*界面层与执行层通过 REST API 通信；本机数据由执行层独占读写。*
+### 易用与交互
+- **开箱即用，零门槛**：单文件绿色分发，双击解压即用；所有操作集成于 Web 界面，无需配置复杂命令行参数。
+- **响应式现代化 UI**：自适应手机与 PC 视口，支持深浅色主题切换、精美毛玻璃背景卡片。
+- **实时日志看板**：WebUI 实时输出带毫秒级时间戳的详细流水审计日志。
 
-- **开箱即用，零门槛**：单文件程序，解压即用；所有功能都有图形界面，无需配置文件、无需命令行知识。
-- **多账号**：任意数量的游戏账号，各自独立登录态。
-- **两种登录方式**：
-  - 密码登录（密码用 `scrypt + AES-256-GCM` 加密后落盘，与上游格式兼容）。
-  - 短信验证码登录（WebUI 一键「发送验证码」→ 输入 → 登录）。
-- **每日定时签到**：每个账号可单独设置每天的签到时间（`HH:MM`），也可设置全局默认时间。调度器固定使用**北京时间（UTC+8）**，与设备系统时区无关 —— Windows / Linux / OpenWrt 各平台行为完全一致；若进程在设定时间之后才启动（开机、重启），会自动**补签**，不会错过当天任务；每账号每天只触发一次，已签到的账号自动跳过，不会重复签到。
-- **完整签到链路**：APP 签到、逐游戏签到（幻塔 1256 / 异环 1289 等，显示中文游戏名）、金币任务（签到/浏览/点赞/分享）、云异环时长。
-- **幽灵角色修复**：优先使用战绩卡（`getGameRecordCards`）作为角色↔游戏权威映射，避免 `getGameRoles` 返回幽灵角色导致整账号 `code=5050` 失败。
-- **会话自动续期**：`accessToken` 失效时自动 `refreshToken` → 失效再走 `laohuToken` 重建 → 有密码则密码重登。
-- **登录鉴权**：WebUI 与所有 API 需要账号密码登录（**首次启动生成随机初始口令**，仅打印一次；**scrypt（N=16384, r=8, p=1）+ 恒定时间比对**哈希，旧 `sha256` 单轮哈希在首次登录时自动升级为 scrypt），token 有效期 7 天，支持在线修改登录账号与密码，改密后**已签发的全部 token 立即失效**。登录接口带失败限速（触发返回 429）。
-- **免鉴权模式（可选）**：设置环境变量 `TAYGEDO_NO_AUTH=1`（OpenWrt 下在 UCI 配置 `option no_auth '1'`，**默认已开**）后，WebUI 与 LuCI 页面**无需登录**即可直接使用，适合内网自用场景。非内网来源即使开了该开关也不放行。
-- **应用层端到端加密（0.5.0 新增，默认开启）**：WebUI / LuCI 与后端之间的**请求与响应正文**使用 **X25519 密钥交换 + HKDF-SHA256 + AES-256-GCM** 加密，具备**前向保密**、**防重放**、**AAD 绑定**、**密钥零化**。经实测，被动抓包时口令与 Token **出现 0 次**（明文对照组各出现 1 次）。抓包者只能看到密文，看不到你登录了什么、查了哪些账号。详见[应用层加密](#应用层加密)。
-- **响应式界面**：手机 / PC 自适应布局，深浅色主题，背景壁纸（毛玻璃卡片）。
-- **实时日志**：WebUI 内置带时间戳的详细运行日志。
+### 账号与多模式登录
+- **多账号管理**：支持录入任意数量的游戏账号，独立调度、互相隔离。
+- **双模态认证**：
+  - **密码登录**：密码在本地经由 `scrypt + AES-256-GCM` 加密落盘，向下兼容上游数据格式。
+  - **短信验证码登录**：WebUI 支持一键下发短信验证码，快速免密授权。
 
-## 界面
+### 自动化调度与执行
+- **精确时区调度**：独立调度器严格锁死**北京时间（UTC+8）**运行，消除宿主机时区影响；跨平台（Windows / Linux / OpenWrt）触发时刻完全一致。
+- **开机与断网自动补签**：若设定时刻机器处于关机或离线状态，进程启动后自动完成当天**补签**；单账号单日严格触发一次，已签到自动跳过。
+- **全任务签到链路**：APP 每日签到、逐游戏打卡（幻塔 1256、异环 1289 等，呈现中文游戏名）、金币任务（打卡/浏览/点赞/分享）、云异环时长托管。
+- **幽灵角色阻断机制**：优先以 `getGameRecordCards` 战绩卡构建角色与游戏映射，避免 `getGameRoles` 偶发返回幽灵角色触发整账号 `code=5050` 报错。
+- **高可用会话自动续期**：`accessToken` 失效 $\rightarrow$ 自动调用 `refreshToken` $\rightarrow$ 失败再经由 `laohuToken` 重建会话 $\rightarrow$ 仍失败则通过加密凭据静默重登。
 
-![塔吉多自动签到 WebUI 预览](docs/images/webui-preview.jpg)
+### 安全防护与加固
+- **双重认证鉴权**：API 访问受 Token 鉴权保护（7 天有效期）。口令哈希使用 **scrypt（N=16384, r=8, p=1）+ 恒定时间比对**（旧 `sha256` 单轮哈希首次登录自动原地升级）。修改密码后已签发 Token 瞬间全部吊销，登录接口内置失败速率限制（HTTP 429）。
+- **内网免鉴权模式（可选）**：通过环境变量 `TAYGEDO_NO_AUTH=1` 或 OpenWrt UCI `option no_auth '1'`（默认已开）启用，内网环境直接免密控制。非内网来源严格阻断放行。
+- **应用层端到端加密**：全链路采用 **X25519 临时密钥交换 + HKDF-SHA256 + AES-256-GCM**，提供前向保密、单调递增 Nonce 防重放与 AAD 上下文绑定。实测嗅探环境下账号密码与 Token 暴露频次为 **0 次**。
 
-*WebUI 主界面预览：顶部统计（总账号 / 今日已签 / 待签到）、账号卡片与右侧带时间戳的实时运行日志。*
+---
 
-访问 `http://<host>:8787`，用**首次启动生成的随机初始口令**登录（程序启动时会在控制台/日志打印一次，并在 WebUI 顶部提示修改）：
+## 界面展示
 
-- 顶部统计：总账号 / 今日已签 / 待签到。
-- 账号卡片：自定义头像、**平台昵称**（无昵称时回退备注名）、每日签到时间（可改）、「立即签到」「删除」。
-- 「添加账号」弹窗：密码 / 验证码两种登录。
-- 「全局设置」：默认签到时间、金币任务、云时长开关、分享平台、修改密码、退出登录。
-- 右侧实时运行日志。
+<div align="center">
+  <img src="docs/images/webui-preview.jpg" alt="塔吉多自动签到 WebUI 预览" width="800" style="max-width: 100%; height: auto;" />
+  <p><sub>图 3：WebUI 主界面预览（看板统计、账号卡片与实时运行日志）</sub></p>
+</div>
+
+访问 `http://<host>:8787`，使用启动日志输出的随机初始口令登录：
+
+- **看板概览**：顶部展示账号总数、今日已完成与排队待签到统计。
+- **账号卡片**：展示专属头像、平台昵称（无昵称回退备注），支持单独定制执行时刻，提供「立即签到」与「删除」。
+- **凭据录入**：支持账号密码与短信验证码双向快捷绑定。
+- **全局控制面板**：配置默认执行时间、金币打卡任务、云游戏时长、分享平台、管理密码变更及安全退出。
+- **日志审计流**：右侧内置高刷新率实时运行终端。
 
 ---
 
 ## 安装教程
 
-### 下载对应平台的安装包
+### 平台包格式速查
 
-| 平台 | 文件 | 说明 |
-| --- | --- | --- |
-| Windows (64 位) | `taygedo-rs-windows-x86_64.zip` | 单文件可执行程序 |
-| Debian / Ubuntu (amd64) | `taygedo-rs_<版本>_amd64.deb` | 含 systemd 服务 |
-| OpenWrt (x86_64 软路由) | `luci-app-taygedo_<版本>-1_x86_64.ipk` 或 `.apk` | 含 LuCI + 二进制 |
-| OpenWrt (ARM64 路由器) | `luci-app-taygedo_<版本>-1_aarch64_cortex-a53.ipk` 或 `.apk` | 含 LuCI + 二进制 |
-| Linux 静态 (musl) | `taygedo-rs-<arch>-unknown-linux-musl.tar.gz` | 其他 Linux/容器通用 |
+| 平台环境 | 文件名格式 | 架构 / 说明 |
+| :--- | :--- | :--- |
+| **Windows (64 位)** | `taygedo-rs-windows-x86_64.zip` | 绿色解压即用单文件程序 |
+| **Debian / Ubuntu (amd64)** | `taygedo-rs_<版本>_amd64.deb` | 集成 systemd 服务与开机自启 |
+| **OpenWrt (x86_64 软路由)** | `luci-app-taygedo_<版本>-1_x86_64.[ipk/apk]` | 包含完整 LuCI 前端与后端守护 |
+| **OpenWrt (ARM64 路由)** | `luci-app-taygedo_<版本>-1_aarch64_cortex-a53.[ipk/apk]` | 适配 MT7986、Rockchip 等嵌入式平台 |
+| **Linux 通用 (musl)** | `taygedo-rs-<arch>-unknown-linux-musl.tar.gz` | 静态编译，适合容器及轻量发行版 |
 
-> OpenWrt 24.10 及以上用 **apk** 包，23.05 及以下用 **ipk** 包（opkg）。
+> [!NOTE]
+> OpenWrt **24.10 及以上**版本采用 `apk` 包管理器；OpenWrt **23.05 及以下**版本使用 `opkg` (`ipk`)。
+
+---
 
 ### Windows 安装
 
-**1. 下载解压**
+1. **下载解压**  
+   在 [Releases](https://github.com/LianXia233/taygedo-CI/releases) 下载 `taygedo-rs-windows-x86_64.zip` 并解压得到 `taygedo-rs.exe`。
 
-在 [Releases](https://github.com/LianXia233/taygedo-CI/releases) 下载 `taygedo-rs-windows-x86_64.zip`，解压得到 `taygedo-rs.exe`。
+2. **启动运行**  
+   - **方式一（快捷）**：直接双击 `taygedo-rs.exe`，启动后台服务并自动弹出浏览器。  
+   - **方式二（命令行推荐）**：打开 PowerShell 便于传参或观察启动输出：
+     ```powershell
+     # 启动服务
+     .\taygedo-rs.exe
 
-**2. 运行**
+     # 可选：自定义环境变量
+     $env:TAYGEDO_LISTEN = "0.0.0.0:8787"        # 自定义监听端口（默认 8787）
+     $env:TAYGEDO_DATA_DIR = "D:\taygedo-data"   # 自定义数据存储目录（默认 .\data）
+     $env:TAYGEDO_WEB_PASSWORD = "YourPassword"  # 可选：显式指定初始管理密码
+     .\taygedo-rs.exe
+     ```
 
-方式一（最简单）：双击 `taygedo-rs.exe`，弹出一个控制台窗口并启动服务。
+3. **进入管理页面**  
+   浏览器访问 `http://127.0.0.1:8787`，输入控制台打印的初始口令登录。
 
-方式二（推荐，便于自定义）：
+4. **开机自启（可选）**  
+   - 快捷方式放入自启目录：按 `Win + R` 输入 `shell:startup`，将 `taygedo-rs.exe` 的快捷方式粘贴进去。  
+   - 或使用「任务计划程序」创建登录触发的高权限任务。
 
-```powershell
-# 进入解压目录后运行
-.\taygedo-rs.exe
-```
+5. **局域网访问放行（可选）**  
+   ```powershell
+   netsh advfirewall firewall add rule name="taygedo" dir=in action=allow protocol=TCP localport=8787
+   ```
 
-可选环境变量：
+---
 
-```powershell
-$env:TAYGEDO_LISTEN = "0.0.0.0:8787"        # 监听端口（默认 8787）
-$env:TAYGEDO_DATA_DIR = "D:\taygedo-data"    # 数据目录（默认 .\data）
-$env:TAYGEDO_WEB_PASSWORD = "你的密码"         # 可选：指定初始登录口令（不设则随机生成）
-.\taygedo-rs.exe
-```
+### Debian / Ubuntu 安装
 
-**3. 访问 WebUI**
+1. **安装软件包**  
+   ```bash
+   sudo dpkg -i taygedo-rs_<版本>_amd64.deb
+   sudo apt-get install -f    # 补全依赖（通常为零依赖）
+   ```
 
-浏览器打开 `http://127.0.0.1:8787`，用**首次启动生成的随机初始口令**登录（程序启动时会在控制台打印一次）。
+2. **启动并激活开机自启**  
+   ```bash
+   sudo systemctl enable --now taygedo-rs
+   sudo systemctl status taygedo-rs
+   ```
 
-**4. 开机自启（可选）**
+3. **自定义环境变量（可选）**  
+   ```bash
+   sudo systemctl edit taygedo-rs
+   ```
+   在编辑界面中填入以下内容并保存退出：
+   ```ini
+   [Service]
+   Environment=TAYGEDO_LISTEN=0.0.0.0:8787
+   Environment=TAYGEDO_DATA_DIR=/var/lib/taygedo
+   Environment=TAYGEDO_WEB_PASSWORD=YourPassword
+   ```
+   应用生效：
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl restart taygedo-rs
+   ```
 
-- 任务计划程序：创建任务 → 触发器选「登录时」→ 操作填 `taygedo-rs.exe` 完整路径 → 勾选「使用最高权限运行」。
-- 启动文件夹：把快捷方式放入 `Win + R` → `shell:startup` 目录。
+4. **获取口令与审计日志**  
+   从 systemd 日志中提取首次启动生成的随机口令：
+   ```bash
+   sudo journalctl -u taygedo-rs -f
+   ```
+   数据默认持久化至 `/var/lib/taygedo`。
 
-**5. 防火墙放行（局域网访问用）**
+---
 
-```powershell
-netsh advfirewall firewall add rule name="taygedo" dir=in action=allow protocol=TCP localport=8787
-```
+### OpenWrt 安装与 LuCI 配置
 
-### Debian 安装
+1. **安装对应的架构包**  
+   ```sh
+   # opkg 安装（OpenWrt 23.05 及更早版本）
+   opkg install /tmp/luci-app-taygedo_<版本>-1_x86_64.ipk
 
-**1. 下载安装**
+   # apk 安装（OpenWrt 24.10 及更新版本）
+   apk add /tmp/luci-app-taygedo_<版本>-r1_x86_64.apk
+   ```
 
-```bash
-# 到 Releases 页面下载最新 deb（文件名带版本号，如 taygedo-rs_0.4.11_amd64.deb）
-# https://github.com/LianXia233/taygedo-CI/releases/latest
-sudo dpkg -i taygedo-rs_<版本>_amd64.deb
-sudo apt-get install -f    # 若有依赖缺失（本项目基本无依赖，通常不需要）
-```
+2. **开箱即用状态**  
+   安装脚本自动完成注册并拉起服务，`/etc/config/taygedo` 默认注入 `enabled '1'` 与 `no_auth '1'`。直接打开路由器管理界面：**服务 → 塔吉多签到** 即可直连控制面板。
 
-**2. 启动并设置开机自启**
+3. **免鉴权模式特性**  
+   - **已开启免鉴权（默认）**：局域网访问 LuCI 直接免密联动后端 API。
+   - **未开免鉴权**：LuCI 提示认证引导卡片，点击右上角「外部 WebUI」跳转至 `:8787` 输入随机口令登录。
+   - **解耦机制**：UCI（`/etc/config/taygedo`）专注服务级控制（启停/端口/网段）；业务配置（签到时刻/任务开关）由 `config.json` 托管，重启服务互不覆盖。
 
-```bash
-sudo systemctl enable --now taygedo-rs
-sudo systemctl status taygedo-rs
-```
+   | 维度 | 说明 |
+   | :--- | :--- |
+   | **生效边界** | 仅作用于 `/api/*` REST 接口，**不改变 LuCI 原生系统的认证机制与 ACL** |
+   | **放行约束** | 需同时满足 `no_auth=1` 且请求 IP 命中 `lan_cidrs` 白名单；公网流量严格拒绝 |
+   | **网络安全** | 仅建议在受信任局域网启用；若直接暴露公网映射，请置为 `no_auth=0` |
+   | **加密隔离** | 与 `crypto_policy` 独立互不干扰，非受信任网段自动强制密文传输 |
 
-**3. 自定义配置**
+4. **UCI 控制命令参考**  
+   ```sh
+   # 切换免鉴权模式
+   uci set taygedo.main.no_auth=1 && uci commit taygedo && /etc/init.d/taygedo restart
 
-```bash
-sudo systemctl edit taygedo-rs
-```
+   # 修改监听端口
+   uci set taygedo.main.port=8787 && uci commit taygedo && /etc/init.d/taygedo restart
 
-在弹出内容中覆盖环境变量：
-
-```ini
-[Service]
-Environment=TAYGEDO_LISTEN=0.0.0.0:8787
-Environment=TAYGEDO_DATA_DIR=/var/lib/taygedo
-Environment=TAYGEDO_WEB_PASSWORD=你的初始密码   # 可选；不设置则首次启动随机生成
-```
-
-保存后：
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart taygedo-rs
-```
-
-**4. 访问与日志**
-
-浏览器打开 `http://<服务器IP>:8787`，用**首次启动生成的随机初始口令**登录（见 `journalctl` 输出的启动横幅）。
-
-```bash
-sudo journalctl -u taygedo-rs -f
-```
-
-数据默认存储在 `/var/lib/taygedo`（`accounts.json` / `config.json` / `state.json`）。
-
-### OpenWrt 安装
-
-**1. 确定包格式与架构**
-
-| OpenWrt 版本 | 包管理器 | 文件 |
-| --- | --- | --- |
-| 24.10 及以上 | `apk` | `*.apk` |
-| 23.05 及以下 | `opkg` | `*.ipk` |
-
-| 设备/平台 | 架构 | 文件名 |
-| --- | --- | --- |
-| x86_64 软路由 / 虚拟机 | x86_64 | `..._x86_64.ipk/apk` |
-| ARM64 路由（MT7986/Rockchip 等） | aarch64_cortex-a53 | `..._aarch64_cortex-a53.ipk/apk` |
-
-**2. 安装**
-
-```sh
-# opkg（23.05 及以下），文件名带版本号，如 luci-app-taygedo_0.4.8-1_x86_64.ipk
-opkg install /tmp/luci-app-taygedo_<版本>-1_x86_64.ipk
-
-# apk（24.10 及以上），如 luci-app-taygedo_0.4.12-r1_x86_64.apk
-apk add /tmp/luci-app-taygedo_<版本>-r1_x86_64.apk
-```
-
-**3. LuCI 页面**
-
-浏览器打开路由器 LuCI → **服务 → 塔吉多签到**，单页即完整管理界面（账号卡片 / 统计 / 运行日志 / 添加账号 / 全局设置），与 WebUI 功能、视觉保持同步。
-
-> **安装即用，无需手动操作**：`apk`/`opkg` 的安装脚本（`post-install` / `postinst`）会**自动**
-> `enable` 并启动服务，且包内 `/etc/config/taygedo` 默认 `enabled '1'` + `no_auth '1'`。
-> 因此装包完成后打开 LuCI 页面即可直接管理账号，无需执行任何额外命令。
-> 若曾用 `uci set taygedo.main.enabled=0` 显式停用，安装脚本不会强行启动（尊重用户选择）。
-
-- **免鉴权模式**（UCI 默认 `option no_auth '1'`，**OpenWrt 专享**）：LuCI 页面免登录直连后端 API，直接管理账号。
-- **未开免鉴权**：页面显示引导页，点右上「**外部 WebUI**」按钮跳转 `:8787` 独立管理界面（或在路由器执行 `uci set taygedo.main.no_auth=1 && uci commit taygedo && /etc/init.d/taygedo restart` 开启免鉴权）。
-- **职责划分（LuCI 与 WebUI 解耦）**：UCI（`/etc/config/taygedo`）只管理**服务级**配置（启用 / 监听端口 / 数据目录 / Web 登录密码 / 免鉴权开关）；**业务级**配置（默认签到时间 / 金币任务 / 云时长 / 分享平台）统一由 `config.json` 管理，LuCI 页面与独立 WebUI 均通过「全局设置」读写同一份数据，二者**数据互通、相互独立、互不影响**——重启服务不会用 UCI 旧值覆盖 WebUI 的修改。
-
-**免鉴权模式的影响范围（务必了解）**
-
-| 维度 | 说明 |
-| --- | --- |
-| 生效范围 | 仅作用于 `/api/*` REST 接口，**不改动 LuCI 自身**的登录鉴权与 ACL |
-| 放行条件 | 需同时满足 `no_auth=1` **且**来源 IP 命中 `lan_cidrs`；非内网来源**不放行**（`lan_no_auth` 控制） |
-| 网络层 | 仅建议在可信局域网启用；若服务端口已映射到公网，请保持 `no_auth=0` |
-| 加密层 | 与 `crypto_policy` 独立，`auto` 下内网仍明文直通，非内网仍强制加密 |
-
-**如何开关**
-
-```sh
-# 开启（LuCI 页面据此免登录直连）
-uci set taygedo.main.no_auth=1 && uci commit taygedo && /etc/init.d/taygedo restart
-
-# 关闭（改回登录模式，LuCI 页面显示引导页跳转独立 WebUI）
-uci set taygedo.main.no_auth=0 && uci commit taygedo && /etc/init.d/taygedo restart
-
-# 查看当前状态
-uci get taygedo.main.no_auth
-```
-
-**4. 打开 WebUI**
-
-LuCI 页面右上「**外部 WebUI**」按钮，或浏览器直接访问 `http://<路由器IP>:8787`。免鉴权模式直接进入；未开启时用**本次生成的随机初始口令**登录（见下）。
-
-> **初始口令不再固定为 `admin/admin`**：0.5.0 起首次启动会用 CSPRNG 生成高强度随机口令，
-> 仅打印在服务启动横幅（stdout）中一次，可通过 `logread | grep -A5 taygedo | head -20`
-> 或 `/etc/init.d/taygedo restart` 后查看。登录后请在「设置」中立即修改，改密后所有会话失效。
-
-**5. 命令行管理（可选）**
-
-```sh
-# 服务级配置（UCI）
-uci set taygedo.main.enabled=1
-uci set taygedo.main.port=8787
-uci commit taygedo
-
-# 业务级配置（默认签到时间 / 金币任务 / 云时长 / 分享平台）
-# 在 LuCI 页面或 WebUI 的「全局设置」中修改，统一写入 config.json，无需操作 UCI
-
-/etc/init.d/taygedo start|stop|restart|status
-logread | grep taygedo
-```
+   # 查看运行日志与提取初始随机口令
+   /etc/init.d/taygedo status
+   logread | grep taygedo
+   ```
 
 ---
 
 ## 通用使用指南
 
-**登录**：0.5.0 起首次启动生成**随机初始口令**（不再是固定 `admin/admin`），仅打印在启动横幅一次；
-登录后请在「设置」中修改账号与口令（口令长度 ≥ 8），改密后所有会话立即失效需重新登录。
+<div align="center">
+  <img src="docs/images/signin-flow.svg" alt="每日签到执行流程" width="800" style="max-width: 100%; height: auto;" />
+  <p><sub>图 4：每日定时签到执行流程时序</sub></p>
+</div>
 
-**添加账号**：
-- 密码登录：输入手机号 + 密码。
-- 验证码登录：输入手机号 → 点「发送验证码」→ 输入短信验证码。
-
-**每日签到时间**：全局默认在「设置」；单账号在账号卡片上直接修改。
-
-**手动签到**：账号卡片点「立即签到」。
-
-**多账号**：重复「添加账号」，每个账号独立登录态与签到时间。
-
-![每日签到执行流程](docs/images/signin-flow.svg)
-
-*调度器按北京时间触发；已完成的账号自动跳过，任一环节失败都会写入日志。*
+- **控制台登录**：0.5.0 起首次生成随机口令（控制台仅输出一次），登录后务必在「设置」中修改口令（长度 $\ge$ 8），成功后原所有 Token 立即作废。
+- **绑定账号**：在「添加账号」弹窗中，根据需求选择账号密码认证或短信验证码直登。
+- **设置时刻**：可在「全局设置」指定统一打卡时刻，亦可在各账号卡片上单独定制差异化执行时间。
+- **手动触发**：点击卡片上的「立即签到」可随时手动拉起全流程任务。
+- **多账号轮询**：重复添加流程即可，多账号互不干扰、独立保存登录凭据与执行状态。
 
 ---
 
 ## 从源码构建
 
-### Docker（推荐）
+### Docker 容器化构建（推荐）
 
 ```bash
 docker compose up -d --build
 ```
+启动后访问 `http://localhost:8787`，所有数据自动持久化于 `./data`。
 
-运行后访问 `http://localhost:8787`，数据持久化在 `./data`。
+### Cargo 本机编译
 
-### 本机 cargo
-
-需要 Rust 工具链（stable 即可）。
+需要已安装稳定版 Rust 工具链（Stable）：
 
 ```bash
 cargo run --release
 ```
 
-环境变量：
+**支持的环境变量配置**：
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `TAYGEDO_LISTEN` | `0.0.0.0:8787` | 监听地址 |
-| `TAYGEDO_DATA_DIR` | `data` | 数据目录 |
-| `TAYGEDO_WEB_PASSWORD` | 无 | 可选。指定 WebUI 初始登录口令。**不设置时由 CSPRNG 随机生成、仅打印一次**，不存在固定默认口令。仅在首次初始化（`config.json` 中尚无口令哈希）时生效，落地后改此项无效 |
-| `TAYGEDO_DEFAULT_SCHEDULE` | 无 | 覆盖默认签到时间 |
-| `TAYGEDO_COIN_TASKS` | 无 | 覆盖金币任务开关（true/false） |
-| `TAYGEDO_CLOUD_DURATION` | 无 | 覆盖云时长开关（true/false） |
-| `TAYGEDO_SHARE_PLATFORM` | 无 | 覆盖分享平台 |
-| `TAYGEDO_NO_AUTH` | `false` | 免鉴权模式（`1/true/yes/on` 开启），WebUI 与 API 无需登录 |
+| 环境变量 | 默认值 | 功能说明 |
+| :--- | :--- | :--- |
+| `TAYGEDO_LISTEN` | `0.0.0.0:8787` | HTTP 监听地址与绑定端口 |
+| `TAYGEDO_DATA_DIR` | `data` | 数据持久化存放目录 |
+| `TAYGEDO_WEB_PASSWORD` | 无 | 显式指定初始管理密码（未配置则使用 CSPRNG 动态生成，仅首次初始化有效） |
+| `TAYGEDO_DEFAULT_SCHEDULE` | 无 | 覆盖全局默认签到时刻（格式：`HH:MM`） |
+| `TAYGEDO_COIN_TASKS` | 无 | 覆盖金币打卡任务开关（`true` / `false`） |
+| `TAYGEDO_CLOUD_DURATION` | 无 | 覆盖云异环时长开关（`true` / `false`） |
+| `TAYGEDO_SHARE_PLATFORM` | 无 | 覆盖分享渠道标记 |
+| `TAYGEDO_NO_AUTH` | `false` | 免登录模式开关（`1/true/yes/on` 启用） |
 
-### Windows 编译
+### Windows 交叉编译
 
 ```bash
 rustup toolchain install stable-x86_64-pc-windows-gnu
@@ -321,355 +288,262 @@ cargo +stable-x86_64-pc-windows-gnu build --release
 
 ---
 
-## 多平台 / 多架构
+## 多平台 / 多架构支持
 
-使用 musl 静态链接。`.github/workflows/build.yml` 打 tag 或手动触发即自动交叉编译并发布以下架构：
+底层采用 musl 全静态链接构建，由 GitHub Actions 交叉编译自动化发布：
 
-| OpenWrt 架构 | Rust target | 说明 |
-| --- | --- | --- |
-| x86_64 | `x86_64-unknown-linux-musl` | 软路由 / 虚拟机 |
-| aarch64 (cortex-a53) | `aarch64-unknown-linux-musl` | Rockchip、MT7986 等新平台 |
+| OpenWrt 架构目标 | Rust Target Triple | 典型适用设备 |
+| :--- | :--- | :--- |
+| **x86_64** | `x86_64-unknown-linux-musl` | 常见 PC 软路由、工控机、PVE/ESXi 虚拟机 |
+| **aarch64 (cortex-a53)** | `aarch64-unknown-linux-musl` | MediaTek MT7986、Rockchip RK3568/RK3588 等现代路由器 |
 
 ---
 
 ## OpenWrt / LuCI 集成（开发者）
 
-`openwrt/luci-app-taygedo/` 提供完整 LuCI 包，安装后可在 **LuCI → 服务 → 塔吉多签到** 里：
+`openwrt/luci-app-taygedo/` 提供了规范的 LuCI 扩展工程：
 
-- **功能与 WebUI 一致**：账号管理、密码/短信验证码登录、每日签到时间、立即签到、运行日志、全局设置（免鉴权模式下隐藏改密）。
-- **与 WebUI 解耦**：LuCI 页面不维护后端登录态/token，直连后端 REST API（依赖免鉴权模式，UCI 默认 `no_auth '1'`）；未开免鉴权时显示引导页并提供「外部 WebUI」跳转。
-- **服务级配置**（UCI `config taygedo`）：启用开关、监听端口、数据目录、Web 登录密码、免鉴权开关。
-- **业务级配置**（默认签到时间、金币任务、云时长、分享平台）：统一由 `config.json` 管理，LuCI 页面与独立 WebUI 通过 `/api/config` 读写同一份数据，数据互通、互不覆盖。
-- init.d 脚本（procd）自动拉起/守护 `taygedo-rs`，支持 reload。
+- **体验完全对齐**：原生 JavaScript 视图层与独立 WebUI 功能高度一致。
+- **服务分层解耦**：LuCI 页面基于 RESTful API 直连交互；UCI 仅维护进程级状态。
+- **进程生命周期管理**：结合 `procd` 体系实现崩溃拉起、热加载与守护。
 
 ```
 openwrt/luci-app-taygedo/
-├── Makefile                       # 包定义（默认预编译下载，源码编译见注释）
+├── Makefile                        # 编译与打包控制定义
 ├── htdocs/
 │   └── luci-static/resources/view/taygedo/
-│       └── status.js              # 现代 LuCI JS 前端（功能对齐 WebUI）
+│       └── status.js               # 现代化 LuCI JS 前端
 └── root/
-    ├── etc/config/taygedo         # UCI 默认配置
-    ├── etc/init.d/taygedo         # procd 守护脚本
+    ├── etc/config/taygedo          # UCI 默认配置文件
+    ├── etc/init.d/taygedo          # procd 守护脚本
     └── usr/share/
         ├── luci/menu.d/taygedo.json
         └── rpcd/acl.d/luci-app-taygedo.json
 ```
 
-使用：把该目录放到 `package/` 或 feeds 中，`make menuconfig` 勾选 `LuCI → Applications → luci-app-taygedo` 后编译。
+编译方法：将该目录置于 OpenWrt 源码树的 `package/` 或 自定义 feeds 中，执行 `make menuconfig` 勾选 `LuCI → Applications → luci-app-taygedo` 后编译。
 
 ---
 
 ## 应用层加密
 
-**加密位于「浏览器前端」与「后端服务」之间——两端各自持有明文，链路中间只有密文。**
+**加密边界收敛于「浏览器客户端」与「后端服务」之间：两端维护明文，中间传输链路全量混淆。**
 
-![taygedo 应用层端到端加密原理图](docs/images/crypto-architecture.svg)
+<div align="center">
+  <img src="docs/images/crypto-architecture.svg" alt="taygedo 应用层端到端加密原理图" width="800" style="max-width: 100%; height: auto;" />
+  <p><sub>图 5：应用层端到端加密原理图（加密边界与会话派生链路）</sub></p>
+</div>
 
-*上方：加密边界所在位置。下方：握手阶段协商密钥的过程，以及双向密钥的域分离派生关系。*
+> [!NOTE]
+> 本机制非 TLS/HTTPS 替代品，而是构建于标准 HTTP 之上的应用层正文混淆增强：HTTP 请求头保持明文，**请求与响应正文彻底密文传输**。在难以配置可信证书的局域网或自编译路由场景下，提供等价的安全兜底防线。
 
-它**不是 TLS/HTTPS**，而是叠加在 HTTP 之上的应用层加密：HTTP 头（请求路径、方法）仍是明文，
-但**请求与响应正文**（口令、Token、账号数据）已不可读。若部署环境能终止 TLS，仍应优先用 TLS——
-两者不冲突，本方案是 HTTPS 不可用时的等价兜底（自签名证书在浏览器端体验差，自编译固件也不便申请公网证书）。
+### 威胁模型与防护边界
 
-### 目标与威胁模型
+- **防护目标**：抵御在局域网内或公网链路上执行的**被动嗅探抓包**（tcpdump、交换机 SPAN 端口镜像），防止泄露登录密码、Token、账号库与打卡记录。
+- **非防御场景**：终端浏览器被植入恶意脚本、服务器系统遭取得 Root 权限、本机具备完全控制权的主动式中间人注入。
 
-**目标**：攻击者在内网或公网链路上做**被动抓包**（tcpdump / 镜像口 / 交换机 SPAN），
-无法还原任意请求或响应正文，包括登录口令、`Authorization` Token、账号数据与签到结果。
+### 密码学方案实现
 
-**不在范围内**：终端被控（浏览器被注入脚本）、服务端被拿到 root、以及**设备本机的主动中间人**。
-这与 HTTPS 的威胁边界一致——本方案不防"端点被拿下"，只防"链路被看"。
+<div align="center">
+  <img src="docs/images/key-derivation.svg" alt="密钥派生链" width="800" style="max-width: 100%; height: auto;" />
+  <p><sub>图 6：多域隔离密钥派生链结构</sub></p>
+</div>
 
-### 密码学方案
+| 环节 | 算法与安全参数 | 规范与实现细节 |
+| :--- | :--- | :--- |
+| **密钥交换** | **X25519 ECDH** | 单次握手由服务端产生**临时公私钥对**，提供前向保密（PFS） |
+| **密钥派生** | **HKDF-SHA256** | 因子混淆：`client_pub \|\| server_pub \|\| client_nonce \|\| server_nonce` |
+| **信道加密** | **AES-256-GCM** | 双向分离派生：`taygedo/v1/c2s`（上行）与 `taygedo/v1/s2c`（下行） |
+| **IV / Nonce** | **4 字节 HKDF 前缀 + 8 字节递增计数器** | 动态前缀保障多会话隔离，大端单调计数器彻底防止重放攻击 |
+| **附加数据 (AAD)**| `sid \|\| direction(1B) \|\| seq(8B)` | 响应正文追加绑定 `reqSeq(8B)`，杜绝重排与错配攻击 |
+| **防重放机制** | 严格验证 `seq > last_seq` | 仅在 GCM 验签成功通过后推进单调序列指针 |
+| **安全销毁** | **`zeroize` 内存擦除** | 会话生命周期达 30 分钟或累计执行达 200,000 次自动销毁 |
 
-| 环节 | 算法 / 参数 | 说明 |
-| --- | --- | --- |
-| 密钥交换 | X25519 ECDH | 每次握手服务端生成**临时密钥对**（前向保密），长期身份密钥不参与派生 |
-| 密钥派生 | HKDF-SHA256 | salt = `client_pub \|\| server_pub \|\| client_nonce \|\| server_nonce` |
-| 会话密钥 | AES-256-GCM | 双向独立派生：`taygedo/v1/c2s`、`taygedo/v1/s2c` |
-| Nonce 构造 | 4 字节 HKDF 前缀 + 8 字节大端计数器 | 前缀由会话密钥派生，跨会话不重复 |
-| AAD | `sid \|\| direction(1B) \|\| seq(8B)` | 响应额外绑定 `reqSeq(8B)`，防止响应重排/错配 |
-| 防重放 | 每方向单调递增 `seq` | 仅接受 `seq > last_seq`，且**验签通过后**才推进计数 |
-| 密钥销毁 | `zeroize` | 会话过期（30 分钟）或请求数超限（20 万次）即销毁并擦除 |
+> [!WARNING]
+> **aarch64 硬件加速编译警告**  
+> `aes` crate 的 ARM64 硬件加速受 `--cfg aes_armv8` 条件门控。若未显式激活，会退回低效纯软实现且存在 Cache-Timing 侧信道隐患。本项目在 `.cargo/config.toml` 中已为 aarch64 target 默认写入对应编译参数并启用运行时探测回退。
 
-![密钥派生链](docs/images/key-derivation.svg)
+---
 
-*握手每会话一次；四个方向的材料由同一共享秘密按用途分离，互不通用。*
+### `crypto_policy` 加密准入策略
 
-**为什么选它**：X25519 在 aarch64 cortex-a53 上单次约 50 μs 量级，HKDF 与 AES-GCM 均
-可走硬件加速（ARMv8 有 AES/PMULL 指令）。相比 ChaCha20-Poly1305，二者安全强度等价，
-但 AES-GCM 在支持 AES 指令的 ARM64 路由器上吞吐更高；在不支持 AES 加速的老旧 MIPS 上，
-ChaCha20-Poly1305 反而更快，**但它同时失去硬件卸载优势且改动面更大**，故未采用。
-非对称部分没有更省的替代 —— 任何要先协商密钥的方案都绕不开一次 ECDH。
+<div align="center">
+  <img src="docs/images/crypto-policy.svg" alt="crypto_policy 加密策略判定" width="800" style="max-width: 100%; height: auto;" />
+  <p><sub>图 7：crypto_policy 决策流转模型</sub></p>
+</div>
 
-> **aarch64 必须显式开启硬件 AES**：`aes` crate 的 `aes_armv8` 是**编译期 cfg 门控**，
-> 不开启时 aarch64 目标会静默落到 `soft` 后端 —— 性能相差约一个数量级，且软件查表
-> 实现存在 cache-timing 侧信道风险。本项目已在 `.cargo/config.toml` 为
-> `aarch64-unknown-linux-musl` / `-gnu` 加入 `rustflags = ["--cfg", "aes_armv8"]`，
-> 运行时自动探测 CPU 特性（`armv8 + autodetect`），在不支持扩展的旧 CPU 上回落而非崩溃。
-> 自行为本项目交叉编译 aarch64 时请保留该配置。注意 `[target.<triple>.rustflags]`
-> 会**覆盖**环境变量 `RUSTFLAGS` 而非追加。
+| 策略值 | 行为说明 | 推荐适用场景 |
+| :---: | :--- | :--- |
+| **`auto`** *(默认)* | **内网白名单直通明文，非受信/外部访问强制启用加密** | **推荐**。家庭局域网便捷直连，公网端口映射下无感保护 |
+| **`always`** | 全网段全链路强制加密，明文请求直接下发 HTTP `428 Precondition Required` | 面临复杂合规要求或外部恶劣不可信信道 *(需留存 SSH 维护手段)* |
+| **`never`** | 从不下发强制加密约束（客户端仍可自主发起协商） | 专用内网链路调试、性能压测与故障排查 |
 
-**上线后的实测**：单次握手在毫秒级（aarch64 路由实测约数十毫秒量级，受设备负载影响）。
-加解密本身的开销远小于一次 HTTP 往返，未观察到对页面交互的可感知影响。
-
-### `crypto_policy`：何时强制加密
-
-OpenWrt / 内网场景若一刀切强制加密，会破坏免鉴权直连的便利性。因此引入策略开关：
-
-![crypto_policy 加密策略判定](docs/images/crypto-policy.svg)
-
-*判定在服务端中间件内完成，基于真实对端 IP，前端无法绕过或伪造来源。*
-
-| 取值 | 行为 | 适用场景 |
-| --- | --- | --- |
-| `auto`（默认） | **内网明文直通，非内网强制加密** | 推荐。家里局域网点点用，公网暴露时自动加密 |
-| `always` | 所有请求必须加密，未加密请求返回 `428 Precondition Required` | 需要满足等保/合规，或链路不可信 |
-| `never` | 从不下发加密要求（客户端可自行选择加密） | 排障兜底 |
-
-**内网判定**由 `lan_cidrs` 决定，默认值：
-
+默认内网网段判定覆盖如下范围（基于真实连接 IP 解析，屏蔽 `X-Forwarded-For` 伪造并支持 IPv4-mapped IPv6 规范化）：
 ```
 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8,
 169.254.0.0/16, ::1/128, fc00::/7, fe80::/10
 ```
 
-判定基于 `ConnectInfo<SocketAddr>` 的**真实对端 IP**，不信任任何 `X-Forwarded-For`
-（否则伪造该头即可自证是内网）。判定同时做 IPv4-mapped IPv6 归一化（`::ffff:192.168.1.5` 按 IPv4 处理）。
+### 免鉴权与加密策略组合矩阵
 
-> `lan_cidrs` 允许为空。留空时会**回落到上述默认值**，而不是变成空集合 ——
-> 避免用户清空字段后既不放行任何内网、又无法恢复。
+| 状态组合 | 通信行为表现 |
+| :--- | :--- |
+| **`no_auth=1` + 局域网访问** | 完全放行免密直登，通信走明文通道，极简性能开销 |
+| **`no_auth=1` + 外网/非白名单** | 依然维持免密逻辑，但**通信正文被强制激活加密**，嗅探无法解构内容 |
+| **`no_auth=0`** | 标准密码认证流程 + `auto` 加密模式；LuCI 自带 ACL 鉴权完全不受影响 |
 
-### 免鉴权与加密的交互
+---
 
-| 组合 | 结果 |
-| --- | --- |
-| `no_auth=1` + 内网访问 | 完全放行，加密走 `auto` 的明文分支，前端可用性不变 |
-| `no_auth=1` + 非内网访问 | 仍然免登录，但**正文被强制加密**（`auto` 的非内网分支），抓包读不到内容 |
-| `no_auth=0` | 正常登录流程 + `auto` 加密策略；LuCI 自身的登录鉴权与 ACL 链完全不受影响 |
+### 密钥存储与生命周期
 
-LuCI 页面走的是 `rpcd`/`ubus` 调用 + `luci-app-taygedo` 自带 ACL，加密层只作用于
-`/api/*` 的 HTTP 通道，**不触碰 LuCI 的鉴权链**。
+- **生成机制**：首次启动使用 CSPRNG 生成 32 字节独立身份密钥保存至 `data/keyring.json`，无任何硬编码。
+- **文件权限管控**：Unix 下限制文件权限为 `0600`、目录为 `0700`；Windows 依赖系统目录 ACL。
+- **轮换与备份**：身份密钥仅用于客户端校验服务端身份连续性，不参与具体会话密钥派生。删除 `keyring.json` 重启即可无损重置；迁移时连带备份即可。
 
-### 密钥管理
+### 架构验证自检清单
 
-- **生成**：首次启动时用 CSPRNG 生成 32 字节身份密钥写入 `data/keyring.json`，**代码中无任何硬编码密钥**。
-- **存储**：Unix 下文件 `0600`、数据目录 `0700`；Windows 下依赖用户目录 ACL。
-  启动时若检测到权限过宽会打印告警（不阻断启动，避免误伤容器场景）。
-- **备份**：把 `data/keyring.json` 与浏览器侧的信任记录一起备份即可。
-  丢失该文件不影响可用性（客户端会提示身份变化并重新信任），但会失去身份连续性。
-- **轮换**：删除 `keyring.json` 后重启即生成新身份，所有旧会话立即失效。
-- **不参与派生**：身份密钥**只用于客户端校验服务端身份**，会话密钥完全来自当次握手的临时密钥对 ——
-  即使身份密钥泄露，历史抓包也无法被解密（前向保密）。
-- **升级保留**：`keyring.json` 位于数据目录（OpenWrt 下为 `/etc/taygedo/`），
-  `luci-app-taygedo` 已把它所在的 `/etc/config/taygedo` 声明为 `conffiles`，
-  `opkg`/`apk` 升级不会覆盖用户配置与密钥。
+以下指标在真实软路由（ImmortalWrt / Filogic / aarch64_cortex-a53）与生产 Linux 主机上实测验证通过：
 
-### 改动文件与配置项
-
-**代码**
-
-| 文件 | 改动 |
-| --- | --- |
-| `src/session.rs` | 新增。加密会话管理、握手、加解密、防重放 |
-| `src/protocol.rs` | 新增 X25519 / HKDF / 常量时间比较原语 |
-| `src/crypto.rs` | 口令哈希升级为 scrypt v2，保留 v1 校验以支持自动迁移 |
-| `src/web.rs` | 加密中间件、握手接口、CORS 同源白名单、移除去 Cookie 取 token、锁定策略、`/api/logout`、`/api/meta` |
-| `src/service.rs` | `CryptoManager`、`LanMatcher`（支持运行时热更新）、环境变量覆盖 |
-| `src/store.rs` | `keyring.json` 读写与权限加固 |
-| `src/models.rs` | `Config` 新增 `crypto_policy` / `lan_no_auth` / `lan_cidrs` / `web_password_version` 等字段 |
-| `static/taygedo-crypto.js` | 新增。浏览器端 WebCrypto 加密客户端 |
-| `docs/images/crypto-architecture.svg` | 新增。本文档的加密原理图 |
-| `docs/images/*.svg` | 新增。README 的架构与流程图形共 7 张 |
-| `src/ui.html` | 设置面板新增加密策略、内网白名单、免鉴权开关；改密支持改账号 |
-| `openwrt/.../status.js` | LuCI 页面同步支持上述配置与改密 |
-
-**配置项（`config.json` / UCI）**
-
-| 键 | 默认 | 说明 |
-| --- | --- | --- |
-| `crypto_policy` | `auto` | `auto` / `always` / `never` |
-| `lan_cidrs` | 空（回落默认值） | 内网网段白名单，逗号分隔 |
-| `lan_no_auth` | `1` | 内网免登录开关 |
-| `web_password_version` | 自动写入 | `2` 表示 scrypt v2 |
-
-对应环境变量：`TAYGEDO_CRYPTO_POLICY`、`TAYGEDO_LAN_CIDRS`、`TAYGEDO_LAN_NO_AUTH`、
-`TAYGEDO_NO_AUTH`、`TAYGEDO_ALLOWED_ORIGINS`（CORS 额外白名单）。
-
-### 向后兼容与回滚
-
-**兼容**：老客户端（不含加密前端）访问 `auto` 策略下的内网地址仍可正常工作；
-`always` 策略下老客户端会收到 `428`，需要更新前端资源或把策略临时改为 `never`。
-
-> **运维提示**：`always` 策略下**没有明文回退通道** —— 一旦前端资源损坏或浏览器不兼容，
-> 将无法通过页面把策略改回 `auto`，只能 SSH 改 UCI 并重启服务。请在确认链路可信、
-> 且已准备好 SSH 兜底手段后再启用 `always`。
-
-**策略切换的已知陷阱（0.5.0 已修复）**：修改 `crypto_policy` 时服务端需要作废既有加密
-会话以强制重新握手。早期实现会把**发起本次请求的会话一并销毁**，导致配置实际已生效、
-但响应无法加密返回而报 `428`/无会话错误，表现为「操作成功却提示失败」。现改为策略变更
-时保留当前会话、仅作废其余会话；且只有走加密通道才需要保留（明文通道下等价于全部作废）。
-
-**回滚**（无需重装，三步）：
-
-1. UCI 设置 `option crypto_policy 'never'`，或环境变量 `TAYGEDO_CRYPTO_POLICY=never`，
-   然后 `/etc/init.d/taygedo restart` —— 立即恢复明文通道。
-2. 若需回到 0.4.x 二进制：直接覆盖回旧版可执行文件，配置与数据格式向下兼容
-   （`crypto_policy` 等新字段旧版会忽略）。
-3. OpenWrt 备份还原：`/root/taygedo-backup-<日期>.tar.gz` 中含旧二进制、旧 `status.js`
-   与配置，解包覆盖后重启服务即可。
-
-### 验证清单
-
-下表为 0.5.0 在**真实设备**（ImmortalWrt SNAPSHOT / mediatek filogic / aarch64_cortex-a53）
-与 Debian 云服务器上的实测结果，同时可作为部署后的自检清单。
-
-| 项 | 方法 | 预期 | 实测 |
-| --- | --- | --- | --- |
-| 正文不可读 | `tcpdump -i any -A -s0 port 8787` 抓包后 grep 口令 | 加密通道下口令出现 0 次 | 通过（口令 0 次、Token 0 次、`username` 字样 0 次） |
-| 对照组 | 用 `crypto_policy=never` 复现同一操作 | 明文口令应出现，证明抓包本身有效 | 通过（口令与 Token 各 1 次） |
-| 内网免鉴权 | 从 `192.168.x.x` 不登录取 `/api/accounts` | 200 且正文为明文 | 通过 |
-| 非内网强制加密 | 用公网 IP 或伪造的 `lan_cidrs` 之后访问 | 明文请求返回 428 | 通过（白名单收窄后本机 IP 收 428 + `x-tgd-enc: 0`） |
-| 免鉴权模式 | `no_auth=1` 后直连 WebUI / LuCI | 无需登录即可用 | 通过 |
-| LuCI 独立管理账号 | 内网 + `no_auth=1` + 无 token 下操作 LuCI 页面 | 列账号/读配置/读日志/改签到时间均生效 | 通过（全部 200，改动已写盘） |
-| LuCI 不受影响 | 登录 LuCI 操作页面 | 页面、ACL、ubus 调用均正常 | 通过 |
-| 改密后 | 改账号与口令，用新凭据登录，旧 token 访问 | 新凭据可登录；旧 token 返回 401 | 通过 |
-| 旧哈希升级 | 用 0.4.x 的 `config.json` 启动后登录一次 | `web_password_version` 变为 2，哈希前缀为 scrypt | 通过（v1→v2，salt 8→16 字节，原口令无感登录） |
-| 防重放 | 重发同一密文请求 | 返回 400（Replay） | 通过 |
-| 策略热切换 | 加密通道下把 `always` 改回 `auto` | 配置生效且**响应不报错** | 通过（修复前报 428，见下） |
-| 升级无损 | 升级前后比对数据文件 md5 | 账号与状态文件完全一致 | 通过（`accounts.json`/`state.json` md5 相同） |
-| 密钥权限 | `ls -l /etc/taygedo/` | `keyring.json` 为 `0600`、目录 `0700` | 通过（首次启动自动生成） |
-| E2E 协议测试 | 独立协议客户端跑全流程 | 全项通过 | 通过（17/17） |
+| 校验项 | 测试手法 | 预期表现 | 实际结果 |
+| :--- | :--- | :--- | :---: |
+| **正文密态** | `tcpdump -i any -A -s0 port 8787` 抓包排查凭据关键字 | 加密通道内凭据与 Token 不暴露 | **通过**（敏感信息出现 0 次） |
+| **对照组验证** | 切换至 `crypto_policy=never` 执行相同抓包操作 | 明文抓取凭据以证明嗅探链路有效 | **通过**（凭据捕获 1 次） |
+| **内网直通** | `192.168.x.x` 网段免登录请求 `/api/accounts` | 返回 HTTP 200 且负载为明文 JSON | **通过** |
+| **外网拦截** | 伪造来源网段或外部公网 IP 发起明文请求 | 返回 HTTP 428 + `x-tgd-enc: 0` | **通过** |
+| **重放阻断** | 抓取有效密文请求并重放发送 | 服务端侦测到 Nonce 失序拒绝请求（HTTP 400） | **通过** |
+| **版本无感升级** | 读取 0.4.x 的 `config.json` 执行首次认证 | 口令哈希从 sha256 平滑升级为 scrypt v2 | **通过** |
+| **会话失效机制** | 执行在线修改密码操作 | 旧 Token 立即失效，请求返回 HTTP 401 | **通过** |
+| **E2E 链路用例** | 协议测试套件持续跑批验证 | 17 项端到端流程全项通过 | **通过 (17/17)** |
 
 ---
 
 ## 数据与兼容性
 
-![数据目录构成](docs/images/data-files.svg)
+<div align="center">
+  <img src="docs/images/data-files.svg" alt="数据目录构成" width="800" style="max-width: 100%; height: auto;" />
+  <p><sub>图 8：数据存储体系及落盘映射</sub></p>
+</div>
 
-*四个文件构成完整状态，全部位于数据目录内；备份该目录即可完整迁移。*
+数据目录（默认 `./data` 或 `/var/lib/taygedo`）内包含以下持久化核心文件：
 
-- `data/accounts.json`：账号列表，字段与上游 `accounts.json` 完全兼容。可直接把上游已登录的账号文件复制过来复用（`refreshToken` / `laohuToken` 会自动续期）。
-- `data/config.json`：全局配置（凭据密钥、默认签到时间、各账号签到时间、开关、Web 账号密码哈希）。
-- `data/state.json`：每日签到状态（按「账号 + 日期」去重，避免重复签到）。
-- `data/keyring.json`（0.5.0 新增）：应用层加密的**服务端长期身份密钥**（32 字节随机数，首次启动自动生成）。
-  文件权限为 `0600`（目录 `0700`），**不参与**会话密钥派生，仅用于客户端校验服务端身份，防止中间人替换。
-  升级安装不会覆盖该文件；卸载/重装如需保留身份，请把它一并备份。
+- `data/accounts.json`：账号实体列表，数据规范与上游项目保持兼容。
+- `data/config.json`：主配置文件（存储凭据哈希、调度时刻、开关等）。
+- `data/state.json`：打卡幂等缓存状态，按「账号 + 日期」防止高频重复签到。
+- `data/keyring.json`：应用层加密服务端长期身份密钥（32 字节 CSPRNG 生成，文件权限 `0600`）。
 
-> **升级兼容性**：0.4.x 的 `config.json` 可直接被 0.5.0 读取。旧的单轮 `sha256` 口令哈希
-> （8 字符 salt、无 `web_password_version` 字段）在首次成功登录后会**自动原地升级**为 scrypt v2，
-> 用户无感知、不需要重置口令。`accounts.json` / `state.json` 格式未变。
+> [!NOTE]
+> **向下兼容支持**：0.5.0 原生支持加载 0.4.x 的 `config.json`。历史单一 `sha256` 口令散列在首次验证成功后会自动就地升级至安全的 `scrypt v2`，无需重置或重新录入数据。
 
 ---
 
-## API 一览
+## API 规范一览
 
-![请求处理链](docs/images/auth-layers.svg)
+<div align="center">
+  <img src="docs/images/auth-layers.svg" alt="请求处理链" width="800" style="max-width: 100%; height: auto;" />
+  <p><sub>图 9：网关拦截与分层认证过滤体系</sub></p>
+</div>
 
-*加密闸门决定「能否读懂正文」，鉴权闸门决定「能否执行操作」，两者独立生效。*
+所有受保护接口均需在 Header 中携带 `Authorization: Bearer <token>`（0.5.0 起废弃 Cookie 凭据传递以阻断潜在 CSRF 风险）。
 
-除 `/api/login`、`/api/crypto/handshake` 外，所有 API 需携带 `Authorization: Bearer <token>`。
-
-> 0.5.0 起**不再接受 Cookie 传递 token**（审计发现 P1-3：Cookie 分支会随 CORS 配置被跨站利用），只认 `Authorization` 头；跨站请求默认被同源 CORS 白名单拦截。
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| POST | `/api/crypto/handshake` | 加密信道握手（未鉴权，仅交换公钥并下发会话标识） |
-| POST | `/api/login` | 登录 `{username, password}` → `{token}`（锁定策略：60 秒内 5 次失败后返回 429） |
-| POST | `/api/password` | 修改登录账号/密码 `{old_password, new_password, new_username?}`（身份取自服务端会话，忽略请求体中的 `username`） |
-| POST | `/api/logout` | 注销当前 token 并销毁对应加密会话 |
-| GET | `/api/meta` | 读取运行模式标记（是否免鉴权、是否需要加密、是否必须改口令） |
-| GET | `/api/accounts` | 账号列表（敏感字段已脱敏） |
-| POST | `/api/accounts` | 登录账号 `{phone, mode, password?, captcha?, name?}` |
-| DELETE | `/api/accounts/{id}` | 删除账号 |
-| POST | `/api/accounts/{id}/signin` | 手动签到 `{force?}` |
-| POST | `/api/accounts/{id}/schedule` | 设置签到时间 `{time:"HH:MM"}` |
-| POST | `/api/send-code` | 发送短信验证码 `{phone}` |
-| GET/POST | `/api/config` | 读取 / 更新全局配置 |
-| GET | `/api/logs?limit=200` | 运行日志 |
+| 方法 | API 路径 | 认证要求 | 作用说明 |
+| :---: | :--- | :---: | :--- |
+| `POST` | `/api/crypto/handshake` | 公开 | 加密通道公钥握手与分配会话 ID |
+| `POST` | `/api/login` | 公开 | 凭据登录认证（触发限速：60 秒内失败 5 次返回 HTTP 429） |
+| `GET` | `/api/meta` | 公开 | 读取服务端环境参数、加密约束策略与改密要求 |
+| `POST` | `/api/password` | 鉴权 | 修改管理员登录账号及口令（成功后既有 Token 瞬间吊销） |
+| `POST` | `/api/logout` | 鉴权 | 注销 Token 并立即销毁关联的加密上下文 |
+| `GET` | `/api/accounts` | 鉴权 | 拉取账号摘要列表（敏感字段脱敏输出） |
+| `POST` | `/api/accounts` | 鉴权 | 录入并登录新游戏账号（支持密码或验证码） |
+| `DELETE`| `/api/accounts/{id}` | 鉴权 | 删除指定账号配置与关联数据 |
+| `POST` | `/api/accounts/{id}/signin` | 鉴权 | 手动触发指定账号打卡任务（可选 `force` 参数） |
+| `POST` | `/api/accounts/{id}/schedule`| 鉴权 | 定制单账号独立签到计划时刻（`{ "time": "HH:MM" }`） |
+| `POST` | `/api/send-code` | 鉴权 | 向目标手机号请求下发登录验证码 |
+| `GET` | `/api/config` | 鉴权 | 读取全局配置字典 |
+| `POST` | `/api/config` | 鉴权 | 更新全局系统配置 |
+| `GET` | `/api/logs` | 鉴权 | 拉取实时审计日志（支持 `limit` 参数控制条数） |
 
 ---
 
 ## 目录结构
 
-![源码结构分组](docs/images/source-map.svg)
-
-*每组职责单一；加密相关逻辑集中在 `session.rs`、`protocol.rs`、`crypto.rs` 三个文件中。*
+<div align="center">
+  <img src="docs/images/source-map.svg" alt="源码结构分组" width="800" style="max-width: 100%; height: auto;" />
+  <p><sub>图 10：源码模块组织架构与职能划分</sub></p>
+</div>
 
 ```
 src/
-├── main.rs        # 入口：启动服务 + 定时调度
-├── api.rs         # 塔吉多/老虎 API 客户端（签名、加密、请求）
-├── protocol.rs    # MD5 签名、AES-128-ECB、ds 校验、表单编码
-├── runner.rs      # 签到核心逻辑
-├── crypto.rs      # scrypt + AES-256-GCM 凭据加密、登录密码哈希
-├── service.rs     # 应用状态、鉴权会话、业务编排
-├── scheduler.rs   # 每日定时调度
-├── login.rs       # 设备身份 / 账号 id 生成
-├── models.rs      # 数据模型
-├── store.rs       # 文件存储
-├── session.rs     # 应用层加密：X25519 握手 / HKDF / AES-256-GCM / 防重放
-├── web.rs         # HTTP 路由 + 鉴权中间件 + 加密中间件 + 处理器
-└── ui.html        # WebUI（自包含单文件，响应式）
+├── main.rs            # 服务启动装配、参数解析与定时任务管理
+├── api.rs             # 游戏平台与老虎 API 客户端实现（签名计算、加密解密）
+├── protocol.rs        # 协议原语：X25519、HKDF、常量时间校验比对
+├── runner.rs          # 自动化签到核心逻辑流水线
+├── crypto.rs          # 凭据存储加密（scrypt + AES-256-GCM）与口令散列
+├── service.rs         # 业务编排器、会话状态机及网段白名单热刷新
+├── scheduler.rs       # 北京时间定时调度驱动引擎
+├── login.rs           # 虚拟终端设备指纹与账号标识派生
+├── models.rs          # 数据结构定义与序列化支持
+├── store.rs           # 本地持久化文件 I/O 与权限安全防护
+├── session.rs         # 应用层端到端加密状态机（握手/派生/防重放）
+├── web.rs             # Axum 路由、加密拦截中间件与鉴权中间件
+└── ui.html            # 自包含单文件响应式 Web 前端
 static/
-└── taygedo-crypto.js  # 浏览器端加密客户端（WebCrypto，前端引用同一套协议）
-openwrt/luci-app-taygedo/   # OpenWrt / LuCI 集成
-.github/workflows/build.yml # 多架构交叉编译 CI
-scripts/package.sh          # deb / ipk / apk 打包脚本
+└── taygedo-crypto.js  # 浏览器端 WebCrypto 加密驱动客户端
+openwrt/luci-app-taygedo/   # OpenWrt 固件集成与 LuCI 原生应用
+.github/workflows/build.yml # 多架构交叉编译与发布工作流
+scripts/package.sh          # deb / ipk / apk 自动化打包脚本
 ```
 
 ---
 
-## 更新日志 (Changelog)
+## 常见问题 (FAQ)
 
-完整的版本变更记录已迁移至独立文件 [CHANGELOG.md](./CHANGELOG.md)，本文件不再内嵌更新日志。
+<details>
+<summary><b>Q1: 访问 WebUI 提示连接失败或拒绝访问？</b></summary>
+请依序核实：
+1. 确认主服务进程正常存活且未异常退出。
+2. 确认系统防火墙或公网安全组已放行相应端口（默认 8787）。
+3. 检查监听地址是否设定为 `0.0.0.0:8787` 而不是局限于本地回环 `127.0.0.1`。
+</details>
 
-## 常见问题
+<details>
+<summary><b>Q2: 遗忘了 WebUI 管理员密码怎么办？</b></summary>
+进入数据存储目录，打开 `config.json` 移除其中的 `web_username`、`web_password_hash` 等相关字段（或临时重命名该文件），随后重启服务。程序将自动重新生成一个全新的随机口令并打印在标准输出日志中，登入后重新配置即可。
+</details>
 
-**Q：访问 WebUI 提示无法连接？**
-检查服务是否运行、端口是否被防火墙/安全组拦截、监听地址是否为 `0.0.0.0`。
+<details>
+<summary><b>Q3: 抓包看到乱码内容，是传输损坏了吗？</b></summary>
+不是。这证明**应用层端到端加密正在正确生效**。传输中的请求体与响应体已被全程混淆，前端内置的 WebCrypto 客户端会自动透明完成解密与渲染。
+</details>
 
-**Q：忘记 WebUI 密码？**
-删除数据目录下的 `config.json`（或其中的 `web_username` / `web_password_hash` / `web_password_salt` / `web_password_version` 字段）后重启，程序会**重新生成一个随机初始口令**并打印在启动横幅中——不再是固定的 `admin/admin`。请留意控制台或 `journalctl -u taygedo-rs` / `logread | grep taygedo` 的输出。
+<details>
+<summary><b>Q4: 升级后浏览器警告「服务端身份已变化」？</b></summary>
+说明服务端的 `keyring.json` 被删除或重新生成（常见于未挂载持久卷的容器重建或误删数据目录）。若为本人运维操作，在前端确认信任新指纹即可。
+</details>
 
-**Q：签到失败 / 登录态失效？**
-在 WebUI 中删除该账号并重新登录即可。
+<details>
+<summary><b>Q5: 如何强制局域网内通信也全面启用加密？</b></summary>
+将 `crypto_policy` 设置为 `always`，或者将 `lan_cidrs` 缩减配置为一个不存在或专用的单点 IP（例如 `127.0.0.1/32`），此时所有外部与局域网调用都将被判定为非受信来源而强制协商加密通道。
+</details>
 
-**Q：OpenWrt 上如何更新？**
-下载新版本对应架构的包，用 `opkg install` / `apk add` 覆盖安装。
-`/etc/config/taygedo` 与 `/etc/taygedo/`（含 `keyring.json`）不会被覆盖。
-
-**Q：抓包看到乱码，是坏了吗？**
-不是。这是应用层加密生效的正常表现。客户端会自动完成握手与解密，WebUI 使用不受影响。
-
-**Q：升级后浏览器提示「服务端身份已变化」？**
-说明 `keyring.json` 被删除或替换（例如重装、清空了 `/etc/taygedo/`）。
-确认是你自己的操作后重新信任即可；若非本人操作，请检查设备是否被他人控制。
-
-**Q：想让局域网也强制加密怎么办？**
-把 `crypto_policy` 设为 `always`，或清空 `lan_cidrs`（清空会回落默认内网段，不会放行全部）。
-若要连内网也走加密，请把 `lan_cidrs` 设为 `127.0.0.1/32` 之类的窄网段。
-
-**Q：手机能访问吗？**
-能，WebUI 已适配手机浏览器。
+<details>
+<summary><b>Q6: 手机移动端浏览器可以正常管理吗？</b></summary>
+可以。WebUI 已经过全尺寸自适应适配，手机横竖屏均可直接访问、添加账号与查看实时日志。
+</details>
 
 ---
 
 ## 免责声明
 
-本项目仅供学习与个人自用，请遵守相关平台的服务条款。使用本工具产生的任何后果由使用者自行承担。
-
+本项目仅供计算机技术学习与个人研究自用，请严格遵守相关平台的服务条款。因违反使用规范或使用本工具产生的任何后果均由使用者自行承担。
 
 ---
 
 ## 许可证
 
-| 范围 | 许可证 | 位置 |
+| 模块范围 | 适用许可证 | 授权凭据位置 |
 | :--- | :--- | :--- |
 | 本项目 Rust 实现、WebUI 与 OpenWrt / LuCI 集成 | **GPL-3.0** | 根目录 [`LICENSE`](./LICENSE) |
-| 上游 TypeScript 实现（逻辑参考来源） | **MIT** | [`src/upstream/LICENSE-MIT`](./src/upstream/LICENSE-MIT)，Copyright (c) 2026 zzstar101 |
+| 上游 TypeScript 业务实现（算法与逻辑参考源） | **MIT** | [`src/upstream/LICENSE-MIT`](./src/upstream/LICENSE-MIT) |
 
-- 本项目为上游 [zzstar101/taygedo-auto-attendance](https://github.com/zzstar101/taygedo-auto-attendance)（MIT）的 Rust 重写版本，新增与改写的代码整体以 **GPL-3.0** 授权。
-- 上游是宽松的 MIT 许可，允许其代码被并入 GPL 项目，因此两层许可可以并存：上游归属与 MIT 声明完整保留，不因本项目改用 GPL 而改变。
-- 选择 GPL-3.0 而非 GPL-2.0，是为了与 Rust 生态常见依赖（reqwest、serde、chrono 等的 `MIT OR Apache-2.0` 双许可）保持兼容 —— GPL-2.0 与 Apache-2.0 条款不兼容，GPL-3.0 则明确允许 Apache-2.0 代码并入。
-- 若你只使用上游的原始 TypeScript 版本，请以该项目的 MIT 许可为准；使用本项目（Rust 版）及其衍生代码时，需遵循 GPL-3.0。
+- 本项目为上游 [zzstar101/taygedo-auto-attendance](https://github.com/zzstar101/taygedo-auto-attendance)（MIT）的 Rust 完整重构版本，衍生与扩展部分整体遵循 **GPL-3.0** 开源。
+- 完整保留上游版权归属与 MIT 声明；采用 GPL-3.0 协议有助于与 Rust 核心生态组件（`reqwest`、`serde` 等常见 `MIT OR Apache-2.0` 依赖）保持法律合规兼容性。

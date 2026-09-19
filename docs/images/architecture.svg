@@ -41,42 +41,42 @@ g.s-div>line{stroke:#444441}
 <g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">界面层与执行层通过 REST API 通信；数据层位于进程本地磁盘。</text></g>
 <g class="s-blue">
 <rect x="40" y="74" width="178" height="74" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-<text x="129" y="84" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">界面层</text>
-<text x="129" y="104" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">WebUI（单文件）</text>
-<text x="129" y="120" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">LuCI 页面</text>
-<text x="129" y="138" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">手机浏览器</text>
+<text x="129" y="85" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">界面层</text>
+<text x="129" y="100" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">WebUI（单文件）</text>
+<text x="129" y="118" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">LuCI 页面</text>
+<text x="129" y="135" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">手机浏览器</text>
 </g>
 <g class="s-teal">
 <rect x="251" y="74" width="178" height="74" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
-<text x="340" y="92" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">执行层：taygedo-rs</text>
-<text x="340" y="112" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">axum HTTP 服务</text>
-<text x="340" y="129" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">调度器 + 签到引擎</text>
+<text x="340" y="94" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">执行层：taygedo-rs</text>
+<text x="340" y="109" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">axum HTTP 服务</text>
+<text x="340" y="126" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">调度器 + 签到引擎</text>
 </g>
 <g class="s-amber">
 <rect x="462" y="74" width="178" height="74" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
-<text x="551" y="92" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">外部平台</text>
-<text x="551" y="112" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">塔吉多 / 老虎 API</text>
-<text x="551" y="129" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">签到与登录态续期</text>
+<text x="551" y="94" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">外部平台</text>
+<text x="551" y="109" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">塔吉多 / 老虎 API</text>
+<text x="551" y="126" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">签到与登录态续期</text>
 </g>
 <g class="s-purple">
 <rect x="40" y="176" width="178" height="74" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
-<text x="129" y="186" font-size="14" font-weight="500" fill="#3C3489" text-anchor="middle" dominant-baseline="central">数据层</text>
-<text x="129" y="206" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">accounts.json</text>
-<text x="129" y="222" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">config.json / state.json</text>
-<text x="129" y="240" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">keyring.json</text>
+<text x="129" y="189" font-size="14" font-weight="500" fill="#3C3489" text-anchor="middle" dominant-baseline="central">数据层</text>
+<text x="129" y="204" font-size="11.0" fill="#534AB7" text-anchor="middle" dominant-baseline="central">accounts.json</text>
+<text x="129" y="220" font-size="11.0" fill="#534AB7" text-anchor="middle" dominant-baseline="central">config.json / state.json</text>
+<text x="129" y="236" font-size="11.0" fill="#534AB7" text-anchor="middle" dominant-baseline="central">keyring.json</text>
 </g>
 <g class="s-gray">
 <rect x="251" y="176" width="178" height="74" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
-<text x="340" y="194" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">加密通道</text>
-<text x="340" y="214" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">X25519 握手</text>
-<text x="340" y="231" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">AES-256-GCM 正文</text>
+<text x="340" y="196" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">加密通道</text>
+<text x="340" y="211" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">X25519 握手</text>
+<text x="340" y="228" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">AES-256-GCM 正文</text>
 </g>
 <g class="s-coral">
 <rect x="462" y="176" width="178" height="74" rx="8" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
-<text x="551" y="186" font-size="14" font-weight="500" fill="#712B13" text-anchor="middle" dominant-baseline="central">OpenWrt 集成</text>
-<text x="551" y="206" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">procd 守护</text>
-<text x="551" y="222" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">rpcd / ACL</text>
-<text x="551" y="240" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">UCI 配置</text>
+<text x="551" y="187" font-size="14" font-weight="500" fill="#712B13" text-anchor="middle" dominant-baseline="central">OpenWrt 集成</text>
+<text x="551" y="202" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">procd 守护</text>
+<text x="551" y="220" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">rpcd / ACL</text>
+<text x="551" y="237" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">UCI 配置</text>
 </g>
 <g class="s-ln"><line x1="220" y1="111" x2="249" y2="111" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-ln"><line x1="431" y1="111" x2="460" y2="111" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>

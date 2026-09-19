@@ -41,45 +41,45 @@ g.s-div>line{stroke:#444441}
 <g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">每组职责单一，加密相关逻辑集中在三个文件中。</text></g>
 <g class="s-blue">
 <rect x="40" y="74" width="178" height="96" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-<text x="129" y="94" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">入口与调度</text>
-<text x="129" y="114" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">main.rs 启动</text>
-<text x="129" y="132" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">scheduler.rs 定时</text>
-<text x="129" y="148" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">login.rs 设备身份</text>
+<text x="129" y="96" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">入口与调度</text>
+<text x="129" y="111" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">main.rs 启动</text>
+<text x="129" y="129" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">scheduler.rs 定时</text>
+<text x="129" y="146" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">login.rs 设备身份</text>
 </g>
 <g class="s-teal">
 <rect x="251" y="74" width="178" height="96" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
-<text x="340" y="94" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">业务执行</text>
-<text x="340" y="114" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">runner.rs 签到流程</text>
-<text x="340" y="132" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">api.rs 平台客户端</text>
-<text x="340" y="148" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">protocol.rs 签名</text>
+<text x="340" y="96" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">业务执行</text>
+<text x="340" y="111" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">runner.rs 签到流程</text>
+<text x="340" y="129" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">api.rs 平台客户端</text>
+<text x="340" y="146" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">protocol.rs 签名</text>
 </g>
 <g class="s-coral">
 <rect x="462" y="74" width="178" height="96" rx="8" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
-<text x="551" y="94" font-size="14" font-weight="500" fill="#712B13" text-anchor="middle" dominant-baseline="central">加密与安全</text>
-<text x="551" y="114" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">session.rs 握手加解密</text>
-<text x="551" y="132" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">protocol.rs 密码学原语</text>
-<text x="551" y="148" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">crypto.rs 口令哈希</text>
+<text x="551" y="96" font-size="14" font-weight="500" fill="#712B13" text-anchor="middle" dominant-baseline="central">加密与安全</text>
+<text x="551" y="111" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">session.rs 握手加解密</text>
+<text x="551" y="129" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">protocol.rs 密码学原语</text>
+<text x="551" y="146" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">crypto.rs 口令哈希</text>
 </g>
 <g class="s-purple">
 <rect x="40" y="196" width="178" height="96" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
-<text x="129" y="216" font-size="14" font-weight="500" fill="#3C3489" text-anchor="middle" dominant-baseline="central">服务与存储</text>
-<text x="129" y="236" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">service.rs 状态与编排</text>
-<text x="129" y="254" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">store.rs 文件存储</text>
-<text x="129" y="270" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">models.rs 数据模型</text>
+<text x="129" y="218" font-size="14" font-weight="500" fill="#3C3489" text-anchor="middle" dominant-baseline="central">服务与存储</text>
+<text x="129" y="233" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">service.rs 状态与编排</text>
+<text x="129" y="251" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">store.rs 文件存储</text>
+<text x="129" y="268" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">models.rs 数据模型</text>
 </g>
 <g class="s-amber">
 <rect x="251" y="196" width="178" height="96" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
-<text x="340" y="216" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">界面与集成</text>
-<text x="340" y="236" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">web.rs 路由与中间件</text>
-<text x="340" y="254" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">ui.html 自包含界面</text>
-<text x="340" y="270" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">static 加密客户端</text>
+<text x="340" y="218" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">界面与集成</text>
+<text x="340" y="233" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">web.rs 路由与中间件</text>
+<text x="340" y="251" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">ui.html 自包含界面</text>
+<text x="340" y="268" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">static 加密客户端</text>
 </g>
 <g class="s-gray">
 <rect x="462" y="196" width="178" height="96" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
-<text x="551" y="216" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">打包与流水线</text>
-<text x="551" y="236" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">workflows 交叉编译</text>
-<text x="551" y="254" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">scripts 打包脚本</text>
-<text x="551" y="270" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">openwrt LuCI 包</text>
+<text x="551" y="218" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">打包与流水线</text>
+<text x="551" y="233" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">workflows 交叉编译</text>
+<text x="551" y="251" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">scripts 打包脚本</text>
+<text x="551" y="268" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">openwrt LuCI 包</text>
 </g>
 <g class="s-t3"><text x="40" y="322" font-size="12" fill="#888780">加密链路的三个关键文件：session.rs 会话与握手、protocol.rs 密码学原语、crypto.rs 口令哈希。</text></g>
 </svg>

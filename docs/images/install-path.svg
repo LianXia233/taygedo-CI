@@ -41,39 +41,39 @@ g.s-div>line{stroke:#444441}
 <g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">按运行环境选择安装方式与对应包格式。</text></g>
 <g class="s-blue">
 <rect x="40" y="74" width="178" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-<text x="129" y="92" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">桌面自用</text>
-<text x="129" y="112" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">Windows</text>
+<text x="129" y="93" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">桌面自用</text>
+<text x="129" y="109" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">Windows</text>
 </g>
 <g class="s-teal">
 <rect x="251" y="74" width="178" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
-<text x="340" y="92" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">服务器常驻</text>
-<text x="340" y="112" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">Debian / Ubuntu</text>
+<text x="340" y="93" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">服务器常驻</text>
+<text x="340" y="109" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">Debian / Ubuntu</text>
 </g>
 <g class="s-amber">
 <rect x="462" y="74" width="178" height="56" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
-<text x="551" y="92" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">路由器</text>
-<text x="551" y="112" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">OpenWrt / ImmortalWrt</text>
+<text x="551" y="93" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">路由器</text>
+<text x="551" y="109" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">OpenWrt / ImmortalWrt</text>
 </g>
 <g class="s-gray">
 <rect x="40" y="176" width="178" height="74" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
-<text x="129" y="194" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">zip 解压</text>
-<text x="129" y="214" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">双击 taygedo-rs.exe</text>
-<text x="129" y="231" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">自动打开浏览器</text>
+<text x="129" y="196" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">zip 解压</text>
+<text x="129" y="211" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">双击 taygedo-rs.exe</text>
+<text x="129" y="228" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">自动打开浏览器</text>
 </g>
 <g class="s-ln"><line x1="129" y1="130" x2="129" y2="174" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-ln"><line x1="340" y1="130" x2="340" y2="162" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-ln"><line x1="551" y1="130" x2="551" y2="162" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-gray">
 <rect x="251" y="176" width="178" height="74" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
-<text x="340" y="194" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">dpkg + systemd</text>
-<text x="340" y="214" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">sudo dpkg -i *.deb</text>
-<text x="340" y="231" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">systemctl enable --now</text>
+<text x="340" y="196" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">dpkg + systemd</text>
+<text x="340" y="211" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">sudo dpkg -i *.deb</text>
+<text x="340" y="228" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">systemctl enable --now</text>
 </g>
 <g class="s-gray">
 <rect x="462" y="176" width="178" height="74" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
-<text x="551" y="194" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">opkg / apk</text>
-<text x="551" y="214" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">ipk（23.05 及以下）</text>
-<text x="551" y="231" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">apk（24.10 及以上）</text>
+<text x="551" y="196" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">opkg / apk</text>
+<text x="551" y="211" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">ipk（23.05 及以下）</text>
+<text x="551" y="228" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">apk（24.10 及以上）</text>
 </g>
 <g class="s-t3"><text x="40" y="274" font-size="12" fill="#888780">安装后统一访问 http://&lt;主机&gt;:8787，或从 LuCI 菜单进入。</text></g>
 </svg>

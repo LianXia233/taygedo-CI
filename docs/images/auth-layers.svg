@@ -41,39 +41,39 @@ g.s-div>line{stroke:#444441}
 <g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">加密中间件先解出正文，鉴权中间件再校验身份；两者均不受前端控制。</text></g>
 <g class="s-gray">
 <rect x="40" y="74" width="120" height="56" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
-<text x="100" y="92" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">HTTP 请求</text>
-<text x="100" y="112" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">明文头 + 密文正文</text>
+<text x="100" y="94" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">HTTP 请求</text>
+<text x="100" y="109" font-size="10.5" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">明文头 + 密文正文</text>
 </g>
 <g class="s-ln"><line x1="162" y1="102" x2="192" y2="102" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-purple">
 <rect x="194" y="74" width="132" height="56" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
-<text x="260" y="92" font-size="14" font-weight="500" fill="#3C3489" text-anchor="middle" dominant-baseline="central">CORS 白名单</text>
-<text x="260" y="112" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">同源校验</text>
+<text x="260" y="93" font-size="14" font-weight="500" fill="#3C3489" text-anchor="middle" dominant-baseline="central">CORS 白名单</text>
+<text x="260" y="109" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">同源校验</text>
 </g>
 <g class="s-ln"><line x1="328" y1="102" x2="358" y2="102" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-blue">
 <rect x="360" y="74" width="142" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-<text x="431" y="92" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">加密中间件</text>
-<text x="431" y="112" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">握手 / 解密 / 验签</text>
+<text x="431" y="93" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">加密中间件</text>
+<text x="431" y="109" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">握手 / 解密 / 验签</text>
 </g>
 <g class="s-ln"><line x1="504" y1="102" x2="534" y2="102" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-teal">
 <rect x="536" y="74" width="104" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
-<text x="588" y="92" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">鉴权中间件</text>
-<text x="588" y="112" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">Token 校验</text>
+<text x="588" y="93" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">鉴权中间件</text>
+<text x="588" y="109" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">Token 校验</text>
 </g>
 <g class="s-ln"><line x1="588" y1="132" x2="588" y2="168" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-ln"><line x1="436" y1="132" x2="436" y2="168" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-green">
 <rect x="360" y="170" width="280" height="56" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
-<text x="500" y="188" font-size="14" font-weight="500" fill="#173404" text-anchor="middle" dominant-baseline="central">路由处理函数</text>
-<text x="500" y="208" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">业务编排</text>
+<text x="500" y="189" font-size="14" font-weight="500" fill="#173404" text-anchor="middle" dominant-baseline="central">路由处理函数</text>
+<text x="500" y="205" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">业务编排</text>
 </g>
 <g class="s-amber">
 <rect x="40" y="170" width="296" height="56" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
-<text x="188" y="179" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">免鉴权放行条件</text>
-<text x="188" y="199" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">OpenWrt 平台且开启了免鉴权</text>
-<text x="188" y="216" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">立即放行，跳过 Token 校验</text>
+<text x="188" y="181" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">免鉴权放行条件</text>
+<text x="188" y="196" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">OpenWrt 平台且开启了免鉴权</text>
+<text x="188" y="213" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">立即放行，跳过 Token 校验</text>
 </g>
 <g class="s-div"><line x1="40" y1="250" x2="640" y2="250" stroke="#D3D1C7" stroke-width="0.5"/></g>
 <g class="s-t1"><text x="40" y="276" font-size="15" font-weight="500" fill="#2C2C2A">两类闸门的分工</text></g>

@@ -41,48 +41,48 @@ g.s-div>line{stroke:#444441}
 <g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">调度器按北京时间触发；已完成的账号自动跳过，不重复执行。</text></g>
 <g class="s-purple">
 <rect x="40" y="74" width="140" height="62" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
-<text x="110" y="86" font-size="14" font-weight="500" fill="#3C3489" text-anchor="middle" dominant-baseline="central">定时触发</text>
-<text x="110" y="106" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">北京时间 UTC+8</text>
-<text x="110" y="123" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">支持启动补签</text>
+<text x="110" y="88" font-size="14" font-weight="500" fill="#3C3489" text-anchor="middle" dominant-baseline="central">定时触发</text>
+<text x="110" y="103" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">北京时间 UTC+8</text>
+<text x="110" y="120" font-size="12" fill="#534AB7" text-anchor="middle" dominant-baseline="central">支持启动补签</text>
 </g>
 <g class="s-ln"><line x1="182" y1="105" x2="214" y2="105" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-blue">
 <rect x="216" y="74" width="140" height="62" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-<text x="286" y="86" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">读取签到状态</text>
-<text x="286" y="106" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">按账号 + 日期</text>
-<text x="286" y="123" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">去重判断</text>
+<text x="286" y="88" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">读取签到状态</text>
+<text x="286" y="103" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">按账号 + 日期</text>
+<text x="286" y="120" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">去重判断</text>
 </g>
 <g class="s-ln"><line x1="358" y1="105" x2="390" y2="105" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-teal">
 <rect x="392" y="74" width="140" height="62" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
-<text x="462" y="94" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">登录态校验</text>
-<text x="462" y="114" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">Token 有效性</text>
+<text x="462" y="96" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">登录态校验</text>
+<text x="462" y="112" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">Token 有效性</text>
 </g>
 <g class="s-ln"><line x1="534" y1="105" x2="566" y2="105" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-gray">
 <rect x="568" y="74" width="72" height="62" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
-<text x="604" y="94" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">续期</text>
-<text x="604" y="114" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">三级回退</text>
+<text x="604" y="97" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">续期</text>
+<text x="604" y="112" font-size="11.0" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">三级回退</text>
 </g>
 <g class="s-ln"><line x1="604" y1="138" x2="604" y2="168" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-amber">
 <rect x="500" y="170" width="140" height="62" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
-<text x="570" y="182" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">执行签到</text>
-<text x="570" y="202" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">APP + 逐游戏</text>
-<text x="570" y="219" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">金币 + 云时长</text>
+<text x="570" y="184" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">执行签到</text>
+<text x="570" y="199" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">APP + 逐游戏</text>
+<text x="570" y="216" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">金币 + 云时长</text>
 </g>
 <g class="s-ln"><line x1="498" y1="201" x2="466" y2="201" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-coral">
 <rect x="326" y="170" width="140" height="62" rx="8" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
-<text x="396" y="182" font-size="14" font-weight="500" fill="#712B13" text-anchor="middle" dominant-baseline="central">写回状态</text>
-<text x="396" y="202" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">state.json</text>
-<text x="396" y="219" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">记录日志</text>
+<text x="396" y="184" font-size="14" font-weight="500" fill="#712B13" text-anchor="middle" dominant-baseline="central">写回状态</text>
+<text x="396" y="199" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">state.json</text>
+<text x="396" y="216" font-size="12" fill="#993C1D" text-anchor="middle" dominant-baseline="central">记录日志</text>
 </g>
 <g class="s-ln"><line x1="324" y1="201" x2="292" y2="201" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-green">
 <rect x="152" y="170" width="140" height="62" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
-<text x="222" y="190" font-size="14" font-weight="500" fill="#173404" text-anchor="middle" dominant-baseline="central">完成</text>
-<text x="222" y="210" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">本日不再触发</text>
+<text x="222" y="192" font-size="14" font-weight="500" fill="#173404" text-anchor="middle" dominant-baseline="central">完成</text>
+<text x="222" y="208" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">本日不再触发</text>
 </g>
 <g class="s-t3"><text x="40" y="256" font-size="12" fill="#888780">任一环节失败都会写入日志，可在 WebUI 或 LuCI 页面查看并手动重试。</text></g>
 </svg>

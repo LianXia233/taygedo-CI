@@ -41,22 +41,22 @@ g.s-div>line{stroke:#444441}
 <g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">加密位于浏览器前端与后端服务之间：两端各自持有明文，链路中间只有密文。</text></g>
 <g class="s-blue">
 <rect x="40" y="74" width="200" height="96" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-<text x="140" y="94" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">浏览器前端</text>
-<text x="140" y="114" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">WebUI / LuCI 页面</text>
-<text x="140" y="132" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">持有会话密钥</text>
-<text x="140" y="148" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">此框内为明文</text>
+<text x="140" y="96" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">浏览器前端</text>
+<text x="140" y="111" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">WebUI / LuCI 页面</text>
+<text x="140" y="129" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">持有会话密钥</text>
+<text x="140" y="146" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">此框内为明文</text>
 </g>
 <g class="s-teal">
 <rect x="440" y="74" width="200" height="96" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
-<text x="540" y="94" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">后端服务</text>
-<text x="540" y="114" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">taygedo-rs（axum）</text>
-<text x="540" y="132" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">持有身份私钥与会话密钥</text>
-<text x="540" y="148" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">此框内为明文</text>
+<text x="540" y="96" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">后端服务</text>
+<text x="540" y="111" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">taygedo-rs（axum）</text>
+<text x="540" y="129" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">持有身份私钥与会话密钥</text>
+<text x="540" y="146" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">此框内为明文</text>
 </g>
 <g class="s-red">
 <rect x="276" y="96" width="128" height="52" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
-<text x="340" y="112" font-size="14" font-weight="500" fill="#501313" text-anchor="middle" dominant-baseline="central">HTTP 链路</text>
-<text x="340" y="132" font-size="12" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">只有密文</text>
+<text x="340" y="113" font-size="14" font-weight="500" fill="#501313" text-anchor="middle" dominant-baseline="central">HTTP 链路</text>
+<text x="340" y="129" font-size="12" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">只有密文</text>
 </g>
 <g class="s-ln"><line x1="242" y1="122" x2="274" y2="122" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-ln"><line x1="406" y1="122" x2="438" y2="122" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
@@ -66,52 +66,52 @@ g.s-div>line{stroke:#444441}
 <g class="s-t1"><text x="40" y="252" font-size="15" font-weight="500" fill="#2C2C2A">握手阶段：协商密钥，每个会话执行一次</text></g>
 <g class="s-gray">
 <rect x="40" y="268" width="178" height="62" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
-<text x="129" y="288" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">① 客户端发起</text>
-<text x="129" y="308" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">临时公钥 + 随机数</text>
+<text x="129" y="290" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">① 客户端发起</text>
+<text x="129" y="306" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">临时公钥 + 随机数</text>
 </g>
 <g class="s-ln"><line x1="220" y1="299" x2="249" y2="299" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-blue">
 <rect x="251" y="268" width="178" height="62" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-<text x="340" y="288" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">② 服务端应答</text>
-<text x="340" y="308" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">临时密钥对，用完即弃</text>
+<text x="340" y="290" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">② 服务端应答</text>
+<text x="340" y="306" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">临时密钥对，用完即弃</text>
 </g>
 <g class="s-ln"><line x1="431" y1="299" x2="460" y2="299" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-amber">
 <rect x="462" y="268" width="178" height="62" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
-<text x="551" y="288" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">③ 双方各自推导</text>
-<text x="551" y="308" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">X25519 得到同一共享秘密</text>
+<text x="551" y="290" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">③ 双方各自推导</text>
+<text x="551" y="306" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">X25519 得到同一共享秘密</text>
 </g>
 <g class="s-div"><line x1="40" y1="356" x2="640" y2="356" stroke="#D3D1C7" stroke-width="0.5"/></g>
 <g class="s-t1"><text x="40" y="382" font-size="15" font-weight="500" fill="#2C2C2A">密钥派生：域分离，双向材料互不重叠</text></g>
 <g class="s-gray">
 <rect x="40" y="398" width="150" height="52" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
-<text x="115" y="414" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">共享秘密</text>
-<text x="115" y="434" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">X25519 ECDH</text>
+<text x="115" y="415" font-size="14" font-weight="500" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">共享秘密</text>
+<text x="115" y="431" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">X25519 ECDH</text>
 </g>
 <g class="s-ln"><line x1="192" y1="424" x2="220" y2="424" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-amber">
 <rect x="222" y="398" width="150" height="52" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
-<text x="297" y="414" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">主密钥</text>
-<text x="297" y="434" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">HKDF aead</text>
+<text x="297" y="415" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">主密钥</text>
+<text x="297" y="431" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">HKDF aead</text>
 </g>
 <g class="s-ln"><line x1="374" y1="410" x2="402" y2="410" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-ln"><line x1="374" y1="438" x2="402" y2="438" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-teal">
 <rect x="404" y="386" width="150" height="48" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
-<text x="479" y="400" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">请求方向密钥</text>
-<text x="479" y="420" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">HKDF c2s</text>
+<text x="479" y="401" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">请求方向密钥</text>
+<text x="479" y="417" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">HKDF c2s</text>
 </g>
 <g class="s-teal">
 <rect x="404" y="444" width="150" height="48" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
-<text x="479" y="458" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">响应方向密钥</text>
-<text x="479" y="478" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">HKDF s2c</text>
+<text x="479" y="459" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">响应方向密钥</text>
+<text x="479" y="475" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">HKDF s2c</text>
 </g>
 <g class="s-green">
 <rect x="566" y="386" width="74" height="106" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
-<text x="603" y="412" font-size="14" font-weight="500" fill="#173404" text-anchor="middle" dominant-baseline="central">每方向</text>
-<text x="603" y="432" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">密钥不同</text>
-<text x="603" y="448" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">前缀不同</text>
-<text x="603" y="466" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">序号递增</text>
+<text x="603" y="414" font-size="14" font-weight="500" fill="#173404" text-anchor="middle" dominant-baseline="central">每方向</text>
+<text x="603" y="429" font-size="11.5" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">密钥不同</text>
+<text x="603" y="446" font-size="11.5" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">前缀不同</text>
+<text x="603" y="462" font-size="11.5" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">序号递增</text>
 </g>
 <g class="s-t3"><text x="40" y="528" font-size="12" fill="#888780">序号仅接受大于上次值，且验签通过后才推进，因此重放同一密文会被拒绝。</text></g>
 <g class="s-t3"><text x="40" y="550" font-size="12" fill="#888780">会话密钥过期或超限即擦除；长期身份私钥不参与派生，历史抓包无法解密。</text></g>

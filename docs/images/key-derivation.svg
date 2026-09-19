@@ -41,13 +41,13 @@ g.s-div>line{stroke:#444441}
 <g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">握手每会话一次；四个方向材料由同一共享秘密按用途分离，互不通用。</text></g>
 <g class="s-blue">
 <rect x="40" y="74" width="200" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-<text x="140" y="92" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">客户端临时私钥</text>
-<text x="140" y="112" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">每次握手重新生成</text>
+<text x="140" y="93" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">客户端临时私钥</text>
+<text x="140" y="109" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">每次握手重新生成</text>
 </g>
 <g class="s-teal">
 <rect x="440" y="74" width="200" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
-<text x="540" y="92" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">服务端临时私钥</text>
-<text x="540" y="112" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">每次握手重新生成</text>
+<text x="540" y="93" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">服务端临时私钥</text>
+<text x="540" y="109" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">每次握手重新生成</text>
 </g>
 <g class="s-ln"><line x1="242" y1="102" x2="300" y2="102" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-ln"><line x1="438" y1="102" x2="380" y2="102" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
@@ -69,26 +69,26 @@ g.s-div>line{stroke:#444441}
 <g class="s-ln"><line x1="115" y1="310" x2="115" y2="336" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-blue">
 <rect x="40" y="338" width="150" height="62" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-<text x="115" y="358" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">c2s</text>
-<text x="115" y="378" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">客户端加密密钥</text>
+<text x="115" y="360" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">c2s</text>
+<text x="115" y="376" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">客户端加密密钥</text>
 </g>
 <g class="s-ln"><line x1="265" y1="310" x2="265" y2="336" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-teal">
 <rect x="190" y="338" width="150" height="62" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
-<text x="265" y="358" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">s2c</text>
-<text x="265" y="378" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">服务端加密密钥</text>
+<text x="265" y="360" font-size="14" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">s2c</text>
+<text x="265" y="376" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">服务端加密密钥</text>
 </g>
 <g class="s-ln"><line x1="415" y1="310" x2="415" y2="336" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-amber">
 <rect x="340" y="338" width="150" height="62" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
-<text x="415" y="358" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">nonce c2s</text>
-<text x="415" y="378" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">4B 前缀 + 8B 计数</text>
+<text x="415" y="360" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">nonce c2s</text>
+<text x="415" y="376" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">4B 前缀 + 8B 计数</text>
 </g>
 <g class="s-ln"><line x1="565" y1="310" x2="565" y2="336" stroke="#888780" stroke-width="1.5" marker-end="url(#ah)"/></g>
 <g class="s-amber">
 <rect x="490" y="338" width="150" height="62" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
-<text x="565" y="358" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">nonce s2c</text>
-<text x="565" y="378" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">4B 前缀 + 8B 计数</text>
+<text x="565" y="360" font-size="14" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">nonce s2c</text>
+<text x="565" y="376" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">4B 前缀 + 8B 计数</text>
 </g>
 <g class="s-t3"><text x="40" y="428" font-size="12" fill="#888780">会话密钥仅存活于内存，过期或超限即 zeroize 擦除；长期身份密钥不参与派生。</text></g>
 </svg>

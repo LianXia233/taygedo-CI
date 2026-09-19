@@ -166,8 +166,36 @@ jobs:
         run: |
           # OpenWrt 24.10+ 的 apk 包是 v3 ADB 格式，必须用 apk-tools 3.0 的 mkpkg 生成。
           # 下载 Alpine 的 apk-tools-static（静态 x86_64 二进制，可交叉打包任意架构）。
-          curl -fsSL -o apk-tools-static.apk \
-            "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/apk-tools-static-3.0.7-r0.apk"
+          #
+          # 版本策略：Alpine 在 minor 升级时会**删除旧版文件**，任何硬编码的 -rN 都
+          # 会在上游发版后变成 404 并使整个作业中止（曾因此导致 openwrt-* 全量失败）。
+          # 因此这里不写死版本：先按 APK_TOOLS_VER 尝试（便于锁定复现），失败则
+          # 从目录索引自动解析当前最新版本，兼顾可复现性与抗上游漂移。
+          BASE="https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64"
+          APK_TOOLS_VER="${APK_TOOLS_VER:-}"
+
+          fetch() {
+            echo "尝试下载 apk-tools-static $1"
+            curl -fsSL -o apk-tools-static.apk "$BASE/apk-tools-static-$1.apk"
+          }
+
+          ok=0
+          if [ -n "$APK_TOOLS_VER" ] && fetch "$APK_TOOLS_VER"; then
+            ok=1
+          fi
+          if [ "$ok" -eq 0 ]; then
+            RESOLVED="$(curl -fsSL "$BASE/" \
+              | grep -o 'apk-tools-static-[0-9][0-9.]*-r[0-9]*\.apk' \
+              | sed -E 's/^apk-tools-static-(.*)\.apk$/\1/' \
+              | sort -V | tail -1)"
+            if [ -z "$RESOLVED" ]; then
+              echo "错误: 无法从 $BASE 解析 apk-tools-static 版本" >&2
+              exit 1
+            fi
+            echo "自动解析到最新版本: $RESOLVED"
+            fetch "$RESOLVED"
+          fi
+
           mkdir -p apkstatic
           tar xzf apk-tools-static.apk -C apkstatic
           install -m755 apkstatic/sbin/apk.static /usr/local/bin/apk

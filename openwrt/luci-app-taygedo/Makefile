@@ -13,7 +13,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-taygedo
-PKG_VERSION:=0.5.0
+PKG_VERSION:=0.5.1
 PKG_RELEASE:=1
 PKG_LICENSE:=GPL-3.0
 PKG_LICENSE_FILES:=LICENSE
@@ -26,20 +26,19 @@ TAYGEDO_VER:=v$(PKG_VERSION)
 include $(INCLUDE_DIR)/package.mk
 
 # ---------------------------------------------------------------------------
-# OpenWrt CONFIG_ARCH -> Rust musl target 映射
+# OpenWrt CONFIG_ARCH -> Rust musl target 映射（预编译下载路径）
 # ---------------------------------------------------------------------------
+# 注意：CI 仅发布 x86_64 与 aarch64 两个 musl 架构的预编译二进制
+# （见 .github/workflows/build.yml），其余架构没有对应 Release 产物。
+# 若继续映射到不存在产物，下载阶段会 404 且报错信息晦涩（曾在
+# arm_cortex-a7 等常见架构上导致下游编译失败），因此这里对不支持
+# 的架构直接 fail-fast 并给出源码编译指引，而不是静默下载错误架构。
 ifeq ($(CONFIG_ARCH),x86_64)
   TAYGEDO_TRIPLE:=x86_64-unknown-linux-musl
 else ifeq ($(CONFIG_ARCH),aarch64)
   TAYGEDO_TRIPLE:=aarch64-unknown-linux-musl
-else ifeq ($(CONFIG_ARCH),arm)
-  TAYGEDO_TRIPLE:=armv7-unknown-linux-musleabihf
-else ifeq ($(CONFIG_ARCH),mipsel)
-  TAYGEDO_TRIPLE:=mipsel-unknown-linux-musl
-else ifeq ($(CONFIG_ARCH),mips)
-  TAYGEDO_TRIPLE:=mips-unknown-linux-musl
 else
-  TAYGEDO_TRIPLE:=x86_64-unknown-linux-musl
+  $(error luci-app-taygedo: 架构 $(CONFIG_ARCH) 暂无预编译产物（仅支持 x86_64 / aarch64）。如需使用请改用本 Makefile 末尾「方式 B：源码编译」）
 endif
 
 TAYGEDO_ARCHIVE:=taygedo-rs-$(TAYGEDO_TRIPLE).tar.gz

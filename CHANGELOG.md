@@ -2,12 +2,41 @@
 
 本文件记录塔吉多自动签到（Rust 版）的所有版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.5.0`。
+> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.5.1`。
 
 > **关于初始口令的重要提示**：`admin / admin` 这类固定初始口令**仅存在于 0.5.0 之前的历史版本**，
 > 下方旧版本条目（如 0.2.0）中的相关描述是当时的事实记录，**不代表当前行为**。
 > 0.5.0 起首次启动一律由 CSPRNG 随机生成初始口令，仅在启动横幅打印一次。
 > 以 [README](README.md) 的说明为准。
+
+## [0.5.1] - 2026-09-30
+
+### 修复 · CI 编译配置（避免下游编译失败）
+
+- **`.cargo/config.toml` 不再被整个删除**：此前 CI 为绕过 rsproxy 镜像在
+  Linux runner 上执行 `rm -f .cargo/config.toml`，把 aarch64 的
+  `aes_armv8` rustflags 一并删掉——aarch64 musl 交叉编译因此静默退化为
+  软件 AES 后端（性能差约一个数量级 + cache-timing 侧信道），直接抵消
+  0.5.0 的硬件加速加固。现改为「镜像配置独立成文件」：
+  - 新增 `.cargo/config.mirror.toml`（源替换 / rsproxy 镜像 / git-fetch 配置），
+    由 `.cargo/config.toml` 以 `include` 引入；
+  - CI 只把 `config.mirror.toml` 覆盖为空文件以切回官方 crates.io，
+    **完整保留** `.cargo/config.toml` 中的 target 级 rustflags；
+  - 该步骤不再限定 Linux runner，Windows / Debian / musl 各作业行为一致。
+- **OpenWrt Makefile 架构映射与发布产物对齐**：`luci-app-taygedo` 的预编译
+  下载路径原先仍为 `arm` / `mipsel` / `mips` 等架构映射 musl target，而 CI
+  实际只发布 x86_64 与 aarch64 两个架构，导致这些架构在 `Build/Prepare`
+  下载阶段必然 404，报错晦涩（曾在 `arm_cortex-a7` 等常见架构上造成下游
+  编译失败）。现仅保留 x86_64 / aarch64 映射，其余架构 `$(error)` 快速失败
+  并提示改用「方式 B：源码编译」，不再静默下载错误架构的产物。
+
+### 优化 · CI 编译
+
+- **原生构建启用 cargo 缓存**（`Swatinem/rust-cache`）：Windows 与 Debian
+  作业按 `Cargo.lock` 缓存 registry 与 target 目录，重复构建显著提速；
+  musl `cross` 构建依赖 Docker 层缓存，维持现状。
+- 版本号同步至 `v0.5.1`：`Cargo.toml` / `Cargo.lock` / `Makefile` 的
+  `PKG_VERSION` 一致更新，预编译产物下载指向即将发布的 tag。
 
 ## [0.5.0] - 2026-09-19
 

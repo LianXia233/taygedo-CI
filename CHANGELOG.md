@@ -29,6 +29,18 @@
   下载阶段必然 404，报错晦涩（曾在 `arm_cortex-a7` 等常见架构上造成下游
   编译失败）。现仅保留 x86_64 / aarch64 映射，其余架构 `$(error)` 快速失败
   并提示改用「方式 B：源码编译」，不再静默下载错误架构的产物。
+- **OpenWrt 包 Makefile 三处兼容性修复**（`luci-app-taygedo`）：
+  - 架构判断由 `$(CONFIG_ARCH)` 改为 `$(ARCH)`：OpenWrt 包上下文里
+    `CONFIG_ARCH` 未定义/为空，导致所有 ifeq 分支落空、静默下载
+    x86_64 二进制，aarch64 设备装进后无法运行；
+  - `Build/Prepare` 下载由 `download.pl` 改为 `curl -fsSL --retry 3`：
+    原先传参不足（`<file> <url>` 而脚本要求 `<dir> <file> <hash> <url>...`），
+    缺参直接打印 Syntax 并以 255 退出；
+  - `Build/Compile` 由 `$(TARGET_STRIP)` 改为 `chmod 755`：预编译产物是
+    aarch64 静态 musl 二进制（Release 资产已 stripped），在 x86_64 宿主上
+    执行 TARGET_STRIP（展开为空时退化成直接运行该二进制）会报
+    `cannot execute binary file` / Error 126。
+  这三处修复使下游 OpenWRT-CI 不再需要对该 Makefile 打 sed 补丁。
 
 ### 优化 · CI 编译
 

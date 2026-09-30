@@ -26,19 +26,19 @@ TAYGEDO_VER:=v$(PKG_VERSION)
 include $(INCLUDE_DIR)/package.mk
 
 # ---------------------------------------------------------------------------
-# OpenWrt CONFIG_ARCH -> Rust musl target 映射（预编译下载路径）
+# OpenWrt ARCH -> Rust musl target 映射（预编译下载路径）
 # ---------------------------------------------------------------------------
 # 注意：CI 仅发布 x86_64 与 aarch64 两个 musl 架构的预编译二进制
 # （见 .github/workflows/build.yml），其余架构没有对应 Release 产物。
 # 若继续映射到不存在产物，下载阶段会 404 且报错信息晦涩（曾在
 # arm_cortex-a7 等常见架构上导致下游编译失败），因此这里对不支持
 # 的架构直接 fail-fast 并给出源码编译指引，而不是静默下载错误架构。
-ifeq ($(CONFIG_ARCH),x86_64)
+ifeq ($(ARCH),x86_64)
   TAYGEDO_TRIPLE:=x86_64-unknown-linux-musl
-else ifeq ($(CONFIG_ARCH),aarch64)
+else ifeq ($(ARCH),aarch64)
   TAYGEDO_TRIPLE:=aarch64-unknown-linux-musl
 else
-  $(error luci-app-taygedo: 架构 $(CONFIG_ARCH) 暂无预编译产物（仅支持 x86_64 / aarch64）。如需使用请改用本 Makefile 末尾「方式 B：源码编译」）
+  $(error luci-app-taygedo: 架构 $(ARCH) 暂无预编译产物（仅支持 x86_64 / aarch64）。如需使用请改用本 Makefile 末尾「方式 B：源码编译」）
 endif
 
 TAYGEDO_ARCHIVE:=taygedo-rs-$(TAYGEDO_TRIPLE).tar.gz
@@ -77,13 +77,17 @@ define Build/Prepare
 	$(eval TAYGEDO_DL:=$(DL_DIR)/$(TAYGEDO_ARCHIVE))
 	@if [ ! -f "$(TAYGEDO_DL)" ]; then \
 		echo "Downloading $(TAYGEDO_DL_URL)"; \
-		$(SCRIPT_DIR)/download.pl "$(TAYGEDO_DL)" "$(TAYGEDO_DL_URL)"; \
+		curl -fsSL --retry 3 -o "$(TAYGEDO_DL)" "$(TAYGEDO_DL_URL)"; \
 	fi
 	$(TAR) -xzf "$(TAYGEDO_DL)" -C $(PKG_BUILD_DIR)
 endef
 
+# 注意：预编译产物为静态 musl 二进制（Release 资产已 stripped），且编译 step
+# 跑在 x86_64 宿主上，不能对 aarch64 目标二进制执行 $(TARGET_STRIP)（展开为空
+# 时会把整条 recipe 退化成“直接执行该二进制”，宿主无法执行 aarch64 ELF）。
+# 因此这里只做文件操作（chmod），不执行目标二进制。
 define Build/Compile
-	$(TARGET_STRIP) $(PKG_BUILD_DIR)/taygedo-rs
+	chmod 755 $(PKG_BUILD_DIR)/taygedo-rs
 endef
 
 define Package/luci-app-taygedo/install

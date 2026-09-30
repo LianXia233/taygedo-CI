@@ -40,15 +40,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 仅清空镜像 include 文件（而非删除整个 config.toml）：GitHub runners
+      # 直连 crates.io，无需 rsproxy；但 config.toml 里的 aarch64 aes_armv8
+      # rustflags 必须保留，否则 OpenWrt 二进制会静默退化为软件 AES
+      # （性能差约一个数量级 + cache-timing 侧信道）。所有 runner 一视同仁。
       - name: Use default crates.io on GitHub runners
-        if: runner.os == 'Linux'
-        run: rm -f .cargo/config.toml
+        shell: bash
+        run: printf '' > .cargo/config.mirror.toml
 
       - name: Install Rust (native)
         if: matrix.cross == false
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Cache cargo (native)
+        if: matrix.cross == false
+        uses: Swatinem/rust-cache@v2
 
       - name: Install cross
         if: matrix.cross == true
@@ -106,10 +114,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Use default crates.io on GitHub runners
-        run: rm -f .cargo/config.toml
+        shell: bash
+        run: printf '' > .cargo/config.mirror.toml
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-gnu
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
       - name: Build (glibc)
         run: cargo build --release --locked
       # 版本号解析：${GITHUB_REF_NAME#v} 仅在 tag 推送时才是版本号；

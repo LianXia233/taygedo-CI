@@ -1,0 +1,19 @@
+# 可选镜像配置（中国大陆网络加速，非必需）。
+#
+# 本文件由 .cargo/config.toml 通过 `include` 引入，只承载「源替换 / 镜像」
+# 类配置，与 target 级 rustflags（如 aarch64 的 aes_armv8 加速）完全分离。
+#
+# 在 GitHub Actions 上，CI 会将该文件覆盖为空文件以切回官方 crates.io，
+# 从而不会误删 .cargo/config.toml 中的编译期配置；本地 / 自建 CI 如不
+# 需要镜像，也可直接删除本文件或置空。
+[source.crates-io]
+replace-with = 'rsproxy-sparse'
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[registries.rsproxy]
+index = "https://rsproxy.cn/crates.io-index"
+
+[net]
+git-fetch-with-cli = true

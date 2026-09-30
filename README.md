@@ -8,7 +8,7 @@
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square)](./LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20|%20Linux%20|%20OpenWrt-lightgrey?style=flat-square)](#安装教程)
 [![Security: E2EE](https://img.shields.io/badge/Security-E2EE%20(X25519%20+%20AES--GCM)-green?style=flat-square)](#应用层加密)
-[![Release](https://img.shields.io/badge/Release-v0.5.0-orange?style=flat-square)](https://github.com/LianXia233/taygedo-CI/releases)
+[![Release](https://img.shields.io/badge/Release-v0.5.1-orange?style=flat-square)](https://github.com/LianXia233/taygedo-CI/releases)
 
 <p align="center">
   下载单文件、双击即启，全部操作在现代化、带登录鉴权、自适应的 WebUI 中完成。<br>

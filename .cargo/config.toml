@@ -1,14 +1,7 @@
-[source.crates-io]
-replace-with = 'rsproxy-sparse'
-
-[source.rsproxy-sparse]
-registry = "sparse+https://rsproxy.cn/index/"
-
-[registries.rsproxy]
-index = "https://rsproxy.cn/crates.io-index"
-
-[net]
-git-fetch-with-cli = true
+# 引入可选的镜像配置（中国大陆网络加速）。镜像逻辑全部收拢在
+# config.mirror.toml，本文件只保留编译期必需的 target 级 rustflags，
+# 保证 CI 上覆盖镜像文件后不会误删 aarch64 的 AES 加速配置。
+include = "config.mirror.toml"
 
 # ── AArch64（OpenWrt 路由器）加密加速 ────────────────────────────────────────
 #

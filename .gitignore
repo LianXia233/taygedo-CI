@@ -1,2 +1,5 @@
 /target
 /data
+
+# 本地 IDE/工具分享产物，不应入库
+/.trae-html-share-packages/

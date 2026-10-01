@@ -31,14 +31,24 @@ include $(INCLUDE_DIR)/package.mk
 # 注意：CI 仅发布 x86_64 与 aarch64 两个 musl 架构的预编译二进制
 # （见 .github/workflows/build.yml），其余架构没有对应 Release 产物。
 # 若继续映射到不存在产物，下载阶段会 404 且报错信息晦涩（曾在
-# arm_cortex-a7 等常见架构上导致下游编译失败），因此这里对不支持
-# 的架构直接 fail-fast 并给出源码编译指引，而不是静默下载错误架构。
+# arm_cortex-a7 等常见架构上导致下游编译失败），因此这里对不支持的
+# 架构在 build 阶段 fail-fast 并给出源码编译指引，而不是静默下载错误架构。
+#
+# 重要：绝不能把“不支持架构”写成解析期 `else $(error ...)`——
+# OpenWrt 在 make defconfig 生成 tmp/.config-package.in 的元数据扫描阶段会
+# include 本 Makefile，而此刻 $(ARCH) 尚未从 target 配置解析出来（为空）。
+# 一旦在这里写 `else $(error ...)`，$(ARCH) 为空即触发解析期 make 语法错误，
+# 该包会被 packageinfo 扫描丢弃，CONFIG_PACKAGE_luci-app-taygedo 变成未知
+# 符号并被 defconfig 清除，最终 .config 里根本不出现本包（表现为“包未选中”），
+# 下游 CI 报“luci-app-taygedo 未选中”且很难定位。
+#
+# 因此这里只做“已知架构 → triple”的正向映射：未知/空架构令 TAYGEDO_TRIPLE
+# 为空，真正的 fail-fast 放到 Build/Prepare 的 recipe 头部（见下）。
 ifeq ($(ARCH),x86_64)
   TAYGEDO_TRIPLE:=x86_64-unknown-linux-musl
-else ifeq ($(ARCH),aarch64)
+endif
+ifeq ($(ARCH),aarch64)
   TAYGEDO_TRIPLE:=aarch64-unknown-linux-musl
-else
-  $(error luci-app-taygedo: 架构 $(ARCH) 暂无预编译产物（仅支持 x86_64 / aarch64）。如需使用请改用本 Makefile 末尾「方式 B：源码编译」）
 endif
 
 TAYGEDO_ARCHIVE:=taygedo-rs-$(TAYGEDO_TRIPLE).tar.gz
@@ -74,6 +84,13 @@ endef
 
 define Build/Prepare
 	$(call Build/Prepare/Default)
+	# 构建期架构校验（解析期不可做这种封死判断，见上方架构映射注释）：
+	# 若 TAYGEDO_TRIPLE 为空，说明当前 ARCH 没有对应预编译产物，直接 fail-fast
+	# 并给出源码编译指引，避免后续以空 triple 下载「.tar.gz」产生晦涩的 404。
+	@if [ -z "$(TAYGEDO_TRIPLE)" ]; then \
+		echo "ERROR: luci-app-taygedo: 架构 '$(ARCH)' 暂无预编译产物（仅支持 x86_64 / aarch64）。如需使用请改用本 Makefile 末尾「方式 B：源码编译」" >&2; \
+		exit 1; \
+	fi
 	$(eval TAYGEDO_DL:=$(DL_DIR)/$(TAYGEDO_ARCHIVE))
 	@if [ ! -f "$(TAYGEDO_DL)" ]; then \
 		echo "Downloading $(TAYGEDO_DL_URL)"; \

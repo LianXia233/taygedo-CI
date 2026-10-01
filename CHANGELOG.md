@@ -50,6 +50,22 @@
 - 版本号同步至 `v0.5.1`：`Cargo.toml` / `Cargo.lock` / `Makefile` 的
   `PKG_VERSION` 一致更新，预编译产物下载指向即将发布的 tag。
 
+### 修复 · 解析期架构 $(error) 导致下游包未被 .config 选中
+
+- **问题**：`Makefile` 顶层对不支持架构使用 `else $(error ...)`，而 OpenWrt
+  在 `make defconfig` 生成 `tmp/.config-package.in` 的元数据扫描阶段会 include
+  本 Makefile，此时 `$(ARCH)` 尚未从 target 解析出来（为空）。空 `$(ARCH)`
+  触发解析期 `$(error)`，该包被 packageinfo 扫描丢弃，`CONFIG_PACKAGE_
+  luci-app-taygedo` 变成未知符号并被 defconfig 清除，最终 .config 中无本包，
+  表现为「luci-app-taygedo 未选中」，导致下游 OpenWRT-CI 的 H5000M 自用配置
+  编译失败且难以定位。
+- **修复**：架构映射只做「已知架构 → triple」的正向 `ifeq`，未知/空架构令
+  `TAYGEDO_TRIPLE` 为空（解析期永不出错）；真正的 fail-fast 移到 `Build/Prepare`
+  的 recipe 头部——若 triple 为空则以明确报错退出。这样扫描期包能正常注册，
+  构建期对不支持架构依旧 fail-fast 并给出源码编译指引。
+- **验证**：解析期空 `ARCH` 不再中止；`ARCH=aarch64`（H5000M）可正常下载；
+  不支持架构在构建期按预期报错。
+
 ## [0.5.0] - 2026-09-19
 
 本版本是一次**安全加固 + 应用层加密**的大版本。起因是一次针对本项目的

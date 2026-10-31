@@ -579,9 +579,16 @@ fn extract_token(req: &axum::extract::Request) -> String {
 }
 
 async fn index() -> Response {
-    // no-cache：WebUI 随二进制编译内嵌（include_str!），升级后若浏览器仍用
-    // 启发式缓存的旧页面，会出现"新旧界面元素不一致/功能不同步"的假象。
-    ([(header::CACHE_CONTROL, "no-cache")], Html(include_str!("ui.html"))).into_response()
+    // 优先支持外部覆盖文件（如 /etc/taygedo/ui.html 或 /www/taygedo/ui.html），
+    // 方便免重编热替换 WebUI；未提供时回退到内嵌的静态页面。
+    let content = if let Ok(s) = std::fs::read_to_string("/etc/taygedo/ui.html") {
+        s
+    } else if let Ok(s) = std::fs::read_to_string("/www/taygedo/ui.html") {
+        s
+    } else {
+        include_str!("ui.html").to_string()
+    };
+    ([(header::CACHE_CONTROL, "no-cache")], Html(content)).into_response()
 }
 
 /// 服务元信息：供前端判断鉴权模式与加密策略。

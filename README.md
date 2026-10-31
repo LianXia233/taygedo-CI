@@ -58,7 +58,7 @@
 ## 🎨 界面展示（White Material Design 3）
 
 <div align="center">
-  <img src="docs/images/webui-preview.jpg" alt="塔吉多自动签到 WebUI 预览" width="800" style="max-width: 100%; height: auto;" />
+  <img src="docs/images/webui-preview.png" alt="塔吉多自动签到 WebUI 预览" width="800" style="max-width: 100%; height: auto;" />
   <p><sub>图 2：WebUI 主界面预览（白色 MD3 风格、看板统计、卡片管理与实时审计流）</sub></p>
 </div>
 

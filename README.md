@@ -1,18 +1,19 @@
 <div align="center">
 
-# 塔吉多自动签到 (Rust 版)
+# 🌸 塔吉多自动签到 (Rust 版)
 
-基于 Rust 重写的塔吉多（幻塔 / 异环等）每日全自动签到工具，主打**简单易用、零门槛运行**。
+基于 Rust 重写的塔吉多（幻塔 / 异环等）每日全自动签到工具，主打**简单易用、零门槛运行、极简纯白美学**。
 
 [![Rust Version](https://img.shields.io/badge/Language-Rust-dea584?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square)](./LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20|%20Linux%20|%20OpenWrt-lightgrey?style=flat-square)](#安装教程)
+[![Design: White MD3](https://img.shields.io/badge/Design-White%20MD3-3b66f5?style=flat-square)](#界面展示)
 [![Security: E2EE](https://img.shields.io/badge/Security-E2EE%20(X25519%20+%20AES--GCM)-green?style=flat-square)](#应用层加密)
 [![Release](https://img.shields.io/badge/Release-v0.5.2-orange?style=flat-square)](https://github.com/LianXia233/taygedo-CI/releases)
 
 <p align="center">
-  下载单文件、双击即启，全部操作在现代化、带登录鉴权、自适应的 WebUI 中完成。<br>
-  深度适配 <b>OpenWrt 主线与原生 LuCI</b>，内置端到端应用层加密通道。
+  📦 <b>下载单文件、双击即启</b>，全部操作在<b>现代化白色 Material Design 3、自适应双端</b>的 WebUI 中完成。<br>
+  ⚡ <b>深度适配 OpenWrt 主线与原生 LuCI 界面</b>，统一视觉体验，内置端到端应用层加密安全通道。
 </p>
 
 </div>
@@ -25,14 +26,14 @@
 
 > [!NOTE]
 > **版本发布轨道**  
-> - **正式版**（如 `v0.4.11`、`v0.5.0`）：稳定，推荐生产环境使用。访问 [Latest Release](https://github.com/LianXia233/taygedo-CI/releases/latest)。  
+> - **正式版**（如 `v0.5.1`、`v0.5.2`）：稳定，推荐生产环境使用。访问 [Latest Release](https://github.com/LianXia233/taygedo-CI/releases/latest)。  
 > - **`nightly` 版**：滚动预发布，每次手动触发构建后覆盖更新，供快速尝鲜。  
 > 
 > 📦 各平台安装包见 [Releases](https://github.com/LianXia233/taygedo-CI/releases)。上游逻辑参考 [zzstar101/taygedo-auto-attendance](https://github.com/zzstar101/taygedo-auto-attendance)（TypeScript 版，MIT 许可）。本项目自身代码以 **GPL-3.0** 发布，详见 [许可证](#许可证)。
 
 ---
 
-## 三步上手（零门槛）
+## 🚀 三步上手（零门槛）
 
 全程通过浏览器完成：添加账号、设置签到时间、查看审计日志与全局配置均在 Web 界面搞定。
 
@@ -41,7 +42,7 @@
   <p><sub>图 1：按运行环境选择安装方式与包格式</sub></p>
 </div>
 
-| 步骤 | Windows | Debian / Ubuntu | OpenWrt (软路由 / 硬件路由) |
+| 步骤 | 🪟 Windows | 🐧 Debian / Ubuntu | 🌐 OpenWrt (软路由 / 硬件路由) |
 | :---: | :--- | :--- | :--- |
 | **① 下载** | 到 [Releases](https://github.com/LianXia233/taygedo-CI/releases) 下载 zip 并解压 | 下载对应架构的 `.deb` 包 | 下载对应架构的 `.ipk` 或 `.apk` |
 | **② 运行** | **双击 `taygedo-rs.exe`**<br>*(自动唤起默认浏览器)* | `sudo dpkg -i taygedo-rs_*.deb`<br>`sudo systemctl enable --now taygedo-rs` | `opkg install` 或 `apk add`<br>*(安装完成后自动注册服务并启动)* |
@@ -54,16 +55,37 @@
 
 ---
 
-## 功能特性
+## 🎨 界面展示（White Material Design 3）
+
+<div align="center">
+  <img src="docs/images/webui-preview.jpg" alt="塔吉多自动签到 WebUI 预览" width="800" style="max-width: 100%; height: auto;" />
+  <p><sub>图 2：WebUI 主界面预览（白色 MD3 风格、看板统计、卡片管理与实时审计流）</sub></p>
+</div>
+
+访问 `http://<host>:8787`，使用启动日志输出的随机初始口令登录：
+
+- **极简纯白 MD3 美学**：采用 Material Design 3 设计规范，精调纯白卡片面板与柔和阴影，辅以微透明毛玻璃效果（`backdrop-filter: blur(20px)`），视觉通透轻盈。
+- **精美壁纸与新版角色头像**：保持经典精美背景壁纸（`uu4H/bg1.jpg`），叠加白昼毛玻璃遮罩；默认预置高清二次元粉发角色头像（Retina 级高清 Base64 直出，零外链零加载延迟）。
+- **手机 & PC 双端完美响应式**：
+  - **PC 桌面端**：双列网格自适应流式排版，大屏信息尽收眼底；
+  - **手机移动端**：单列弹性折叠，支持 `viewport-fit=cover` 适配刘海屏与虚拟底条，针对触控热区深度优化，单手操作体验极佳。
+- **看板与账号卡片**：
+  - 顶部 MD3 彩标晶片卡片直观呈现账号数、今日已签与排队待签；
+  - 账号卡片采用 20px 圆角立体设计、状态胶囊徽章（Chip）与一键式便捷操作（「立即签到」、「修改计划」、「删除」）。
+- **前端热加载机制**：后端支持优先加载 `/etc/taygedo/ui.html` 或 `/www/taygedo/ui.html`，无需重编二进制即可无感热替换自定义前端样式。
+
+---
+
+## 🌟 功能特性
 
 <div align="center">
   <img src="docs/images/architecture.svg" alt="系统架构" width="800" style="max-width: 100%; height: auto;" />
-  <p><sub>图 2：系统架构（界面层与执行层通过 REST API 交互，本地状态独占落盘）</sub></p>
+  <p><sub>图 3：系统架构（界面层与执行层通过 REST API 交互，本地状态独占落盘）</sub></p>
 </div>
 
 ### 易用与交互
 - **开箱即用，零门槛**：单文件绿色分发，双击解压即用；所有操作集成于 Web 界面，无需配置复杂命令行参数。
-- **响应式现代化 UI**：自适应手机与 PC 视口，支持深浅色主题切换、精美毛玻璃背景卡片。
+- **白色 MD3 响应式 UI**：统一 WebUI 与 LuCI 视觉体验，支持手机/PC 双端响应式流动排版与微动效。
 - **实时日志看板**：WebUI 实时输出带毫秒级时间戳的详细流水审计日志。
 
 ### 账号与多模式登录
@@ -83,21 +105,6 @@
 - **双重认证鉴权**：API 访问受 Token 鉴权保护（7 天有效期）。口令哈希使用 **scrypt（N=16384, r=8, p=1）+ 恒定时间比对**（旧 `sha256` 单轮哈希首次登录自动原地升级）。修改密码后已签发 Token 瞬间全部吊销，登录接口内置失败速率限制（HTTP 429）。
 - **内网免鉴权模式（可选）**：通过环境变量 `TAYGEDO_NO_AUTH=1` 或 OpenWrt UCI `option no_auth '1'`（默认已开）启用，内网环境直接免密控制。非内网来源严格阻断放行。
 - **应用层端到端加密**：全链路采用 **X25519 临时密钥交换 + HKDF-SHA256 + AES-256-GCM**，提供前向保密、单调递增 Nonce 防重放与 AAD 上下文绑定。实测嗅探环境下账号密码与 Token 暴露频次为 **0 次**。
-
----
-
-## 界面展示
-
-<div align="center">
-  <img src="docs/images/webui-preview.jpg" alt="塔吉多自动签到 WebUI 预览" width="800" style="max-width: 100%; height: auto;" />
-  <p><sub>图 3：WebUI 主界面预览（看板统计、账号卡片与实时运行日志）</sub></p>
-</div>
-
-访问 `http://<host>:8787`，使用启动日志输出的随机初始口令登录：
-
-- **看板概览**：顶部展示账号总数、今日已完成与排队待签到统计。
-- **账号卡片**：展示专属头像、平台昵称（无昵称回退备注），支持单独定制执行时刻，提供「立即签到」与「删除」。
-- **凭据录入**：支持账号密码与短信验证码双向快捷绑定。
 - **全局控制面板**：配置默认执行时间、金币打卡任务、云游戏时长、分享平台、管理密码变更及安全退出。
 - **日志审计流**：右侧内置高刷新率实时运行终端。
 

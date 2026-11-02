@@ -88,6 +88,8 @@ fn save_and_load_roundtrip() {
     );
 }
 
+// 断言的是 Unix 主密钥文件布局（`keys/master.key`），Windows 走 DPAPI 封装。
+#[cfg(unix)]
 #[test]
 fn on_disk_bytes_are_ciphertext() {
     let dir = tempfile::tempdir().unwrap();
@@ -252,6 +254,8 @@ fn corrupted_ciphertext_is_rejected_and_not_overwritten() {
     assert_eq!(std::fs::read(&path).unwrap(), raw, "失败时不得改写原文件");
 }
 
+// 篡改的是 Unix 主密钥文件（`keys/master.key`），Windows 无此文件。
+#[cfg(unix)]
 #[test]
 fn tampered_key_file_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
@@ -331,6 +335,8 @@ fn keyring_corruption_is_fatal_not_silently_regenerated() {
     assert!(err.contains("密钥 ID 不匹配"), "实际错误：{err}");
 }
 
+// 主密钥轮换目前只在 Unix 实现（Windows 分支显式返回 Platform 错误）。
+#[cfg(unix)]
 #[test]
 fn rotation_preserves_data_and_changes_key_id() {
     let dir = tempfile::tempdir().unwrap();
@@ -366,11 +372,13 @@ fn rotation_preserves_data_and_changes_key_id() {
     assert_eq!(store2.load_config().unwrap().credential_key, "ck-rot");
 }
 
+// 同 `rotation_preserves_data_and_changes_key_id`：轮换仅在 Unix 实现。
 /// 模拟"轮换做到一半崩溃"：磁盘上 master.key 仍是旧密钥、pending 是新密钥、
 /// 且只有部分文件已换成新密钥。
 ///
 /// 关键断言：**一次重启就要恢复**——续做完成后进程内必须重新装载新密钥，
 /// 否则本次启动会拿旧密钥去读新密文，直接报错退出（那等于要求用户重启两次）。
+#[cfg(unix)]
 #[test]
 fn interrupted_rotation_is_resumed_in_one_start() {
     let dir = tempfile::tempdir().unwrap();

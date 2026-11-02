@@ -100,21 +100,43 @@
     `Result<Response, Response>`，`Err` 变体 128 字节。这是 axum 的既定约定
     （`Err` 必须实现 `IntoResponse`），装箱只会多一次堆分配、不减少实际成本，
     因此加 `#[allow]` 并写明理由，而不是为了消 lint 去改签名。
+- **`crypto_policy=never` 下 WebUI 不可用**（Codex 评审 P2）：WebUI 此前无条件
+  发加密信封，而 `never` 策略下中间件不解密，登录等 POST 会让业务 handler
+  收到密文 JSON 而失败。`src/ui.html` 现在先读 `/api/meta` 的 `crypto_policy`，
+  仅在 `never` 时改走明文请求，其余策略保持信封路径（不回退明文）。
+- **非 2xx 响应对调用方不可读**（Codex 评审 P2）：业务错误（如 401）同样被
+  中间件加密，但 `static/taygedo-crypto.js` 在 `!r.ok` 分支直接返回密文，
+  调用方丢失真实错误；同时明文 `no_session` 被当成普通结果返回，
+  重握手逻辑永远不触发。现在按 `X-TGD-Enc` 标记（缺失时按信封结构）统一解密，
+  明文 `crypto_error` 则抛错进入「重建会话 + 重试一次」。
+- **LuCI 跨源预检缺少 `X-TGD-Envelope`**（Codex 评审 P2）：同主机不同端口时
+  GET/HEAD 信封走该请求头，而 `cors_middleware` 的
+  `Access-Control-Allow-Headers` 未声明它，浏览器会在预检阶段拦下请求。
+  现统一为常量 `ALLOWED_REQUEST_HEADERS`（预检响应与常规响应共用一处定义）。
 
 ### 测试
 
-- 单元/集成测试 **97 passed / 0 failed**（`cargo test`）。
+- 单元/集成测试 **97 passed / 0 failed**（Linux，`cargo test --all-targets`）。
+  Windows 本机为 **85 passed / 0 failed**：8 个既有 Unix 专用用例 + 本次新增
+  `#[cfg(unix)]` 门禁的 4 个用例（断言 `keys/master.key` 布局、密钥篡改、
+  轮换、续做轮换）在 Windows 上不适用，如实跳过而非改断言凑数。
 - 端到端协议测试 `scripts/e2e_web.mjs`：真实二进制 + 仓库内真实前端文件，
-  **21/21 通过**。覆盖：
+  **26/26 通过**。覆盖：
   - 清单验签 + 11 个资源哈希；
   - 加载真实的 `web_guard.js` 对真实清单执行完整性校验：TOFU 首次、指纹已固定、
     指纹变更被拒、资源被替换（哈希不符）被拒、资源恢复后自愈；
+  - 跨源预检声明 `X-TGD-Envelope`（对应本次 `cors_middleware` 修复）；
   - 握手验签、登录、账号/配置/日志往返；
-  - 重放拒绝、跨接口搬移拒绝、GET 走头与 POST 走 body、正文与头并存拒绝、明文 428。
+  - 重放拒绝、跨接口搬移拒绝、GET 走头与 POST 走 body、正文与头并存拒绝、明文 428；
+  - 错误登录返回 401 且响应已解密（调用方拿到 `error` 而非密文）；
+  - 伪造会话 ID 触发 `no_session` 后自动重握手并成功（会话 ID 已更新）。
 - `cargo fmt --all -- --check` 与 `cargo clippy --all-targets -- -D warnings` 均无输出。
 - 上述 fmt / clippy / 测试在 **rustc 1.99.1**（与 CI 同版本）下复验通过。此前本地
   为 1.93，有两条新 lint 未触发，已由 PR 门禁拦下并修正——这也是把质量门禁放到
   PR 上的直接理由：本地版本落后时，"我这儿是干净的"并不等于 CI 干净。
+- `scripts/e2e_web.mjs` 的 vendor 模块动态 import 改为 `pathToFileURL`：
+  原先传裸文件路径，Windows 下被 ESM loader 判为未知 scheme（`Received protocol 'c:'`），
+  该缺陷只在非 Linux 本地复跑时暴露，CI 不受影响。
 
 ## [0.5.2] - 2026-11-01
 

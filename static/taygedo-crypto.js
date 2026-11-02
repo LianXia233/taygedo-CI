@@ -304,35 +304,48 @@
 
         return fetch(self.baseUrl + path, init).then(function (r) {
           return r.text().then(function (text) {
-            if (!r.ok) {
-              var data = {};
-              try { data = JSON.parse(text); } catch (e) {}
-              return { ok: false, status: r.status, data: data };
-            }
-            var j;
-            try { j = JSON.parse(text); } catch (e) {
-              throw new Error('响应不是合法加密信封');
-            }
-            if (j.v !== 2) throw new Error('响应信封版本非法');
-            if (j.kid !== self.kid) throw new Error('响应 Key ID 不匹配');
-            if (j.sid !== self.sid) throw new Error('响应会话 ID 不匹配');
-            if (Number(j.rseq) !== seq) throw new Error('响应与请求不匹配（可能被替换）');
+            var parsed = null;
+            try { parsed = JSON.parse(text); } catch (e) { parsed = null; }
+            var marker = r.headers && r.headers.get ? r.headers.get('X-TGD-Enc') : null;
+            // 业务错误（非 2xx）同样会被中间件加密。必须不分状态统一解密，
+            // 否则调用方只拿到一串密文，丢掉真实错误信息。
+            // 标记缺失时（例如跨源未暴露该头）退化为按信封结构判断。
+            var encrypted = marker === '1' || (marker !== '0' && parsed && parsed.v === 2);
+            if (encrypted) {
+              var j = parsed;
+              if (!j || j.v !== 2) throw new Error('响应不是合法加密信封');
+              if (j.kid !== self.kid) throw new Error('响应 Key ID 不匹配');
+              if (j.sid !== self.sid) throw new Error('响应会话 ID 不匹配');
+              if (Number(j.rseq) !== seq) throw new Error('响应与请求不匹配（可能被替换）');
 
-            var rn = b64uDecode(j.n);
-            if (rn.length !== 24) throw new Error('响应 nonce 长度非法');
-            var raad = self._aad('taygedo/v2/res', Number(j.seq), mtd, path, rn, seq);
-            var pt;
-            try {
-              pt = v.xchacha20poly1305(self.s2c, rn, raad).decrypt(b64uDecode(j.ct));
-            } catch (e) {
-              throw new Error('响应解密失败（认证标签校验不通过）');
+              var rn = b64uDecode(j.n);
+              if (rn.length !== 24) throw new Error('响应 nonce 长度非法');
+              var raad = self._aad('taygedo/v2/res', Number(j.seq), mtd, path, rn, seq);
+              var pt;
+              try {
+                pt = v.xchacha20poly1305(self.s2c, rn, raad).decrypt(b64uDecode(j.ct));
+              } catch (e) {
+                throw new Error('响应解密失败（认证标签校验不通过）');
+              }
+              var data = {};
+              var s = fromUtf8(pt);
+              if (s.length) {
+                try { data = JSON.parse(s); } catch (e) { data = { raw: s }; }
+              }
+              return { ok: r.ok, status: r.status, data: data };
             }
-            var data = {};
-            var s = fromUtf8(pt);
-            if (s.length) {
-              try { data = JSON.parse(s); } catch (e) { data = { raw: s }; }
+
+            // 明文响应只可能来自显式策略分支（crypto_policy=never / 内网直通）
+            // 或加密层自身的错误。带 crypto_error 的必须抛错，
+            // 否则重试逻辑永远看不到 no_session / replay，页面会一直失败。
+            var pdata = parsed || {};
+            if (pdata.crypto_error) {
+              var err = new Error(pdata.error || pdata.crypto_error);
+              err.crypto_error = pdata.crypto_error;
+              err.status = r.status;
+              throw err;
             }
-            return { ok: true, status: r.status, data: data };
+            return { ok: r.ok, status: r.status, data: pdata };
           });
         });
       });

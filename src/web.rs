@@ -83,6 +83,13 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+/// 跨源预检允许的请求头。
+///
+/// 必须与前端实际发送的头一致：`X-TGD-Envelope` 是 GET/HEAD 的信封载体，
+/// 漏掉它会让 LuCI（同主机不同端口）在预检阶段就被浏览器拦下。
+const ALLOWED_REQUEST_HEADERS: &str =
+    "Authorization, Content-Type, X-TGD-Session, X-TGD-Seq, X-TGD-Envelope";
+
 /// CORS 中间件：来源白名单。
 ///
 /// 仅当请求 `Origin` 命中白名单时才回显该 Origin 并声明凭证支持；
@@ -118,7 +125,7 @@ async fn cors_middleware(
                 )
                 .header(
                     header::ACCESS_CONTROL_ALLOW_HEADERS,
-                    "Authorization, Content-Type, X-TGD-Session, X-TGD-Seq",
+                    ALLOWED_REQUEST_HEADERS,
                 )
                 // 仅对白名单来源声明可变头，便于前端读取加密标记
                 .header(header::ACCESS_CONTROL_EXPOSE_HEADERS, "X-TGD-Enc")
@@ -141,7 +148,7 @@ async fn cors_middleware(
         );
         h.insert(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
-            HeaderValue::from_static("Authorization, Content-Type, X-TGD-Session, X-TGD-Seq"),
+            HeaderValue::from_static(ALLOWED_REQUEST_HEADERS),
         );
         h.insert(
             header::ACCESS_CONTROL_EXPOSE_HEADERS,

@@ -29,7 +29,7 @@ use windows_sys::Win32::Security::Cryptography::{
 
 use super::super::atomic;
 use super::super::StorageError;
-use super::{Protection, KEY_BLOB_LEN};
+use super::Protection;
 
 /// DPAPI blob 上限（实际约 300 字节）。
 const MAX_DPAPI_BLOB: usize = 4096;
@@ -177,8 +177,3 @@ pub fn protect_to_file(path: &Path, key: &[u8; 32]) -> Result<Protection, Storag
         Protection::DpapiUser
     })
 }
-
-/// 便于诊断：密钥文件名。
-
-// KEY_BLOB_LEN 在 Windows 路径上不直接使用，保留引用避免 unused 警告。
-const _: usize = KEY_BLOB_LEN;

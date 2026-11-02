@@ -670,16 +670,41 @@ function showMain() {
   $('mainScreen').style.display = '';
 }
 
+/* 明文请求：仅在 crypto_policy=never 时使用。
+   该策略是显式的运维关闭项，后端此时不解密也不加密，
+   再发信封只会让业务 handler 看到密文 JSON。返回结构与
+   cryptoClient.request 一致，调用方无需分支。 */
+async function plainRequest(path, method, body, headers) {
+  const mtd = (method || 'GET').toUpperCase();
+  const init = { method: mtd, headers: Object.assign({}, headers || {}), cache: 'no-store' };
+  if (body !== undefined && mtd !== 'GET' && mtd !== 'HEAD') {
+    init.headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, init);
+  const text = await r.text();
+  let data = {};
+  if (text) {
+    try { data = JSON.parse(text); } catch (e) { data = { raw: text }; }
+  }
+  return { ok: r.ok, status: r.status, data };
+}
+
 async function api(path, method, body) {
   const headers = {};
   if (token) headers['Authorization'] = 'Bearer ' + token;
 
-  // 没有加密客户端 = 无法保护请求。这里**不**回退到明文 fetch：
-  // 明文降级会让"看起来一切正常"的部署实际上毫无保护。
-  if (!cryptoClient) {
-    throw new Error('当前页面无法加载安全通信模块，已阻止发送明文请求');
+  let res;
+  if (metaInfo.crypto_policy === 'never') {
+    res = await plainRequest(path, method || 'GET', body, headers);
+  } else {
+    // 没有加密客户端 = 无法保护请求。这里**不**回退到明文 fetch：
+    // 明文降级会让"看起来一切正常"的部署实际上毫无保护。
+    if (!cryptoClient) {
+      throw new Error('当前页面无法加载安全通信模块，已阻止发送明文请求');
+    }
+    res = await cryptoClient.request(path, method || 'GET', body, headers);
   }
-  const res = await cryptoClient.request(path, method || 'GET', body, headers);
 
   if (res.status === 401) {
     clearToken();
@@ -708,8 +733,14 @@ async function doLogin(e) {
   const btn = $('loginBtn');
   btn.disabled = true; btn.textContent = '登录中...';
   try {
-    if (!cryptoClient) throw new Error('安全通信模块不可用，已阻止明文登录');
-    const res = await cryptoClient.request('/api/login', 'POST', { username: user, password: pwd });
+    let res;
+    if (metaInfo.crypto_policy === 'never') {
+      // 显式关闭加密：后端不解密，必须同样走明文
+      res = await plainRequest('/api/login', 'POST', { username: user, password: pwd });
+    } else {
+      if (!cryptoClient) throw new Error('安全通信模块不可用，已阻止明文登录');
+      res = await cryptoClient.request('/api/login', 'POST', { username: user, password: pwd });
+    }
     const j = res.data || {};
     if (!res.ok) throw new Error(j.error || '登录失败');
     token = j.token;

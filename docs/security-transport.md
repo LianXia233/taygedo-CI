@@ -272,6 +272,23 @@ aad = "taygedo/v2/res" || 0x00
 `crypto_policy=auto` 且来源命中 `lan_cidrs`。这两条都在启动横幅与 `/api/meta`
 里公开暴露（`crypto_policy` / `crypto_required`），运维可随时核对，不是暗门。
 
+### 6.1 客户端如何跟随策略
+
+- **策略选择传输方式**：WebUI 先读 `/api/meta` 的 `crypto_policy`，
+  只有 `never` 时改走明文 `fetch`（该策略下服务端不解密也不加密，再发信封
+  只会让业务 handler 收到密文 JSON）；其余策略一律发信封，`auto + 内网`
+  虽然允许明文，但加密请求同样被接受，因此不做额外分支。
+- **错误响应同样加密**：业务 handler 返回非 2xx 时，中间件仍然加密响应体并
+  置 `X-TGD-Enc: 1`。客户端必须**先解密再判断状态码**，否则调用方只能拿到
+  一串密文。加密层自身的错误则以明文返回并带 `crypto_error`，客户端遇到
+  这类明文错误会**抛错**（而不是当成普通业务结果），从而触发 5.2 的
+  重建会话 + 重试一次。
+- **跨源预检必须声明 `X-TGD-Envelope`**：LuCI 与服务进程不同端口却同主机时，
+  GET/HEAD 的信封走该请求头。`cors_middleware` 的
+  `Access-Control-Allow-Headers` 已固定声明 `Authorization, Content-Type,
+  X-TGD-Session, X-TGD-Seq, X-TGD-Envelope`；漏掉任一项都会让浏览器在预检
+  阶段直接拦下请求。
+
 ---
 
 ## 7. 前端资源完整性

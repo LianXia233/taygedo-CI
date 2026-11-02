@@ -10,19 +10,25 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const base = process.argv[2] || 'http://127.0.0.1:18787';
 const password = process.argv[3] || 'e2e-password-123';
+// 用于验证 CORS 预检声明：取同主机 Origin，保证命中服务端来源白名单
+const originForTest = new URL(base).origin;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const vendor = (f) => path.join(root, 'static', 'vendor', f);
 
-const { xchacha20poly1305 } = await import(vendor('noble-ciphers.js'));
-const { ed25519, x25519 } = await import(vendor('noble-curves-ed25519.js'));
-const { hkdf } = await import(vendor('noble-hashes-hkdf.js'));
-const { sha256 } = await import(vendor('noble-hashes-sha256.js'));
+// 动态 import 必须传 URL：Windows 下裸盘符路径（C:\...）会被 ESM loader
+// 判为未知 scheme，Linux 上两种写法都可，故统一用 pathToFileURL。
+const vend = (f) => pathToFileURL(vendor(f)).href;
+
+const { xchacha20poly1305 } = await import(vend('noble-ciphers.js'));
+const { ed25519, x25519 } = await import(vend('noble-curves-ed25519.js'));
+const { hkdf } = await import(vend('noble-hashes-hkdf.js'));
+const { sha256 } = await import(vend('noble-hashes-sha256.js'));
 
 // 模拟浏览器全局，让前端客户端文件可以原样 eval
 globalThis.window = globalThis;
@@ -147,6 +153,23 @@ console.log('1b) 前端资源完整性（真实 verifier）');
 console.log('2) 握手 + 验签 + 业务往返');
 // 服务元信息：据此判断本来源是否被强制加密
 const meta = await (await fetch(base + '/api/meta')).json();
+// 跨源预检必须声明 GET/HEAD 的信封头，否则 LuCI（同主机不同端口）读取会被浏览器拦下
+{
+  const pre = await fetch(base + '/api/logs', {
+    method: 'OPTIONS',
+    headers: {
+      Origin: originForTest,
+      'Access-Control-Request-Method': 'GET',
+      'Access-Control-Request-Headers': 'X-TGD-Session,X-TGD-Seq,X-TGD-Envelope',
+    },
+  });
+  const allow = String(pre.headers.get('access-control-allow-headers') || '').toLowerCase();
+  assert(
+    pre.status === 204 && allow.includes('x-tgd-envelope'),
+    '跨源预检允许 X-TGD-Envelope',
+    `status=${pre.status} allow=${allow}`
+  );
+}
 const C = window.TaygedoCrypto.create({ baseUrl: base });
 {
   const hs = await C.handshake();
@@ -243,6 +266,29 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
   });
   const bj = await both.json().catch(() => ({}));
   assert(!both.ok && bj.crypto_error === 'malformed', '正文与信封头并存被拒绝', JSON.stringify(bj));
+
+  console.log('3b) 错误响应解密 / 会话失效重握手');
+
+  // 业务错误（401）同样被中间件加密：客户端必须解密后拿到 error 文本
+  const wrong = await C.request('/api/login', 'POST', {
+    username: 'admin',
+    password: 'e2e-wrong-password-xyz',
+  });
+  assert(!wrong.ok && wrong.status === 401, '错误登录返回 401', String(wrong.status));
+  assert(
+    typeof (wrong.data && wrong.data.error) === 'string' && !wrong.data.ct,
+    '错误响应已解密（调用方拿到的不是密文）',
+    JSON.stringify(wrong.data)
+  );
+
+  // 服务端不认识的 sid：明文返回 no_session，客户端应自动重握手并重试一次
+  const stale = '0'.repeat(32);
+  C.sid = stale;
+  const retried = await C.request('/api/accounts', 'GET', undefined, {
+    Authorization: 'Bearer ' + token,
+  });
+  assert(retried.ok && Array.isArray(retried.data.accounts), 'no_session 触发重握手后请求成功');
+  assert(C.sid !== stale, '重握手后会话 ID 已更新', String(C.sid));
 
   console.log('4) 明文降级被拒绝');
   const plain = await fetch(base + '/api/accounts', {

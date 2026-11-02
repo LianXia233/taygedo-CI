@@ -49,7 +49,11 @@ pub const KEY_MAGIC: [u8; 8] = *b"TGDKEY01";
 /// 主密钥文件版本。
 #[cfg(unix)]
 pub const KEY_FORMAT_VERSION: u8 = 1;
-/// 密钥文件总长：8 + 1 + 1 + 32。
+/// 密钥文件长度（Magic 8 + 版本 1 + 保护方式 1 + 密钥 32）。
+///
+/// 非 Unix 平台只在测试里引用（Windows 的密钥走 DPAPI 封装），
+/// 故对这些目标放行 dead_code。
+#[cfg_attr(not(unix), allow(dead_code))]
 pub const KEY_BLOB_LEN: usize = 42;
 
 /// 主密钥保护方式。取值即事实，不做美化。
@@ -312,6 +316,9 @@ pub fn promote_pending_key(_data_dir: &Path) -> Result<(), StorageError> {
 mod tests {
     use super::*;
 
+    // 这两个用例测的是 Unix 密钥文件编码（`encode_key_blob` / `decode_key_blob`
+    // 本身只在 unix 下编译），Windows 上引用会直接编译失败。
+    #[cfg(unix)]
     #[test]
     fn key_blob_roundtrip() {
         let key = [0x42u8; 32];
@@ -320,6 +327,7 @@ mod tests {
         assert_eq!(decode_key_blob(&blob).unwrap(), key);
     }
 
+    #[cfg(unix)]
     #[test]
     fn key_blob_rejects_short_and_bad_magic() {
         assert!(decode_key_blob(&[0u8; 10]).is_err());

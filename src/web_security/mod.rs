@@ -39,7 +39,7 @@
 //! ## 与业务层的关系
 //!
 //! 加解密全部发生在中间件里，业务 handler 只看到明文 JSON。因此
-//! **API 路径、请求参数、响应结构完全不变**，WebUI / LuCI 的业务代码
+//! **API 路径、请求参数、响应结构完全不变**，外部 API 客户端与 LuCI 视图
 //! 不需要改动任何数据结构。
 
 pub mod cipher;
@@ -203,7 +203,6 @@ impl CryptoManager {
                     requests: 0,
                     recv: ReplayWindow::new(),
                     send_seq: 1,
-                    authenticated: false,
                     peer: peer.to_string(),
                 },
             );
@@ -333,14 +332,6 @@ impl CryptoManager {
             ct: URL_SAFE_NO_PAD.encode(&ct),
         };
         serde_json::to_vec(&env).map_err(|_| CryptoError::Malformed)
-    }
-
-    /// 标记会话已完成口令登录。
-    pub fn mark_authenticated(&self, sid: &str) {
-        let mut map = self.sessions.lock().unwrap();
-        if let Some(s) = map.get_mut(sid) {
-            s.authenticated = true;
-        }
     }
 
     /// 销毁单个会话（精细登出 / 异常会话隔离）。

@@ -2,7 +2,7 @@
 //!
 //! ## 为什么不是"严格递增 last_seq"
 //!
-//! WebUI 会并发发起多个请求（例如 `loadAccounts()` 与 `loadLogs()` 不 await
+//! 客户端会并发发起多个请求（例如 `loadAccounts()` 与 `loadLogs()` 不 await
 //! 就一起发出）。TCP 层的到达顺序不保证，严格单调的 `last_seq` 会把
 //! **合法的乱序请求**误判为重放。
 //!

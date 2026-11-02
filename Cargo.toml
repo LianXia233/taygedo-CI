@@ -2,7 +2,7 @@
 name = "taygedo-rs"
 version = "0.7.0"
 edition = "2021"
-description = "塔吉多自动签到 - Rust 重写版，带 WebUI 管理界面"
+description = "塔吉多自动签到 - Rust 重写版（单文件，API 服务 + OpenWrt/LuCI 集成）"
 license = "GPL-3.0-only"
 
 [[bin]]

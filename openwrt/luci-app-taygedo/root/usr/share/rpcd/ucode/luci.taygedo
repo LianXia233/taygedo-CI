@@ -1,0 +1,270 @@
+'use strict';
+
+// LuCI ↔ 塔吉多后端 的 rpcd 内部通道。
+//
+// 设计约束（与仓库其余部分一致，刻意保持最小实现，不引入新框架）：
+//   - 浏览器不直连后端端口：本插件在 rpcd 服务端（root 身份）用 curl 调
+//     本机回环 http://127.0.0.1:<uci port>。
+//   - 身份由 OpenWrt 提供，且**只认 rpcd 注入的服务端真值**：
+//     本固件的 rpcd-mod-ucode 不提供 request.session，而是把已认证会话号放进
+//     request.args.ubus_rpc_session（客户端伪造该键会被 ubus 以 Invalid
+//     parameters 拒绝）。较新 rpcd 若有 request.session 则优先使用。
+//     前端传入的 args.sid 仅用于让 ubus 签名保持兼容，**不作为信任依据**。
+//     真实鉴权发生在 rpcd 的 ACL 检查（acl.d/luci-app-taygedo.json，按方法粒度）；
+//     本插件把会话号透传为 X-TGD-Luci-Session，后端在"OpenWrt + 回环"路径下
+//     只做形态校验，不再嵌套调用 ubus（嵌套会与 rpcd 自身 uloop 死锁）。
+//   - 方法白名单：每个 ubus 方法对应唯一固定的 HTTP 方法与路径，参数只允许
+//     出现在 body 或严格校验过的 id/limit 上，避免把请求参数拼进 shell。
+//   - ACL 粒度为单个方法（见 acl.d/luci-app-taygedo.json），不使用"一个通吃
+//     的 request 方法"，避免一次授权放行全部业务写操作。
+//   - 导出形态遵循本固件既有插件（luci.wolultra / luci.netmonitor）的写法：
+//     `return { '<ubus 对象名>': { <方法名>: { args, call } } }`。
+
+import { popen, readfile, mkdtemp, open } from 'fs';
+import { cursor } from 'uci';
+
+const FALLBACK_PORT = 8787;
+const CURL_TIMEOUT = 15;
+
+// 读取 UCI 配置的端口。非法值回落到 8787（与 init.d 默认一致）。
+function backend_port() {
+	let v = cursor().get('taygedo', 'main', 'port');
+	let n = v != null ? +v : 0;
+	return (n > 0 && n < 65536) ? n : FALLBACK_PORT;
+}
+
+// LuCI 会话号白名单校验：只允许 ubus_rpc_session 的字符集。
+// sid 会进入 curl 的命令行，必须严格校验，不能拼接未校验的外部输入。
+function valid_sid(sid) {
+	if (type(sid) != 'string')
+		return false;
+	let s = trim(sid);
+	if (length(s) < 1 || length(s) > 128)
+		return false;
+	return match(s, /^[A-Za-z0-9_.:-]+$/) ? true : false;
+}
+
+// 账号 id 白名单校验（同样是拼进 URL path 的外部输入）。
+function valid_id(id) {
+	return type(id) == 'string' && match(id, /^[A-Za-z0-9_-]{1,64}$/) ? true : false;
+}
+
+// 调用方会话号：只取服务端真值，忽略前端传入的 args.sid。
+function caller_session(request) {
+	if (type(request.session) == 'string') {
+		let s = trim(request.session);
+		if (length(s) > 0)
+			return s;
+	}
+	if (request.args != null && type(request.args.ubus_rpc_session) == 'string')
+		return trim(request.args.ubus_rpc_session);
+	return '';
+}
+
+function fail(http, msg) {
+	return { ok: false, http: http, error: msg };
+}
+
+function rmdir_tmp(dir) {
+	let h = popen('rm -rf \'' + dir + '\'', 'r');
+	if (h)
+		h.close();
+}
+
+// 统一的内部调用：固定方法 + 路径；请求体与响应体都走临时文件，
+// 命令行里只出现「已验证的 sid/id」与「本插件自己生成的临时路径」。
+function call(request, opt) {
+	let args = request.args != null ? request.args : {};
+	let sid = caller_session(request);
+	let path = opt.path(args);
+
+	if (path == null)
+		return fail(400, 'bad arguments');
+
+	if (opt.auth != false && !valid_sid(sid))
+		return fail(401, 'missing LuCI session');
+
+	let dir = mkdtemp('/tmp/tgd.rpcd.XXXXXX');
+	if (dir == null)
+		return fail(500, 'tmpdir create failed');
+
+	let body = opt.body ? opt.body(args) : null;
+	if (body != null) {
+		// ubus 字符串参数只接受字符串，前端已 JSON.stringify；这里还原成对象。
+		if (type(body) == 'string') {
+			try {
+				body = json(body);
+			} catch (e) {
+				rmdir_tmp(dir);
+				return fail(400, 'bad body');
+			}
+		}
+		let f = open(dir + '/req', 'w');
+		if (f == null) {
+			rmdir_tmp(dir);
+			return fail(500, 'tmpfile create failed');
+		}
+		f.write(sprintf('%J', body));
+		f.close();
+	}
+
+	let cmd = 'curl -sS --max-time ' + CURL_TIMEOUT + ' --noproxy \'*\''
+		+ ' -o \'' + dir + '/out\' -w \'%{http_code}\''
+		+ ' -X ' + opt.method
+		+ ' -H \'Accept: application/json\'';
+
+	if (opt.auth != false)
+		cmd += ' -H \'X-TGD-Luci-Session: ' + trim(sid) + '\'';
+
+	if (body != null)
+		cmd += ' -H \'Content-Type: application/json\''
+			+ ' --data-binary @\'' + dir + '/req\'';
+
+	cmd += ' \'http://127.0.0.1:' + backend_port() + path + '\'';
+
+	let h = popen(cmd, 'r');
+	let code = h ? trim(h.read('all')) : '0';
+	if (h)
+		h.close();
+
+	let raw = readfile(dir + '/out');
+	rmdir_tmp(dir);
+
+	let status = +code;
+	if (!(status > 0))
+		return fail(503, 'backend unreachable');
+
+	let data = null;
+	if (raw != null && length(trim(raw)) > 0) {
+		try {
+			data = json(raw);
+		} catch (e) {
+			data = null;
+		}
+	}
+
+	if (status >= 200 && status < 300)
+		return { ok: true, http: status, data: data };
+
+	let msg = 'backend error';
+	if (type(data) == 'object' && data != null && type(data.error) == 'string')
+		msg = data.error;
+	else if (type(data) == 'object' && data != null && type(data.message) == 'string')
+		msg = data.message;
+
+	return { ok: false, http: status, error: msg, data: data };
+}
+
+const methods = {
+	meta: {
+		call: function(request) {
+			return call(request, {
+				method: 'GET',
+				auth: false,
+				path: function() { return '/api/meta'; }
+			});
+		}
+	},
+
+	config_get: {
+		args: { sid: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'GET',
+				path: function() { return '/api/config'; }
+			});
+		}
+	},
+
+	config_set: {
+		args: { sid: 'string', body: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'POST',
+				path: function() { return '/api/config'; },
+				body: function(a) { return a.body != null ? a.body : {}; }
+			});
+		}
+	},
+
+	accounts_list: {
+		args: { sid: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'GET',
+				path: function() { return '/api/accounts'; }
+			});
+		}
+	},
+
+	account_add: {
+		args: { sid: 'string', body: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'POST',
+				path: function() { return '/api/accounts'; },
+				body: function(a) { return a.body != null ? a.body : {}; }
+			});
+		}
+	},
+
+	account_delete: {
+		args: { sid: 'string', id: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'DELETE',
+				path: function(a) { return valid_id(a.id) ? '/api/accounts/' + a.id : null; }
+			});
+		}
+	},
+
+	signin: {
+		args: { sid: 'string', id: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'POST',
+				path: function(a) { return valid_id(a.id) ? '/api/accounts/' + a.id + '/signin' : null; },
+				body: function() { return { force: true }; }
+			});
+		}
+	},
+
+	schedule_set: {
+		args: { sid: 'string', id: 'string', body: 'object' },
+		call: function(request) {
+			return call(request, {
+				method: 'POST',
+				path: function(a) { return valid_id(a.id) ? '/api/accounts/' + a.id + '/schedule' : null; },
+				body: function(a) { return a.body != null ? a.body : {}; }
+			});
+		}
+	},
+
+	logs: {
+		args: { sid: 'string', limit: 'string' },
+		call: function(request) {
+			let limit = request.args != null ? +request.args.limit : 200;
+			if (!(limit > 0))
+				limit = 200;
+			if (limit > 500)
+				limit = 500;
+			return call(request, {
+				method: 'GET',
+				path: function() { return '/api/logs?limit=' + limit; }
+			});
+		}
+	},
+
+	send_code: {
+		args: { sid: 'string', body: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'POST',
+				path: function() { return '/api/send-code'; },
+				body: function(a) { return a.body != null ? a.body : {}; }
+			});
+		}
+	}
+};
+
+return { 'luci.taygedo': methods };

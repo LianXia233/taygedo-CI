@@ -8,7 +8,8 @@ FROM debian:bookworm-slim
 WORKDIR /app
 COPY --from=builder /app/target/release/taygedo-rs /usr/local/bin/taygedo-rs
 ENV TAYGEDO_DATA_DIR=/data \
-    TAYGEDO_LISTEN=0.0.0.0:8787
+    TAYGEDO_LISTEN=0.0.0.0:8787 \
+    TAYGEDO_EDITION=standalone
 EXPOSE 8787
 VOLUME ["/data"]
 CMD ["taygedo-rs"]

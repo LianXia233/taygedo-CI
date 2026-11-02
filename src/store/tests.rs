@@ -33,15 +33,8 @@ fn config_json(cred: &str) -> String {
   "cloud_duration": true,
   "share_platform": "qq",
   "max_retries": 3,
-  "web_username": "admin",
-  "web_password_hash": "deadbeef",
-  "web_password_salt": "0011223344556677",
-  "web_password_version": 2,
-  "web_password_must_change": false,
   "crypto_policy": "auto",
-  "lan_no_auth": true,
-  "lan_cidrs": "192.168.0.0/16",
-  "initial_password_announced": true
+  "lan_cidrs": "192.168.0.0/16"
 }}"#
     )
 }
@@ -317,7 +310,9 @@ fn keyring_corruption_is_fatal_not_silently_regenerated() {
     {
         let store = Store::new(dir.path().to_path_buf()).unwrap();
         store
-            .save_keyring(&serde_json::from_str::<crate::models::KeyRing>(&keyring_json()).unwrap())
+            .save_keyring_if_absent(
+                &serde_json::from_str::<crate::models::KeyRing>(&keyring_json()).unwrap(),
+            )
             .unwrap();
     }
     // 用错误的主密钥重新加密 keyring，模拟"文件被替换"

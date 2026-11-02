@@ -32,6 +32,91 @@ GitHub 会继续强制它在 Node 24 上运行、并在 `dependency-audit` 作�
 无需升级：`Swatinem/rust-cache@v2` 的 `v2` 分支已是 `node24`；`dtolnay/rust-toolchain@stable`
 与 `taiki-e/install-action@v2` 是 composite action，不使用 Node 运行时。
 
+### 破坏性变更 · 内置 WebUI 彻底移除，OpenWrt 改走内部 ucode/rpcd 通道
+
+- **内置 WebUI 已删除**（不是"保留但不启用"）：`src/ui.html`、`/` 首页路由、
+  `/api/login`、`/api/logout`、`/api/password` 登录 / 改密 / 登出接口、
+  WebUI 专用静态资源与清单条目、`web_password` 等配置项与相关测试全部移除。
+  `GET /` 由 axum 直接返回 `404`，不再有 `webui_retired`（404 带 code）或 `410 Gone`
+  这类"保留但弃用"的形态。
+- **没有应用自有凭据**：不再生成随机初始口令，不再签发 Token，不再校验口令哈希。
+  `/api/meta` 去掉 `webui_enabled` / `no_auth` / `must_change_password`，
+  `auth_mode` 只剩 `luci_session`（OpenWrt）与 `trusted_source`（独立部署）两种。
+- **OpenWrt 无浏览器侧加密前端**：LuCI 视图不再加载 `taygedo-crypto.js`、
+  不再构造 `X-TGD-Envelope` 信封、不直连应用端口；数据由 rpcd ucode 插件
+  `luci.taygedo` 在服务端以已认证 LuCI 会话身份调用 `http://127.0.0.1:<port>`
+  后回传给页面。视图只做展示与交互。
+- **后端端口不对 LAN 暴露**：OpenWrt init 脚本固定 `TAYGEDO_LISTEN=127.0.0.1:<port>`；
+  rpcd ACL 按方法粒度显式声明权限（读 / 写分离），未声明的方法一律拒绝，
+  且不授予 `/etc/taygedo/**` 文件读写。
+- **加密信封层的归宿**：服务端信封层与非 OpenWrt 的浏览器侧加密前端**保持现状**
+  ——独立部署的外部 API 客户端仍是真实消费者；OpenWrt 侧已无消费者，
+  其唯一入口（LuCI 视图）已移除加密加载路径，`static/` 资源不再随 OpenWrt 包装机。
+  另：OpenWrt 上即便 `crypto_policy=always`，回环内部通道也不强制信封
+  （该通道只能由本机进程触达，且叠加 LuCI 会话校验）。
+- **鉴权缺陷修复**：`luci_session.rs::parse_session_get` 同时接受顶层 `username`
+  与 rpcd 真机实际返回的 `{"values":{"username":"root"}}`（顶层为空时回落），
+  新增回归测试覆盖顶层 / values / 两者缺失或为空三种输入。
+- **配置字段清理**：`web_username`、`web_password_hash`、`web_password_salt`、
+  `web_password_version`、`web_password_must_change`、`lan_no_auth`、
+  `initial_password_announced` 全部移除；旧数据文件里的未知字段读取时被忽略。
+- **打包与 CI 同步**：打包脚本、OpenWrt Makefile、CI 不再打包 WebUI 资源，
+  也不再传递 `TAYGEDO_WEB_PASSWORD`；`scripts/e2e_web.mjs` 改为无登录、无 `Authorization`
+  的协议测试。
+- **启动日志**：不再打印 WebUI 访问地址或初始口令；OpenWrt 提示块改为说明
+  "无内置 WebUI、无浏览器侧加密前端，数据经 rpcd/ucode 内部通道"。
+
+### 安全 · 方案 A：鉴权边界收敛到 rpcd ACL
+
+- **会话号只认服务端真值**：`/usr/share/rpcd/ucode/luci.taygedo` 新增 `caller_session(request)`，
+  从 `request.session`（较新 rpcd 提供）或 `request.args.ubus_rpc_session`（本固件
+  `rpcd-mod-ucode` 实际注入的位置）取会话号；前端传入的 `args.sid` 只用于保持 ubus 签名兼容，
+  **不作为信任依据**。客户端若自己在 params 里伪造 `ubus_rpc_session`，ubus 直接以
+  `Invalid parameters`（-32602）拒绝，该键无法被前端抢先写入。
+- **鉴权边界 = rpcd ACL**：`acl.d/luci-app-taygedo.json` 继续按方法粒度声明 read / write
+  （只读方法在 read，改配置 / 加删账号 / 签到 / 验证码在 write），未登录会话或未被授予该 ACL
+  的会话调不到 `luci.taygedo` 的任何方法（实测 `-32002 Access denied`）。
+- **后端回环路径不再嵌套 ubus**：`src/web.rs` 新增纯函数 `session_gate(openwrt, loopback, sid)`，
+  把「运行形态 + 来源 + 会话号」压成四种结果：
+  - `OpenWrt + 回环 + 会话号形态合法` → 放行（`InternalChannel`），**不再调用**
+    `ubus call session get`；只校验形态（1–128 位、`[A-Za-z0-9_.:-]`）。
+  - `OpenWrt + 回环 + 形态非法` → `401 luci_session_invalid`。
+  - 非回环来源（含 OpenWrt 与独立部署）→ `UbusCheck`，保持原有 `ubus call session get`
+    校验强度，不因修 OpenWrt 而放宽外部路径。
+  - 空会话号 → `401 luci_session_missing`。
+  死锁根因是 rpcd 的 ucode 方法在其自身 uloop 内同步执行，插件再同步发起 `ubus call`
+  等不到同一进程应答，实测恰好耗满后端 `UBUS_TIMEOUT`（2 秒）后按 fail-closed 返回 401。
+- **信任模型与代价**：回环路径的信任前提是「本机进程 + rpcd 已认证会话」；本机 root 可以直接
+  `curl http://127.0.0.1:<port>` 并自带形态合法的会话号，这与 root 已有的权限等价，
+  不构成权限提升。真正约束受限用户的是 rpcd ACL——受限 LuCI 用户即便打开页面，
+  也调不到未授权方法。两套路径的差异与信任前提见 `docs/security-transport.md` §8.2。
+
+### 验证
+
+- **本地静态与测试**（实跑）：`cargo fmt --all -- --check`、`cargo clippy --all-targets -- -D warnings`、
+  `cargo test --all-targets`（91 passed / 0 failed，含方案 A 的 4 个会话门单测）、
+  `cargo build --release` 全部通过；改动文件 CRLF 计数为 0。
+- **本地冒烟**（`TAYGEDO_EDITION=openwrt`，临时实例 `127.0.0.1:18787`）：`GET /` 返回 `404`；
+  `/api/meta` 只剩 `ok/edition/auth_mode/crypto_policy/crypto_required/crypto_proto/crypto_alg/crypto_identity_kid`；
+  `/api/config` 无会话 `401 luci_session_missing`、形态非法 `401 luci_session_invalid`、
+  回环 + 形态合法会话号 `200`（本机无 ubus，能 200 即证明回环路径确实不再依赖 ubus），
+  冷首调耗时 0.97ms；`/api/login`、`/api/logout`、`/api/password` 均为 `404`。
+- **真机**（ImmortalWrt / aarch64_cortex-a53，部署分支构建产物后实测）：`parse_session_get`
+  已能识别 rpcd 返回的 `{"values":{"username":"root"}}`；带 `X-TGD-Luci-Session` 直连回环
+  请求 `/api/config` 返回 `200`，无会话 / 形态非法一律 `401`。
+- **真机冷会话（方案 A 关键观测）**：`/etc/init.d/taygedo restart` 清空会话缓存后，
+  经 LuCI 真实的 `POST /ubus`（`luci.taygedo`）首次调用 `config_get` 与 `meta`，
+  均返回 `http:200`，实测耗时 **50ms**（进程内 uptime 差值计），
+  不再出现此前"恰好耗满 `UBUS_TIMEOUT` 2 秒后 401"的现象；
+  无会话 / 伪造会话在该路径上被 rpcd ACL 直接拒绝（`-32002 Access denied`）。
+- **真机端口与来源**：`netstat` 仅见 `127.0.0.1:8787`（无 `0.0.0.0`）；
+  从设备自身访问 `http://192.168.88.1:8787/api/meta` 连接失败（rc 非 0）；
+  直连回环的 `/api/config` 无会话 `401`、形态非法会话号 `401`。
+- **真机页面**：无头浏览器（Playwright，SSH 端口转发）登录 LuCI 后打开
+  「服务 → 塔吉多签到」，页面正常渲染账号列表、运行日志与全局设置，
+  控制台无 401、业务接口无 4xx/5xx（唯一的 403 是登录前 `/cgi-bin/luci` 自身的既知行为）；
+  `GET /`、`/api/login`、`/api/logout`、`/api/password` 均 `404`。
+
 ### 安全 · 升级受 RustSec 公告影响的传递依赖
 
 `v0.7.0` 的发布流水线里 `dependency-audit` 作业实测报告 **9 条漏洞**
@@ -96,8 +181,8 @@ GitHub 会继续强制它在 Node 24 上运行、并在 `dependency-audit` 作�
   `luci_session_check`，并把 `web_password` / `no_auth` / `lan_no_auth` 标注为
   已废弃；包描述与 ACL 说明改为"LuCI 唯一入口、鉴权交给 OpenWrt"。
 
-> **维护边界**：内置 WebUI 在 OpenWrt 目标上已退役且**不再维护**；
-> 它仅在 Windows / Linux 独立部署时保持现状，非 OpenWrt 构建与运行行为不变。
+> **维护边界（已被上方 `[Unreleased]` 取代）**：本条描述的是"保留源码、仅在该目标下不启用"
+> 的过渡形态；`[Unreleased]` 中内置 WebUI 已从代码库彻底删除，`src/ui.html` 不复存在。
 
 ### 验证
 

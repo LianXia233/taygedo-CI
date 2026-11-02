@@ -15,7 +15,7 @@ pub const SESSION_TTL_SECS: i64 = 30 * 60;
 /// 单会话最大请求数。
 ///
 /// 上限的作用是限制**同一把密钥的加密次数**（降低 nonce 复用与密钥磨损面），
-/// 同时给出一个自然的"该重新握手了"的时机。20 万次远高于正常 WebUI 使用量。
+/// 同时给出一个自然的"该重新握手了"的时机。20 万次远高于正常客户端使用量。
 pub const SESSION_MAX_REQUESTS: u64 = 200_000;
 /// 同时存在的会话上限。超出时淘汰最旧的，避免内存被握手洪水打爆。
 pub const MAX_SESSIONS: usize = 256;
@@ -38,8 +38,6 @@ pub struct Session {
     pub recv: ReplayWindow,
     /// 响应方向序号（独立计数，与请求序号无关）。
     pub send_seq: u64,
-    /// 是否已通过口令登录（用于审计与后续策略）。
-    pub authenticated: bool,
     /// 来源标识（IP）。仅供诊断（"这个会话来自哪"），日志默认不输出。
     #[allow(dead_code)]
     pub peer: String,

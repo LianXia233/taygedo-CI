@@ -3,7 +3,8 @@
 		"description": "Grant access to Taygedo auto attendance",
 		"read": {
 			"ubus": {
-				"service": [ "list" ]
+				"service": [ "list" ],
+				"luci.taygedo": [ "meta", "config_get", "accounts_list", "logs" ]
 			},
 			"uci": [ "taygedo" ],
 			"file": {
@@ -16,15 +17,21 @@
 				"/etc/config/taygedo": [ "write" ]
 			},
 			"ubus": {
-				"service": [ "restart", "reload" ]
+				"service": [ "restart", "reload" ],
+				"luci.taygedo": [ "config_set", "account_add", "account_delete", "signin", "schedule_set", "send_code" ]
 			}
 		},
 		"note": [
-			"本包不通过 rpcd/ubus 代理任何业务数据：账号、签到状态与日志均由",
-			"taygedo-rs 自己的 HTTP API 提供（LuCI 页面直接请求 :8787）。",
-			"鉴权不使用应用自有口令：页面把 LuCI 会话号随请求带给后端，后端用本机",
-			"ubus session get 判定有效性（即登录态由 OpenWrt 负责）。",
-			"因此 ACL 只需 UCI 读写（改端口/加密策略）+ service 重启权限。",
+			"业务数据经 rpcd 内部通道转发：LuCI 页面调用 ubus 对象 luci.taygedo，",
+			"由 /usr/share/rpcd/ucode/luci.taygedo 在服务端以 curl 调本机回环",
+			"http://127.0.0.1:<port>；浏览器不直连后端端口。",
+			"鉴权由 OpenWrt 负责，边界就是本文件的 ACL：未登录（或未被授予",
+			"taygedo ACL 的）会话根本调不到 luci.taygedo 的任何方法。",
+			"ucode 只认 rpcd 注入的服务端会话号（request.args.ubus_rpc_session，",
+			"客户端伪造该键会被 ubus 拒绝），并透传为 X-TGD-Luci-Session。",
+			"后端在 OpenWrt + 回环路径下只做会话号形态校验，不再嵌套调 ubus。",
+			"ACL 按方法粒度授权：只读方法在 read，写方法（改配置/加删账号/签到/",
+			"验证码）在 write，不使用一个通吃方法放行全部操作。",
 			"刻意**不**授予 /etc/taygedo/** 的文件读写：该目录含 config.json",
 			"（账号与加密后的凭据）与 keyring.json（长期身份私钥），若经 rpcd",
 			"暴露为可读，任何拥有 taygedo ACL 的 LuCI 用户都能导出私钥。"

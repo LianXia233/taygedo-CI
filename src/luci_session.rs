@@ -2,19 +2,20 @@
 //!
 //! ## 为什么由服务端自己校验
 //!
-//! OpenWrt 集成模式下内置 WebUI 已退役：LuCI 页面（uhttpd 上的原生 JS 视图）
-//! 直接跨端口调用本服务的 REST API。登录与身份由 OpenWrt 自己的 LuCI 会话
-//! 负责，本服务**不再签发、也不再校验自有口令/Token**。
+//! OpenWrt 集成模式不提供内置 WebUI，也没有浏览器侧加密前端：LuCI 视图只做
+//! 展示与交互，数据由 rpcd/ucode 插件在服务端调用本服务的 loopback API 取得，
+//! 再把结果返回前端。登录与身份完全由 OpenWrt 自己的 LuCI 会话负责，本服务
+//! **不再签发、也不再校验自有口令/Token**。
 //!
-//! 页面在每次请求上带 `X-TGD-Luci-Session`（取自 LuCI 的 `L.env.sessionid`），
-//! 本模块通过本机 ubus 的 `session get` 让 rpcd 判定该会话是否真实有效。
-//! 这样"能否访问"完全取决于 OpenWrt 的会话状态：用户在 LuCI 注销/会话过期后，
-//! 后端 API 立即拒绝，无需另行维护第二套凭据。
+//! rpcd 侧在转发时带上 `X-TGD-Luci-Session`（会话号取自 rpcd 已认证的 ubus
+//! 会话），本模块通过本机 ubus 的 `session get` 让 rpcd 判定该会话是否真实
+//! 有效。这样"能否访问"完全取决于 OpenWrt 的会话状态：用户在 LuCI 注销/
+//! 会话过期后，后端 API 立即拒绝，无需另行维护第二套凭据。
 //!
 //! ## 边界
 //!
 //! - 该路径只在 OpenWrt 集成模式下启用；独立部署（Windows/服务器/Docker）
-//!   仍走自有的 Bearer Token 登录。
+//!   没有自有登录体系，仅放行回环与 `lan_cidrs` 白名单来源。
 //! - 校验失败一律**拒绝**（fail-closed）：ubus 不可用、超时、返回非 JSON
 //!   都视为会话无效，不做"看起来能用就放行"的降级。
 //! - 结果做短 TTL 缓存：避免每个 API 请求都 fork 一次 ubus。有效会话缓存 30s，
@@ -175,13 +176,27 @@ fn call_ubus_session_get(sid: &str) -> bool {
 
 /// 解析 `session get` 的输出。
 ///
-/// 有效会话返回形如 `{"username":"root","timeout":900, ...}`；
+/// rpcd 在不同版本/不同调用路径下有两种返回形态，两种都必须接受：
+///
+/// 1. 顶层 `username`：`{"username":"root","timeout":900, ...}`
+/// 2. 值嵌套（真机实测形态）：`{"values":{"username":"root","timeout":900, ...}}`
+///
+/// 顶层为空或缺失时回落到 `values.username`；两者都缺失或为空即判无效。
 /// 未知会话由 rpcd 返回错误（非零退出码或错误 JSON），不予认可。
 pub fn parse_session_get(stdout: &str) -> bool {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(stdout) else {
         return false;
     };
-    matches!(v.get("username").and_then(|u| u.as_str()), Some(u) if !u.trim().is_empty())
+    let non_empty = |u: Option<&str>| matches!(u, Some(u) if !u.trim().is_empty());
+
+    if non_empty(v.get("username").and_then(|u| u.as_str())) {
+        return true;
+    }
+    non_empty(
+        v.get("values")
+            .and_then(|values| values.get("username"))
+            .and_then(|u| u.as_str()),
+    )
 }
 
 #[cfg(test)]
@@ -204,5 +219,42 @@ mod tests {
         assert!(!parse_session_get(r#"{"error":"unknown session"}"#));
         assert!(!parse_session_get("not json"));
         assert!(!parse_session_get(""));
+    }
+
+    /// 回归测试：真机 rpcd 的 `session get` 实际返回
+    /// `{"values":{"username":"root", ...}}`，旧实现只读顶层字段而把有效会话
+    /// 判成无效（真机 401 的直接原因）。
+    #[test]
+    fn session_get_accepts_real_device_shape() {
+        let real = r#"{"values":{"username":"root","timeout":900}}"#;
+        assert!(parse_session_get(real));
+        // 真机上带 ACL 与其它字段的完整输出同样必须被接受
+        let real_full =
+            r#"{"values":{"username":"root","timeout":900,"acl":{"ubus":{},"uci":{}}}}"#;
+        assert!(parse_session_get(real_full));
+        // 匿名/空用户的会话（LuCI 登录前的 ubus_rpc_session）不算已认证
+        assert!(!parse_session_get(r#"{"values":{"username":""}}"#));
+        assert!(!parse_session_get(r#"{"values":{}}"#));
+    }
+
+    /// 三种输入的覆盖：顶层 username、values.username、两者都缺失/为空。
+    #[test]
+    fn session_get_accepts_both_shapes_and_rejects_missing() {
+        // ① 顶层
+        assert!(parse_session_get(r#"{"username":"root","timeout":900}"#));
+        // ② values 嵌套
+        assert!(parse_session_get(
+            r#"{"values":{"username":"root","timeout":900}}"#
+        ));
+        // ③ 都缺失 / 都为空 / 顶层为空但 values 有效 / 反之
+        assert!(!parse_session_get("{}"));
+        assert!(!parse_session_get(r#"{"username":""}"#));
+        assert!(!parse_session_get(r#"{"values":{"username":"  "}}"#));
+        assert!(parse_session_get(
+            r#"{"username":"","values":{"username":"root"}}"#
+        ));
+        assert!(parse_session_get(
+            r#"{"username":"root","values":{"username":""}}"#
+        ));
     }
 }

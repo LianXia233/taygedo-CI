@@ -38,11 +38,11 @@ g.s-div>line{stroke:#444441}
   </marker>
 </defs>
 <g class="s-t1"><text x="40" y="30" font-size="15" font-weight="500" fill="#2C2C2A">系统架构：三层解耦与本机数据</text></g>
-<g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">界面层与执行层通过 REST API 通信；数据层位于进程本地磁盘。</text></g>
+<g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">OpenWrt 上由 rpcd/ucode 经回环调用执行层，独立部署直接走 REST API；数据层位于进程本地磁盘。</text></g>
 <g class="s-blue">
 <rect x="40" y="74" width="178" height="74" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
 <text x="129" y="85" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">界面层</text>
-<text x="129" y="100" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">WebUI（单文件）</text>
+<text x="129" y="100" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">外部 API 客户端</text>
 <text x="129" y="118" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">LuCI 页面</text>
 <text x="129" y="135" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">手机浏览器</text>
 </g>

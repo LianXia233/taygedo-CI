@@ -61,6 +61,14 @@ pub const HDR_ENVELOPE: HeaderName = HeaderName::from_static("x-tgd-envelope");
 ///
 /// `method` 与 `path?query` 取自 HTTP 请求本身（不是客户端声明的），
 /// 因此把 `/api/accounts` 的密文搬到 `/api/password` 上必然认证失败。
+///
+/// ## 为什么允许 `clippy::result_large_err`
+///
+/// 这里的 `Err` 就是「要直接返回给客户端的 HTTP 响应」本身，这是 axum
+/// 中间件的既定约定（`Err` 必须实现 `IntoResponse`）。`Response<Body>` 有
+/// 128 字节，装箱只能把它变成一次堆分配 + 一次解引用，既不会减少实际成本，
+/// 也让每条错误路径多一层包装。lint 的建议（Box 化）在这个签名下没有收益。
+#[allow(clippy::result_large_err)]
 pub async fn crypto_middleware(
     State(state): State<Arc<AppState>>,
     req: axum::extract::Request,

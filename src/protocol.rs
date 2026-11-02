@@ -18,7 +18,8 @@ pub fn md5_hex(s: &str) -> String {
 /// 老虎 / 云平台签名：按 key 字典序拼接 value，再拼 secret，取 MD5。
 pub fn sign(data: &BTreeMap<String, String>, secret: &str) -> String {
     let mut joined = String::new();
-    for (_k, v) in data.iter() {
+    // BTreeMap 的 values() 已按 key 字典序迭代，无需显式取 key。
+    for v in data.values() {
         joined.push_str(v);
     }
     joined.push_str(secret);

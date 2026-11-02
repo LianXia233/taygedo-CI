@@ -1,4 +1,4 @@
-# WebUI ↔ 后端 应用层加密协议 v2
+# 前端（WebUI / LuCI）↔ 后端 应用层加密协议 v2
 
 本文是 **`taygedo/v2`** 协议的完整规格。协议运行在**普通 HTTP 之上**，不使用
 TLS、不需要证书。它同时解决四件事：机密性、完整性、来源认证、防重放；并额外
@@ -274,8 +274,8 @@ aad = "taygedo/v2/res" || 0x00
 
 ### 6.1 客户端如何跟随策略
 
-- **策略选择传输方式**：WebUI 先读 `/api/meta` 的 `crypto_policy`，
-  只有 `never` 时改走明文 `fetch`（该策略下服务端不解密也不加密，再发信封
+- **策略选择传输方式**：前端先读 `/api/meta` 的 `crypto_policy`，
+  只有 `never` 时改走明文请求（该策略下服务端不解密也不加密，再发信封
   只会让业务 handler 收到密文 JSON）；其余策略一律发信封，`auto + 内网`
   虽然允许明文，但加密请求同样被接受，因此不做额外分支。
 - **错误响应同样加密**：业务 handler 返回非 2xx 时，中间件仍然加密响应体并
@@ -283,11 +283,14 @@ aad = "taygedo/v2/res" || 0x00
   一串密文。加密层自身的错误则以明文返回并带 `crypto_error`，客户端遇到
   这类明文错误会**抛错**（而不是当成普通业务结果），从而触发 5.2 的
   重建会话 + 重试一次。
-- **跨源预检必须声明 `X-TGD-Envelope`**：LuCI 与服务进程不同端口却同主机时，
-  GET/HEAD 的信封走该请求头。`cors_middleware` 的
-  `Access-Control-Allow-Headers` 已固定声明 `Authorization, Content-Type,
-  X-TGD-Session, X-TGD-Seq, X-TGD-Envelope`；漏掉任一项都会让浏览器在预检
-  阶段直接拦下请求。
+- **跨源预检必须声明必要请求头**：LuCI 与服务进程不同端口却同主机时，
+  GET/HEAD 的信封走 `X-TGD-Envelope`，LuCI 会话走 `X-TGD-Luci-Session`。
+  `cors_middleware` 的 `Access-Control-Allow-Headers` 已固定声明 `Authorization,
+  Content-Type, X-TGD-Session, X-TGD-Seq, X-TGD-Envelope, X-TGD-Luci-Session`；
+  漏掉任一项都会让浏览器在预检阶段直接拦下请求。
+- **会话头必须与加密会话头区分**：`X-TGD-Session` 是加密协议自身的会话号
+  （每次握手都会变），`X-TGD-Luci-Session` 才是 OpenWrt 的鉴权凭据。
+  复用同一个头会被加密客户端覆写，导致 OpenWrt 上鉴权偶发失效，故刻意分成两个。
 
 ---
 
@@ -343,11 +346,16 @@ file:/static/vendor/...=<sha256>:<size>
 ```
 
 `taygedo-crypto.js` 的 `_requireIntegrity()` 在每次握手前检查
-`window.TgdIntegrity.ok`，为 `false` 直接抛错；`ui.html` 的 `init()` 在
-`TgdIntegrityPromise` 失败时**禁用登录按钮**并显示原因。
+`window.TgdIntegrity.ok`，为 `false` 直接抛错；独立部署的 `ui.html` 在
+`TgdIntegrityPromise` 失败时**禁用登录按钮**并显示原因，LuCI 页面则直接
+拒绝建立加密会话（页面显示鉴权/连接异常）。
 
-也就是说：**资源校验不通过时，业务 JS 不会被执行，登录框不可用。**
+也就是说：**资源校验不通过时，业务 JS 不会被执行，界面不可用。**
 不是"警告一下继续用"。
+
+> 清单范围随运行目标不同：独立部署为 11 个资源（含 `/` 首页）；OpenWrt 上
+> 首页已退役，清单为 10 个资源（不含 `/`），否则 `web_guard.js` 会去拉一个
+> 必然 404 的首页，导致整体校验失败。
 
 ### 7.3 这套机制能挡什么、不能挡什么
 
@@ -379,7 +387,11 @@ file:/static/vendor/...=<sha256>:<size>
 
 ---
 
-## 8. 登录 / Token / Cookie
+## 8. 登录 / 鉴权 / Cookie
+
+认证方式随**运行目标**切换，两种模式互斥：
+
+### 8.1 独立部署（Windows / Linux）：应用自有 Token
 
 - 登录走 `POST /api/login`，**必须在加密会话内**（`ui.html` 里 `doLogin` 只走
   `api()`，`api()` 没有 cryptoClient 时直接抛错，不存在明文登录分支）。
@@ -390,6 +402,38 @@ file:/static/vendor/...=<sha256>:<size>
 - 会话建立后**不**降级：登录成功会给当前加密会话打 `authenticated` 标记，
   改密码时会销毁除当前会话外的所有会话（其它设备的旧 token 立即失效）。
 - 服务端记录/回显的错误信息不含密钥、明文、token；日志只记 `sid` 与错误码。
+
+### 8.2 OpenWrt 集成模式：鉴权交给 OpenWrt（LuCI/ubus 会话）
+
+内置 WebUI 在 OpenWrt 上已退役，因此**不存在应用自有登录流程**：
+
+- 入口只有 LuCI 菜单「服务 → 塔吉多签到」。`GET /` 返回 404（`code=webui_retired`）。
+- LuCI 视图把 `L.env.sessionid`（LuCI 的 `ubus_rpc_session`）放进请求头
+  `X-TGD-Luci-Session`，每个业务请求都带；请求体仍走 6.1 的信封路径。
+- 服务端 `openwrt_auth` 两步校验，**缺一即拒**：
+  1. 来源必须命中 `lan_cidrs`（受信内网），否则 `403 untrusted_source`；
+  2. `ubus call session get '{"ubus_rpc_session":"<sid>"}'` 由 rpcd 判定会话有效，
+     `username` 非空即通过。缺头 `401 luci_session_missing`，判定失败
+     `401 luci_session_invalid`。校验结果按 `sid` 做短 TTL 缓存（有效 30s / 无效 3s），
+     超时（2s）或 ubus 不可用一律 **fail-closed**（按无效处理）。
+  3. 校验有资源上界：同时最多 4 个 ubus 调用在跑，拿不到许可直接按无效处理（不排队）；
+     单个调用到 2s 仍未退出就 `kill()` 并回收子进程。二者都必需——`spawn_blocking`
+     一旦开始无法取消，`Command::output()` 又会一直等到子进程自行退出，若只丢弃
+     超时句柄，ubus 卡死时阻塞线程与子进程会持续堆积。
+- 会话号格式先做严格白名单（8–128 位 ASCII 字母数字），因为它会被拼进 JSON
+  传给 `ubus`，不做校验等于把注入面交给请求方。
+- 应用自有登录端点在该模式下**已废弃**：`POST /api/login` 与 `POST /api/password`
+  返回 `410 Gone`（`deprecated_endpoint`），`POST /api/logout` 返回
+  `{"ok":true,"deprecated":true}`（会话由 LuCI 注销，本服务无权也不该代劳）。
+  它们只在非 OpenWrt 平台可用。
+- `/api/meta` 公开返回 `edition`（openwrt/standalone）、`webui_enabled` 与
+  `auth_mode`（luci_session / token / none），供排障核对，不含任何凭据。
+- 排障降级：`TAYGEDO_LUCI_SESSION_CHECK=0`（UCI `option luci_session_check '0'`）
+  退回"仅受信内网放行"，等价于旧的 `no_auth + lan_no_auth` 组合。这是显式开关，
+  不是失败回退路径，默认关闭。
+- 已知限制：`ubus session get` 只证明"这个会话号是 OpenWrt 认可的"，不细分
+  LuCI 用户的 ACL。若路由器上存在受限的 LuCI 用户，本服务无法区分其权限——
+  需要按用户区分时应改为经 rpcd 代理或引入独立授权层，当前实现不做。
 
 ---
 

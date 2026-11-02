@@ -58,15 +58,37 @@ var TGD = (function () {
 		return cryptoReady;
 	}
 
+	// OpenWrt 集成模式下后端不再校验自有 Token，而是校验 LuCI/ubus 会话。
+	// 会话号取自 LuCI 运行时环境（L.env.sessionid），随每个请求一并带给后端；
+	// 后端再用本机 ubus 的 session get 判定其有效性。会话过期/注销即自动失效，
+	// 无需在本应用里维护第二套登录态。
+	function luciSessionHeaders() {
+		var sid = '';
+		try {
+			if (typeof L !== 'undefined' && L.env && L.env.sessionid) {
+				sid = String(L.env.sessionid);
+			}
+		} catch (e) { sid = ''; }
+		return sid ? { 'X-TGD-Luci-Session': sid } : {};
+	}
+
 	function plainApi(path, method, body) {
-		var opts = { method: method || 'GET', headers: {} };
+		var headers = luciSessionHeaders();
 		if (body !== undefined) {
-			opts.headers['Content-Type'] = 'application/json';
+			headers['Content-Type'] = 'application/json';
+		}
+		var opts = { method: method || 'GET', headers: headers };
+		if (body !== undefined) {
 			opts.body = JSON.stringify(body);
 		}
 		return fetch(apiBase + path, opts).then(function (r) {
 			return r.json().catch(function () { return {}; }).then(function (data) {
-				if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+				if (!r.ok) {
+					var e = new Error(data.error || ('HTTP ' + r.status));
+					e.code = data.code || '';
+					e.status = r.status;
+					throw e;
+				}
 				return data;
 			});
 		});
@@ -80,13 +102,19 @@ var TGD = (function () {
 			.then(function (meta) {
 				if (meta && meta.crypto_required) {
 					return ensureCrypto().then(function () {
-						return cryptoClient.request(path, method || 'GET', body);
+						// 第 4 个参数是附加头：把 LuCI 会话带进加密请求
+						return cryptoClient.request(path, method || 'GET', body, luciSessionHeaders());
 					}).then(function (res) {
-						if (!res.ok) throw new Error((res.data && res.data.error) || ('HTTP ' + res.status));
+						if (!res.ok) {
+							var e = new Error((res.data && res.data.error) || ('HTTP ' + res.status));
+							e.code = (res.data && res.data.code) || '';
+							e.status = res.status;
+							throw e;
+						}
 						return res.data;
 					});
 				}
-				// 策略为 auto + 内网来源：沿用原有直连（LuCI 与本服务同机部署）。
+				// 策略为 auto + 内网来源：沿用直连（LuCI 与本服务同机部署）。
 				return plainApi(path, method, body);
 			});
 	}
@@ -97,12 +125,8 @@ var TGD = (function () {
 		apiBase = 'http://' + location.hostname + ':' + port;
 	}
 
-	function openWebUI() {
-		window.open(apiBase + '/', '_blank');
-	}
-
 	return {
-		esc: esc, toast: toast, api: api, initApiBase: initApiBase, openWebUI: openWebUI,
+		esc: esc, toast: toast, api: api, initApiBase: initApiBase,
 		getApiBase: function () { return apiBase; }
 	};
 })();
@@ -344,7 +368,6 @@ function mainHtml() {
 		'    <div><h1>塔吉多自动签到</h1><p>多账号 · 每日定时 · 云游戏时长</p></div>',
 		'  </div>',
 		'  <div class="tgd-hdr-actions">',
-		'    <button class="tgd-btn" id="tgd-webui" title="在新窗口打开独立 WebUI">' + ICONS.external + ' 外部 WebUI</button>',
 		'    <button class="tgd-btn" id="tgd-settings" title="设置">' + ICONS.gear + '</button>',
 		'    <button class="tgd-btn tgd-primary" id="tgd-add">＋ 添加账号</button>',
 		'  </div>',
@@ -375,15 +398,21 @@ function mainHtml() {
 	].join('');
 }
 
-function noAuthHtml() {
+// 鉴权未通过时的提示页。
+//
+// OpenWrt 集成模式下没有"应用自有登录"，登录态完全来自 LuCI/ubus 会话：
+// 这里只解释原因并引导重新加载 LuCI，不再提供任何"打开外部 WebUI"或
+// "改 UCI 开免鉴权"的入口。
+function noAuthHtml(detail) {
 	return [
 		'<div class="tgd-login-wrap">',
 		'  <div class="tgd-login-card">',
 		'    <div class="tgd-logo">' + ICONS.logo + '</div>',
 		'    <h1>塔吉多自动签到</h1>',
-		'    <div class="tgd-sub">LuCI 独立版需要后端开启免鉴权才能直接管理账号</div>',
-		'    <button class="tgd-btn tgd-primary" id="tgd-noauth-webui" style="width:100%;min-height:46px;font-size:15px">' + ICONS.external + ' 打开外部 WebUI</button>',
-		'    <div class="tgd-hint">如需在 LuCI 内直接使用，请在路由器执行：<br><code>uci set taygedo.main.no_auth=1</code><br><code>uci commit taygedo && /etc/init.d/taygedo restart</code></div>',
+		'    <div class="tgd-sub">本页通过 LuCI 会话访问签到服务，当前未通过 OpenWrt 鉴权</div>',
+		detail ? '    <div class="tgd-hint">' + TGD.esc(detail) + '</div>' : '',
+		'    <button class="tgd-btn tgd-primary" id="tgd-auth-retry" style="width:100%;min-height:46px;font-size:15px">' + ICONS.refresh + ' 重新加载</button>',
+		'    <div class="tgd-hint">内置 WebUI 已退役，LuCI 是唯一入口，登录与鉴权由 OpenWrt 负责。<br>若 LuCI 会话已过期，请重新登录 LuCI 后再打开本页。</div>',
 		'  </div>',
 		'</div>'
 	].join('');
@@ -454,17 +483,9 @@ function settingsModalHtml() {
 		'          <option value="never">never - 始终明文（仅限可信内网）</option>',
 		'        </select></div>',
 		'      <div class="tgd-field"><label>本机内网网段（逗号分隔 CIDR）</label><input class="tgd-input" id="tgd-cfg-lan-cidrs" placeholder="192.168.0.0/16,10.0.0.0/8"></div>',
-		'      <div class="tgd-switch-row"><span class="tgd-txt">内网免鉴权放行</span><label class="tgd-switch"><input type="checkbox" id="tgd-cfg-lan-noauth"><span class="tgd-slider"></span></label></div>',
 		'      <button class="tgd-btn tgd-primary" id="tgd-crypto-save" style="width:100%;min-height:44px;margin-top:4px">保存加密设置</button>',
 		'      <hr class="tgd-divider">',
-		'      <div id="tgd-pwd-section">',
-		'      <div class="tgd-section-title">修改登录账号密码</div>',
-		'      <div class="tgd-field"><label>新账号名（留空则不修改）</label><input class="tgd-input" id="tgd-new-user" autocomplete="username" placeholder="至少 3 位，字母/数字/_-"></div>',
-		'      <div class="tgd-field"><label>当前密码</label><input class="tgd-input" id="tgd-old-pwd" type="password" autocomplete="current-password"></div>',
-		'      <div class="tgd-field"><label>新密码（至少 8 位）</label><input class="tgd-input" id="tgd-new-pwd" type="password" autocomplete="new-password"></div>',
-		'      <div class="tgd-field"><label>确认新密码</label><input class="tgd-input" id="tgd-new-pwd2" type="password" autocomplete="new-password"></div>',
-		'      <button class="tgd-btn tgd-danger" id="tgd-pwd-save" style="width:100%;min-height:44px;margin-top:4px">修改后所有会话将失效</button>',
-		'      </div>',
+		'      <div class="tgd-hint">登录与账号密码由 OpenWrt（LuCI）负责，本应用不再提供独立登录口令。</div>',
 		'    </div>',
 		'  </div>',
 		'</div>'
@@ -481,14 +502,15 @@ function renderMain() {
 	startPoll();
 }
 
-function renderNoAuth() {
+function renderNoAuth(detail) {
 	var root = document.getElementById('tgd-root');
-	root.innerHTML = '<style>' + TGD_CSS + '</style>' + noAuthHtml() + '<div class="tgd-toast"></div>';
-	document.getElementById('tgd-noauth-webui').addEventListener('click', TGD.openWebUI);
+	root.innerHTML = '<style>' + TGD_CSS + '</style>' + noAuthHtml(detail) + '<div class="tgd-toast"></div>';
+	document.getElementById('tgd-auth-retry').addEventListener('click', function () {
+		window.location.reload();
+	});
 }
 
 function bindMainEvents() {
-	document.getElementById('tgd-webui').addEventListener('click', TGD.openWebUI);
 	document.getElementById('tgd-settings').addEventListener('click', openSettings);
 	document.getElementById('tgd-add').addEventListener('click', function () { openAddModal('password'); });
 	document.getElementById('tgd-refresh-logs').addEventListener('click', loadLogs);
@@ -508,7 +530,6 @@ function bindMainEvents() {
 	document.getElementById('tgd-login-submit').addEventListener('click', addAccount);
 	document.getElementById('tgd-cfg-save').addEventListener('click', saveConfig);
 	document.getElementById('tgd-crypto-save').addEventListener('click', saveCrypto);
-	document.getElementById('tgd-pwd-save').addEventListener('click', changePassword);
 }
 
 function openAddModal(mode) {
@@ -700,12 +721,6 @@ function buildLogTabs(accounts) {
 }
 
 function openSettings() {
-	TGD.api('/api/meta', 'GET').then(function (meta) {
-		var pwdSection = document.getElementById('tgd-pwd-section');
-		if (pwdSection && meta && meta.no_auth) {
-			pwdSection.style.display = 'none';
-		}
-	}).catch(function () {});
 	TGD.api('/api/config', 'GET').then(function (cfg) {
 		document.getElementById('tgd-cfg-schedule').value = cfg.default_schedule;
 		document.getElementById('tgd-cfg-coin').checked = !!cfg.coin_tasks;
@@ -715,12 +730,6 @@ function openSettings() {
 		if (policySel) policySel.value = cfg.crypto_policy || 'auto';
 		var cidrs = document.getElementById('tgd-cfg-lan-cidrs');
 		if (cidrs) cidrs.value = cfg.lan_cidrs || '';
-		var lna = document.getElementById('tgd-cfg-lan-noauth');
-		if (lna) lna.checked = (cfg.lan_no_auth !== false);
-		document.getElementById('tgd-new-user').value = '';
-		document.getElementById('tgd-old-pwd').value = '';
-		document.getElementById('tgd-new-pwd').value = '';
-		document.getElementById('tgd-new-pwd2').value = '';
 		document.getElementById('tgd-settings-modal').classList.add('tgd-show');
 	}).catch(function (e) { TGD.toast(e.message, 'tgd-err'); });
 }
@@ -741,32 +750,9 @@ function saveConfig() {
 function saveCrypto() {
 	TGD.api('/api/config', 'POST', {
 		crypto_policy: document.getElementById('tgd-cfg-crypto-policy').value,
-		lan_cidrs: document.getElementById('tgd-cfg-lan-cidrs').value.trim(),
-		lan_no_auth: document.getElementById('tgd-cfg-lan-noauth').checked
+		lan_cidrs: document.getElementById('tgd-cfg-lan-cidrs').value.trim()
 	}).then(function () {
 		TGD.toast('加密设置已保存', 'tgd-ok');
-	}).catch(function (e) { TGD.toast(e.message, 'tgd-err'); });
-}
-
-function changePassword() {
-	var newUser = document.getElementById('tgd-new-user').value.trim();
-	var oldPwd = document.getElementById('tgd-old-pwd').value;
-	var newPwd = document.getElementById('tgd-new-pwd').value;
-	var newPwd2 = document.getElementById('tgd-new-pwd2').value;
-	if (!oldPwd) { TGD.toast('请输入当前密码', 'tgd-err'); return; }
-	if (!newPwd) { TGD.toast('请输入新密码', 'tgd-err'); return; }
-	if (newPwd.length < 8) { TGD.toast('新密码至少 8 位', 'tgd-err'); return; }
-	if (newPwd !== newPwd2) { TGD.toast('两次输入的新密码不一致', 'tgd-err'); return; }
-	if (newPwd === oldPwd) { TGD.toast('新密码不能与当前密码相同', 'tgd-err'); return; }
-	var body = { old_password: oldPwd, new_password: newPwd };
-	if (newUser) body.new_username = newUser;
-	TGD.api('/api/password', 'POST', body).then(function () {
-		document.getElementById('tgd-new-user').value = '';
-		document.getElementById('tgd-old-pwd').value = '';
-		document.getElementById('tgd-new-pwd').value = '';
-		document.getElementById('tgd-new-pwd2').value = '';
-		closeModal('tgd-settings-modal');
-		TGD.toast('账号密码已修改，请用新凭据重新登录', 'tgd-ok');
 	}).catch(function (e) { TGD.toast(e.message, 'tgd-err'); });
 }
 
@@ -775,19 +761,6 @@ function startPoll() {
 	pollTimer = setInterval(function () {
 		loadLogs();
 	}, 3000);
-}
-
-function ensureCryptoClient() {
-	if (window.TaygedoCrypto) { return Promise.resolve(true); }
-	var src = TGD.getApiBase() + '/static/taygedo-crypto.js';
-	return new Promise(function (resolve) {
-		var el = document.createElement('script');
-		el.src = src;
-		el.async = true;
-		el.onload = function () { resolve(!!window.TaygedoCrypto); };
-		el.onerror = function () { resolve(false); };
-		document.head.appendChild(el);
-	});
 }
 
 return view.extend({
@@ -802,27 +775,32 @@ return view.extend({
 		root.innerHTML = '<style>' + TGD_CSS + '</style><div class="tgd-login-wrap"><div class="tgd-login-card"><div class="tgd-logo">' +
 			ICONS.logo + '</div><h1>塔吉多自动签到</h1><div class="tgd-sub">正在连接签到服务…</div></div></div><div class="tgd-toast"></div>';
 
-		var probe = fetch(TGD.getApiBase() + '/api/config', { method: 'GET' }).then(function (r) {
-			if (!r.ok) throw new Error('HTTP ' + r.status);
-			return r.json();
-		});
-
-		probe.catch(function (e) {
-			if (e && /HTTP 428/.test(e.message || '')) {
-				ensureCryptoClient().then(function (ok) {
-					if (ok) { renderMain(); } else { renderNoAuth(); }
-				});
-				return;
-			}
-			console.error('taygedo probe:', e);
-			if (e instanceof TypeError) { renderServiceDown(); }
-			else { renderNoAuth(); }
-		});
+		// 探测后端可用性与鉴权状态。
+		//
+		// 走 TGD.api 而不是裸 fetch：请求必须携带 LuCI 会话头，且在
+		// crypto_policy=always 时由客户端自动建立加密会话。用裸 fetch 会在
+		// 加密策略为 always 时拿到 428，导致误判为"未鉴权"。
+		var probe = TGD.api('/api/config', 'GET');
 
 		probe.then(function () {
 			renderMain();
 		}).catch(function (e) {
-			console.error('taygedo renderMain:', e);
+			console.error('taygedo probe:', e);
+			var code = (e && e.code) || '';
+			if (code === 'untrusted_source') {
+				renderNoAuth('当前来源不在受信内网网段（lan_cidrs）内，服务端已拒绝该请求。');
+				return;
+			}
+			if (code === 'luci_session_missing') {
+				renderNoAuth('请求未携带 LuCI 会话号，请从 LuCI 菜单「服务 → 塔吉多签到」进入本页。');
+				return;
+			}
+			if (code === 'luci_session_invalid') {
+				renderNoAuth('LuCI 会话已失效或不被 OpenWrt 认可，请重新登录 LuCI 后重试。');
+				return;
+			}
+			if (e instanceof TypeError) { renderServiceDown(); return; }
+			renderNoAuth(e && e.message ? e.message : '');
 		});
 
 		return root;

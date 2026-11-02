@@ -131,9 +131,16 @@ impl AppState {
         };
         let crypto = CryptoManager::new(&identity_secret);
 
+        // 运行版本判定：OpenWrt 集成模式（LuCI 为唯一 Web 入口）或独立模式。
+        let openwrt = is_openwrt();
+
         // WebUI 口令初始化：优先环境变量；否则生成随机口令，杜绝默认 admin。
+        //
+        // OpenWrt 集成模式下 WebUI 已退役、登录鉴权交给 LuCI/ubus 会话，
+        // 因此不再生成自助登录口令：既无 WebUI 入口可用，也会与
+        // "鉴权交给 OpenWrt" 的定位相矛盾。
         let mut initial_password: Option<String> = None;
-        if config.web_password_hash.is_none() {
+        if config.web_password_hash.is_none() && !openwrt {
             let env_pwd = std::env::var("TAYGEDO_WEB_PASSWORD")
                 .ok()
                 .filter(|s| !s.trim().is_empty());
@@ -155,14 +162,15 @@ impl AppState {
         store.save_config(&config)?;
 
         // 免鉴权模式：环境变量 TAYGEDO_NO_AUTH=1/true/yes/on 时开启。
-        // **OpenWrt 专享**：仅 OpenWrt（存在 /etc/openwrt_release）平台生效；
+        // **仅 OpenWrt 平台生效**，且仅在 LuCI 会话校验被显式关闭（排障降级）
+        // 时才作为兼容路径生效；默认的 OpenWrt 集成模式由 LuCI/ubus 会话鉴权接管。
         // 其他平台（Windows / Linux 服务器 / Docker 等）即使设置环境变量也会被强制关闭，
         // 避免免鉴权被误开在公网环境造成安全风险。
-        let openwrt = is_openwrt();
+        let session_auth = openwrt && luci_session_required();
         let no_auth_env = std::env::var("TAYGEDO_NO_AUTH")
             .map(|v| parse_bool_env(&v))
             .unwrap_or(false);
-        let no_auth = no_auth_env && openwrt;
+        let no_auth = no_auth_env && openwrt && !session_auth;
 
         let lan = LanMatcher::new(&config.lan_cidrs);
 
@@ -221,7 +229,14 @@ impl AppState {
                     .into(),
             );
         }
-        if no_auth_env && !openwrt {
+        if session_auth {
+            app.push_log(
+                "info",
+                "OpenWrt 集成模式：内置 WebUI 已退役，LuCI 为唯一入口；\
+                 鉴权由 OpenWrt（LuCI/ubus）会话负责，仅接受受信内网来源"
+                    .into(),
+            );
+        } else if no_auth_env && !openwrt {
             app.push_log(
                 "warn",
                 "检测到 TAYGEDO_NO_AUTH=1，但当前非 OpenWrt 平台：免鉴权模式已强制关闭，请使用 WebUI 账号密码登录".into(),
@@ -552,9 +567,46 @@ pub fn normalize_crypto_policy(v: &str) -> Option<String> {
     }
 }
 
-/// 当前是否运行在 OpenWrt（存在 /etc/openwrt_release 即视为 OpenWrt）。
+/// 当前是否运行在 OpenWrt 集成模式。
+///
+/// 判定优先级：
+/// 1. 环境变量 `TAYGEDO_EDITION`：`openwrt` 或 `standalone`（显式指定，供
+///    init.d 与测试使用；跨平台脚本不依赖绝对路径，仅作为版本标识）；
+/// 2. 回落到平台标记文件 `/etc/openwrt_release`（OpenWrt 固件固定存在）。
+///
+/// 结果在进程内缓存：环境变量与固件标识在运行期不会变化。
+///
+/// OpenWrt 集成模式的含义：内置 WebUI 退役（不提供界面与自有登录），
+/// LuCI 是唯一入口，登录鉴权交给 OpenWrt（LuCI/ubus 会话）。
 pub fn is_openwrt() -> bool {
-    std::path::Path::new("/etc/openwrt_release").exists()
+    static CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CACHE.get_or_init(|| match edition_from_env() {
+        Some(v) => v,
+        None => std::path::Path::new("/etc/openwrt_release").exists(),
+    })
+}
+
+/// 解析 `TAYGEDO_EDITION`。无法识别的取值视为未设置（回落到平台标记探测）。
+fn edition_from_env() -> Option<bool> {
+    let v = std::env::var("TAYGEDO_EDITION").ok()?;
+    match v.trim().to_lowercase().as_str() {
+        "openwrt" => Some(true),
+        "standalone" | "generic" | "linux" | "windows" => Some(false),
+        _ => None,
+    }
+}
+
+/// OpenWrt 集成模式下是否要求 LuCI 会话校验（默认开启）。
+///
+/// 关闭（`TAYGEDO_LUCI_SESSION_CHECK=0`）仅作为排障降级路径：此时回落到
+/// "仅内网来源放行"，不再校验 ubus 会话，与退役前的 `no_auth` 语义一致。
+pub fn luci_session_required() -> bool {
+    if !is_openwrt() {
+        return false;
+    }
+    std::env::var("TAYGEDO_LUCI_SESSION_CHECK")
+        .map(|v| parse_bool_env(&v))
+        .unwrap_or(true)
 }
 
 fn now_unix() -> i64 {

@@ -1,7 +1,9 @@
 # OpenWrt LuCI app: 塔吉多自动签到 (Taygedo auto attendance)
 #
 # 现代 LuCI JS 前端：htdocs/luci-static/resources/view/taygedo/status.js
-# 界面与内置 WebUI 功能一致，直接调用 Rust 后端（默认 8787 端口）的 REST API。
+# 这是 OpenWrt 上的唯一 Web 入口，直接调用 Rust 后端（默认 8787 端口）的 REST API；
+# 后端内置 WebUI 已退役（不再下发前端页面、不监听其登录流程），登录与鉴权交给
+# OpenWrt（LuCI/ubus 会话）。
 #
 # 两种构建方式（二选一）：
 #   A. 预编译二进制下载（默认）：从 GitHub Release 下载对应架构的 musl 二进制。
@@ -78,8 +80,9 @@ endef
 
 define Package/luci-app-taygedo/description
   LuCI interface (JS) for the Taygedo (Hotta 幻塔 / Neverness to Everness 异环)
-  daily attendance tool. Multi-account, SMS/password login, daily scheduling
-  and a built-in responsive WebUI with authentication.
+  daily attendance tool. Multi-account, SMS/password login, daily scheduling.
+  LuCI is the only web entry on OpenWrt; authentication is delegated to
+  OpenWrt (LuCI/ubus session). The built-in WebUI is retired and not included.
 endef
 
 define Build/Prepare

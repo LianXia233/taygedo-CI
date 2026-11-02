@@ -5,6 +5,8 @@
 
 use super::*;
 use crate::crypto_storage::{envelope, FileIdentity, Protection};
+// 仅在 Unix 用例（中断轮换续做）里用到，不 gate 会在 Windows 上触发 unused_imports。
+#[cfg(unix)]
 use zeroize::Zeroizing;
 
 fn accounts_json() -> String {

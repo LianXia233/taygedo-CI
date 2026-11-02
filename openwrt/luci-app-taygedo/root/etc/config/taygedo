@@ -1,15 +1,24 @@
 config taygedo 'main'
-	# 服务级配置（LuCI 与 WebUI 解耦：UCI 只管服务本身）
+	# 服务级配置（UCI 只管服务本身）
 	# 默认启用：本包为 LuCI 集成服务，安装后由 post-install 自动 enable + start。
 	# 如需停用：uci set taygedo.main.enabled=0 && uci commit taygedo
 	option enabled '1'
 	option port '8787'
 	option data_dir '/etc/taygedo'
-	option web_password ''
-	# 免鉴权模式（OpenWrt 专享）：LuCI 页面直接调用后端 REST API 需要开启。
-	# 业务配置（默认签到时间/金币任务/云时长/分享平台）统一在 config.json 中管理，
-	# LuCI 页面与独立 WebUI 均通过 /api/config 读写，二者数据互通、互不覆盖。
+
+	# ---- 鉴权（OpenWrt 集成模式）----
+	# 内置 WebUI 已退役，LuCI 是唯一入口；登录与鉴权交由 OpenWrt：
+	# 页面把 LuCI 会话号随请求带给后端，后端用本机 ubus `session get` 校验，
+	# 本服务不签发也不校验自有凭据。
+	option luci_session_check '1'
+
+	# 已废弃选项（保留仅为兼容旧配置，默认配置下不参与鉴权判定）：
+	#   web_password —— WebUI 口令，WebUI 退役后不再使用（且不再经 init 传给后端）
+	#   no_auth      —— 免鉴权放行，仅在 luci_session_check=0 的排障路径下有意义
+	#   lan_no_auth  —— 同上，作为 luci_session_check=0 时的内网来源限制
 	option no_auth '1'
+	# 业务配置（默认签到时间/金币任务/云时长/分享平台）统一在 config.json 中管理，
+	# LuCI 页面通过 /api/config 读写。
 
 	# ---- 应用层加密（X25519 + HKDF-SHA256 + XChaCha20-Poly1305）----
 	# 加密策略，三选一：
@@ -21,12 +30,13 @@ config taygedo 'main'
 	option crypto_policy 'auto'
 
 	# 内网网段（逗号分隔 CIDR）。用于两处判定：
-	#   1) 免鉴权模式是否放行该来源；2) auto 策略下是否豁免加密。
+	#   1) 受信来源判定（LuCI 会话请求必须来自这些网段）；
+	#   2) auto 策略下是否豁免加密。
 	# 留空则回落到内置默认：RFC1918 三段 + loopback + IPv6 ULA/链路本地。
 	option lan_cidrs ''
 
-	# 内网来源是否享受免鉴权放行。设为 0 后即使 no_auth=1，非内网来源也不放行，
-	# 可防止「免鉴权开关误开 + 服务暴露到公网」演变为完全开放。
+	# 已废弃：内网来源免鉴权放行。仅当 luci_session_check=0（排障路径）时生效，
+	# 用于在退回"仅内网放行"模式时仍限制来源范围。
 	option lan_no_auth '1'
 
 	# ---- 配置文件静态加密（XChaCha20-Poly1305 + HKDF-SHA256）----

@@ -54,8 +54,9 @@ jobs:
         run: cargo test --all-targets --locked
 
       # 端到端协议测试：用**真实二进制** + **仓库里真实的前端客户端文件**
-      # 走完整链路（清单验签 → 握手验签 → 登录 → 业务 → 重放/搬移/降级拒绝）。
-      # 只跑 Rust 单测无法覆盖这条链路，因为半条实现都在 JS 里。
+      # 走完整链路（清单验签 → 握手验签 → 业务 → 重放/搬移/降级拒绝）。
+      # 服务端已无内置 WebUI 与自有登录，测试不携带 Authorization，
+      # 靠本机回环来源通过访问控制。
       - name: Build binary for E2E
         run: cargo build --locked
 
@@ -69,7 +70,6 @@ jobs:
           DATA_DIR="$(mktemp -d)"
           # always：强制所有来源加密，才能验证"明文降级被拒"这条分支
           TAYGEDO_DATA_DIR="$DATA_DIR" \
-          TAYGEDO_WEB_PASSWORD=e2e-password-123 \
           TAYGEDO_CRYPTO_POLICY=always \
           ./target/debug/taygedo-rs > server.log 2>&1 &
           SRV_PID=$!
@@ -79,7 +79,7 @@ jobs:
             sleep 0.5
           done
           curl -fsS http://127.0.0.1:8787/api/meta >/dev/null
-          node scripts/e2e_web.mjs http://127.0.0.1:8787 e2e-password-123
+          node scripts/e2e_web.mjs http://127.0.0.1:8787
           kill $SRV_PID 2>/dev/null || true
           wait $SRV_PID 2>/dev/null || true
           trap - EXIT

@@ -68,6 +68,12 @@ var TGD = (function () {
 
 	// 把 (HTTP 方法 + 路径) 映射到固定的 ubus 方法。
 	// 路径来自本页内部调用，不接受外部输入；id 由 ucode 侧再做白名单校验。
+	// ubus 的字符串型参数只接受字符串：请求体在过 ubus 边界前先序列化，
+	// 由 rpcd 插件在服务端 json() 还原（对象直接当参数会被 ubus 判为 Invalid argument）。
+	function bodyArg(body) {
+		return JSON.stringify(body != null ? body : {});
+	}
+
 	function dispatch(path, method, body) {
 		method = String(method || 'GET').toUpperCase();
 		path = String(path || '');
@@ -80,22 +86,22 @@ var TGD = (function () {
 			if (m[2] === 'signin' && method === 'POST')
 				return rpcCall.signin(sid(), id);
 			if (m[2] === 'schedule' && method === 'POST')
-				return rpcCall.schedule_set(sid(), id, body || {});
+				return rpcCall.schedule_set(sid(), id, bodyArg(body));
 			throw unsupported(path, method);
 		}
 
 		if (path === '/api/config')
-			return method === 'GET' ? rpcCall.config_get(sid()) : rpcCall.config_set(sid(), body || {});
+			return method === 'GET' ? rpcCall.config_get(sid()) : rpcCall.config_set(sid(), bodyArg(body));
 		if (path === '/api/accounts')
-			return method === 'GET' ? rpcCall.accounts_list(sid()) : rpcCall.account_add(sid(), body || {});
+			return method === 'GET' ? rpcCall.accounts_list(sid()) : rpcCall.account_add(sid(), bodyArg(body));
 		if (path === '/api/send-code' && method === 'POST')
-			return rpcCall.send_code(sid(), body || {});
+			return rpcCall.send_code(sid(), bodyArg(body));
 		if (path === '/api/meta' && method === 'GET')
 			return rpcCall.meta();
 
 		var lm = path.match(/^\/api\/logs(?:\?limit=(\d+))?/);
 		if (lm)
-			return rpcCall.logs(sid(), lm[1] ? +lm[1] : 200);
+			return rpcCall.logs(sid(), String(lm[1] ? +lm[1] : 200));
 
 		throw unsupported(path, method);
 	}

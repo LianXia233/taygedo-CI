@@ -12,24 +12,24 @@
 //     出现在 body 或严格校验过的 id/limit 上，避免把请求参数拼进 shell。
 //   - ACL 粒度为单个方法（见 acl.d/luci-app-taygedo.json），不使用"一个通吃
 //     的 request 方法"，避免一次授权放行全部业务写操作。
+//   - 导出形态遵循本固件既有插件（luci.wolultra / luci.netmonitor）的写法：
+//     `return { '<ubus 对象名>': { <方法名>: { args, call } } }`。
 
-import { popen, readfile, writefile } from 'fs';
+import { popen, readfile, mkdtemp, open } from 'fs';
+import { cursor } from 'uci';
 
 const FALLBACK_PORT = 8787;
 const CURL_TIMEOUT = 15;
 
 // 读取 UCI 配置的端口。非法值回落到 8787（与 init.d 默认一致）。
 function backend_port() {
-	let h = popen('uci -q get taygedo.main.port', 'r');
-	let v = h ? trim(h.read('all')) : '';
-	if (h)
-		h.close();
-	let n = +v;
+	let v = cursor().get('taygedo', 'main', 'port');
+	let n = v != null ? +v : 0;
 	return (n > 0 && n < 65536) ? n : FALLBACK_PORT;
 }
 
 // LuCI 会话号白名单校验：只允许 ubus_rpc_session 的字符集。
-// sid 会进入 shell 命令行，必须严格校验，不能直接拼接收外部输入。
+// sid 会进入 curl 的命令行，必须严格校验，不能拼接未校验的外部输入。
 function valid_sid(sid) {
 	if (type(sid) != 'string')
 		return false;
@@ -41,50 +41,67 @@ function valid_sid(sid) {
 
 // 账号 id 白名单校验（同样是拼进 URL path 的外部输入）。
 function valid_id(id) {
-	if (type(id) != 'string')
-		return false;
-	return match(id, /^[A-Za-z0-9_-]{1,64}$/) ? true : false;
+	return type(id) == 'string' && match(id, /^[A-Za-z0-9_-]{1,64}$/) ? true : false;
 }
 
 function fail(http, msg) {
 	return { ok: false, http: http, error: msg };
 }
 
-// 统一的内部调用：固定方法+路径，body 走临时文件（避免 shell 引号与注入），
-// 只把 HTTP 状态码留在 stdout，响应体写入文件后读取。
-function call(req, opt) {
-	let args = req.args ? req.args : {};
+function rmdir_tmp(dir) {
+	let h = popen('rm -rf \'' + dir + '\'', 'r');
+	if (h)
+		h.close();
+}
+
+// 统一的内部调用：固定方法 + 路径；请求体与响应体都走临时文件，
+// 命令行里只出现「已验证的 sid/id」与「本插件自己生成的临时路径」。
+function call(request, opt) {
+	let args = request.args != null ? request.args : {};
 	let sid = args.sid;
-	let body = opt.body ? opt.body(args) : null;
 	let path = opt.path(args);
 
 	if (path == null)
 		return fail(400, 'bad arguments');
 
-	let need_auth = opt.auth != false;
-	if (need_auth && !valid_sid(sid))
+	if (opt.auth != false && !valid_sid(sid))
 		return fail(401, 'missing LuCI session');
 
-	let mktmp = popen('mktemp -d /tmp/tgd.rpcd.XXXXXX', 'r');
-	let dir = mktmp ? trim(mktmp.read('all')) : '';
-	if (mktmp)
-		mktmp.close();
-	if (length(dir) < 1)
+	let dir = mkdtemp('/tmp/tgd.rpcd.XXXXXX');
+	if (dir == null)
 		return fail(500, 'tmpdir create failed');
+
+	let body = opt.body ? opt.body(args) : null;
+	if (body != null) {
+		// ubus 字符串参数只接受字符串，前端已 JSON.stringify；这里还原成对象。
+		if (type(body) == 'string') {
+			try {
+				body = json(body);
+			} catch (e) {
+				rmdir_tmp(dir);
+				return fail(400, 'bad body');
+			}
+		}
+		let f = open(dir + '/req', 'w');
+		if (f == null) {
+			rmdir_tmp(dir);
+			return fail(500, 'tmpfile create failed');
+		}
+		f.write(sprintf('%J', body));
+		f.close();
+	}
 
 	let cmd = 'curl -sS --max-time ' + CURL_TIMEOUT + ' --noproxy \'*\''
 		+ ' -o \'' + dir + '/out\' -w \'%{http_code}\''
 		+ ' -X ' + opt.method
 		+ ' -H \'Accept: application/json\'';
 
-	if (need_auth)
+	if (opt.auth != false)
 		cmd += ' -H \'X-TGD-Luci-Session: ' + trim(sid) + '\'';
 
-	if (body != null) {
-		writefile(dir + '/req', json(body));
+	if (body != null)
 		cmd += ' -H \'Content-Type: application/json\''
 			+ ' --data-binary @\'' + dir + '/req\'';
-	}
 
 	cmd += ' \'http://127.0.0.1:' + backend_port() + path + '\'';
 
@@ -94,9 +111,7 @@ function call(req, opt) {
 		h.close();
 
 	let raw = readfile(dir + '/out');
-	let clean = popen('rm -rf \'' + dir + '\'', 'r');
-	if (clean)
-		clean.close();
+	rmdir_tmp(dir);
 
 	let status = +code;
 	if (!(status > 0))
@@ -123,92 +138,116 @@ function call(req, opt) {
 	return { ok: false, http: status, error: msg, data: data };
 }
 
-// 业务方法。全部经后端 /api/*，不含任何 WebUI 专属接口。
-return {
-	meta: function(req) {
-		return call(req, {
-			method: 'GET',
-			path: function() { return '/api/meta'; },
-			auth: false
-		});
+const methods = {
+	meta: {
+		call: function(request) {
+			return call(request, {
+				method: 'GET',
+				auth: false,
+				path: function() { return '/api/meta'; }
+			});
+		}
 	},
 
-	config_get: function(req) {
-		return call(req, {
-			method: 'GET',
-			path: function() { return '/api/config'; }
-		});
+	config_get: {
+		args: { sid: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'GET',
+				path: function() { return '/api/config'; }
+			});
+		}
 	},
 
-	config_set: function(req) {
-		return call(req, {
-			method: 'POST',
-			path: function() { return '/api/config'; },
-			body: function(a) { return a.body != null ? a.body : {}; }
-		});
+	config_set: {
+		args: { sid: 'string', body: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'POST',
+				path: function() { return '/api/config'; },
+				body: function(a) { return a.body != null ? a.body : {}; }
+			});
+		}
 	},
 
-	accounts_list: function(req) {
-		return call(req, {
-			method: 'GET',
-			path: function() { return '/api/accounts'; }
-		});
+	accounts_list: {
+		args: { sid: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'GET',
+				path: function() { return '/api/accounts'; }
+			});
+		}
 	},
 
-	account_add: function(req) {
-		return call(req, {
-			method: 'POST',
-			path: function() { return '/api/accounts'; },
-			body: function(a) { return a.body != null ? a.body : {}; }
-		});
+	account_add: {
+		args: { sid: 'string', body: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'POST',
+				path: function() { return '/api/accounts'; },
+				body: function(a) { return a.body != null ? a.body : {}; }
+			});
+		}
 	},
 
-	account_delete: function(req) {
-		return call(req, {
-			method: 'DELETE',
-			path: function(a) {
-				return valid_id(a.id) ? '/api/accounts/' + a.id : null;
-			}
-		});
+	account_delete: {
+		args: { sid: 'string', id: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'DELETE',
+				path: function(a) { return valid_id(a.id) ? '/api/accounts/' + a.id : null; }
+			});
+		}
 	},
 
-	signin: function(req) {
-		return call(req, {
-			method: 'POST',
-			path: function(a) {
-				return valid_id(a.id) ? '/api/accounts/' + a.id + '/signin' : null;
-			},
-			body: function() { return { force: true }; }
-		});
+	signin: {
+		args: { sid: 'string', id: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'POST',
+				path: function(a) { return valid_id(a.id) ? '/api/accounts/' + a.id + '/signin' : null; },
+				body: function() { return { force: true }; }
+			});
+		}
 	},
 
-	schedule_set: function(req) {
-		return call(req, {
-			method: 'POST',
-			path: function(a) {
-				return valid_id(a.id) ? '/api/accounts/' + a.id + '/schedule' : null;
-			},
-			body: function(a) { return a.body != null ? a.body : {}; }
-		});
+	schedule_set: {
+		args: { sid: 'string', id: 'string', body: 'object' },
+		call: function(request) {
+			return call(request, {
+				method: 'POST',
+				path: function(a) { return valid_id(a.id) ? '/api/accounts/' + a.id + '/schedule' : null; },
+				body: function(a) { return a.body != null ? a.body : {}; }
+			});
+		}
 	},
 
-	logs: function(req) {
-		let limit = req.args != null ? +req.args.limit : 200;
-		if (!(limit > 0))
-			limit = 200;
-		if (limit > 500)
-			limit = 500;
-		return call(req, {
-			method: 'GET',
-			path: function() { return '/api/logs?limit=' + limit; }
-		});
+	logs: {
+		args: { sid: 'string', limit: 'string' },
+		call: function(request) {
+			let limit = request.args != null ? +request.args.limit : 200;
+			if (!(limit > 0))
+				limit = 200;
+			if (limit > 500)
+				limit = 500;
+			return call(request, {
+				method: 'GET',
+				path: function() { return '/api/logs?limit=' + limit; }
+			});
+		}
 	},
 
-	send_code: function(req) {
-		return call(req, {
-			method: 'POST',
-			path: function() { return '/api/send-code'; },
-			body: function(a) { return a.body != null ? a.body : {}; }
-		});
+	send_code: {
+		args: { sid: 'string', body: 'string' },
+		call: function(request) {
+			return call(request, {
+				method: 'POST',
+				path: function() { return '/api/send-code'; },
+				body: function(a) { return a.body != null ? a.body : {}; }
+			});
+		}
 	}
 };
+
+return { 'luci.taygedo': methods };

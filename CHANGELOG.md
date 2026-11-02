@@ -47,6 +47,23 @@
 
 ### 验证
 
+- **本地静态与测试**（实跑）：`cargo fmt --all -- --check`、`cargo clippy --all-targets -- -D warnings`、
+  `cargo test --all-targets`（87 passed / 0 failed）、`cargo build --release` 全部通过；
+  改动文件 CRLF 计数为 0。
+- **本地冒烟**（`TAYGEDO_EDITION=openwrt`，临时实例 `127.0.0.1:18787`）：`GET /` 返回 `404`；
+  `/api/meta` 只剩 `ok/edition/auth_mode/crypto_policy/crypto_required/crypto_proto/crypto_alg/crypto_identity_kid`；
+  `/api/config` 无会话 `401 luci_session_missing`、伪造会话 `401 luci_session_invalid`；
+  `/api/login`、`/api/logout`、`/api/password` 均为 `404`。
+- **真机**（ImmortalWrt / aarch64，部署 CI 产物后实测）：`ubus call session login` 取得的会话
+  能被 `ubus call session get` 识别为 `{"values":{"username":"root"}}`，带 `X-TGD-Luci-Session`
+  请求 `/api/config` 返回 `200` 与真实配置（`parse_session_get` 修复已验证）；
+  `ubus call luci.taygedo meta/config_get/config_set/logs` 均返回 `200`，伪造会话 `401`、
+  非法请求体 `400`；后端仅监听 `127.0.0.1:8787`，LAN 侧访问失败。
+- **真机待解决的结构性冲突**：rpcd 的 ucode 方法在自身 uloop 内处理请求，插件再同步调用
+  `ubus call`（后端校验会话）会等不到同一进程的应答，实测恰好卡满后端 2s 超时后按 fail-closed
+  返回 `401`；一旦该会话在非 rpcd 路径上校验过（缓存有效），同一会话经内部通道即可正常返回。
+  该冲突需在两种方案间取舍（rpcd ACL 作为鉴权边界、后端只认回环 / 或后端改为后台异步刷新会话缓存），
+  因此当前部署已按回滚脚本恢复，未随本版本上线。
 
 ## [0.7.0] - 2026-11-02
 

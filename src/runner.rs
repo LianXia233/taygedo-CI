@@ -85,7 +85,16 @@ pub async fn run_account(
             }
         };
 
-    match sign_with_session(api, &start_account, &access_token, credential_key, opts, log).await {
+    match sign_with_session(
+        api,
+        &start_account,
+        &access_token,
+        credential_key,
+        opts,
+        log,
+    )
+    .await
+    {
         Ok(res) => Ok(res),
         Err(e) if is_auth_error(&e.0) => {
             log(format!(
@@ -107,37 +116,58 @@ async fn refresh_or_rebuild_session(
     log: &mut (dyn FnMut(String) + Send),
 ) -> Result<(Account, String), ApiError> {
     // 1. refreshToken 刷新（优先，代价最小、不触发登录风控）
-    match api.refresh_token(&account.refresh_token, &account.device_id).await {
+    match api
+        .refresh_token(&account.refresh_token, &account.device_id)
+        .await
+    {
         Ok((at, rt, uid)) => {
             log(format!("账号 {}：刷新会话（refreshToken）", account.id));
-            return Ok((with_session(account, &at, &rt, uid.as_deref(), None, None), at));
+            return Ok((
+                with_session(account, &at, &rt, uid.as_deref(), None, None),
+                at,
+            ));
         }
         Err(e) => {
-            log(format!("账号 {}：refreshToken 刷新失败（{}）", account.id, e.0));
+            log(format!(
+                "账号 {}：refreshToken 刷新失败（{}）",
+                account.id, e.0
+            ));
             if !e.0.contains("REFRESH_REJECTED_402")
                 || account.laohu_token.is_none()
                 || account.laohu_user_id.is_none()
             {
                 // 非 402 或缺少 laohuToken 时，尝试密码重登兜底，仍失败则返回原始错误
-                if let (Some(phone), Some(pwd)) =
-                    (account.phone.as_deref(), resolve_password(account, credential_key).as_deref())
-                {
-                    if let Ok((token, user_id)) =
-                        api.login_with_password(phone, pwd, &account.device_id).await
+                if let (Some(phone), Some(pwd)) = (
+                    account.phone.as_deref(),
+                    resolve_password(account, credential_key).as_deref(),
+                ) {
+                    if let Ok((token, user_id)) = api
+                        .login_with_password(phone, pwd, &account.device_id)
+                        .await
                     {
                         let (at, rt, uid) = api
                             .user_center_login(&token, &user_id, &account.device_id)
                             .await?;
                         log(format!("账号 {}：密码重新登录成功", account.id));
                         return Ok((
-                            with_session(account, &at, &rt, Some(&uid), Some(&token), Some(&user_id)),
+                            with_session(
+                                account,
+                                &at,
+                                &rt,
+                                Some(&uid),
+                                Some(&token),
+                                Some(&user_id),
+                            ),
                             at,
                         ));
                     }
                 }
                 return Err(e);
             }
-            log(format!("账号 {}：refreshToken 失效，使用 laohuToken 重建会话", account.id));
+            log(format!(
+                "账号 {}：refreshToken 失效，使用 laohuToken 重建会话",
+                account.id
+            ));
         }
     }
 
@@ -152,16 +182,21 @@ async fn refresh_or_rebuild_session(
     {
         Ok((at, rt, uid)) => {
             log(format!("账号 {}：laohuToken 重建会话成功", account.id));
-            return Ok((with_session(account, &at, &rt, Some(&uid), None, None), at));
+            Ok((with_session(account, &at, &rt, Some(&uid), None, None), at))
         }
         Err(e) => {
-            log(format!("账号 {}：laohuToken 重建失败（{}）", account.id, e.0));
+            log(format!(
+                "账号 {}：laohuToken 重建失败（{}）",
+                account.id, e.0
+            ));
             // 3. 密码重登（最后兜底）
-            if let (Some(phone), Some(pwd)) =
-                (account.phone.as_deref(), resolve_password(account, credential_key).as_deref())
-            {
-                let (token, user_id) =
-                    api.login_with_password(phone, pwd, &account.device_id).await?;
+            if let (Some(phone), Some(pwd)) = (
+                account.phone.as_deref(),
+                resolve_password(account, credential_key).as_deref(),
+            ) {
+                let (token, user_id) = api
+                    .login_with_password(phone, pwd, &account.device_id)
+                    .await?;
                 let (at, rt, uid) = api
                     .user_center_login(&token, &user_id, &account.device_id)
                     .await?;
@@ -171,7 +206,7 @@ async fn refresh_or_rebuild_session(
                     at,
                 ));
             }
-            return Err(e);
+            Err(e)
         }
     }
 }
@@ -229,7 +264,10 @@ async fn sign_with_session(
     };
     if let Some(a) = &app {
         if a.already_signed == Some(true) {
-            log(format!("账号 {}（{}）：APP 签到：今日已签到", account.name, account.id));
+            log(format!(
+                "账号 {}（{}）：APP 签到：今日已签到",
+                account.name, account.id
+            ));
         } else {
             log(format!(
                 "账号 {}（{}）：APP 签到：获得 {} 金币，{} 经验",
@@ -245,7 +283,10 @@ async fn sign_with_session(
     let mut game_signins = Vec::new();
     let mut game_failures: Vec<String> = Vec::new();
     for role in &roles {
-        let (already, err) = match api.game_signin(access_token, &role.role_id, &role.game_id).await {
+        let (already, err) = match api
+            .game_signin(access_token, &role.role_id, &role.game_id)
+            .await
+        {
             Ok(()) => (false, None),
             Err(e) if is_already_signed(&e.0) => (true, None),
             Err(e) if is_auth_error(&e.0) => return Err(e),
@@ -271,7 +312,10 @@ async fn sign_with_session(
             let rewards = api.get_signin_rewards(access_token, &role.game_id).await?;
             let reward = rewards
                 .get((days - 1).max(0) as usize)
-                .map(|(n, num)| Reward { name: n.clone(), num: *num });
+                .map(|(n, num)| Reward {
+                    name: n.clone(),
+                    num: *num,
+                });
 
             log(format!(
                 "账号 {}（{}）：游戏 {} / {}：{}，本月第 {} 天{}",
@@ -279,7 +323,11 @@ async fn sign_with_session(
                 account.id,
                 game_label(&role.game_id, role.game_name.as_deref()),
                 role.role_name.as_deref().unwrap_or(&role.role_id),
-                if already { "今日已签到" } else { "签到成功" },
+                if already {
+                    "今日已签到"
+                } else {
+                    "签到成功"
+                },
                 days,
                 reward
                     .as_ref()
@@ -292,7 +340,10 @@ async fn sign_with_session(
         game_signins.push(GameSigninResult {
             game_id: role.game_id.clone(),
             game_name: role.game_name.clone(),
-            role_name: role.role_name.clone().unwrap_or_else(|| role.role_id.clone()),
+            role_name: role
+                .role_name
+                .clone()
+                .unwrap_or_else(|| role.role_id.clone()),
             days,
             reward,
             already_signed: Some(already),
@@ -349,7 +400,10 @@ async fn sign_with_session(
         Some(failures.join("；"))
     };
 
-    log(format!("账号 {}（{}）：签到流程结束，状态：{}", account.name, account.id, status));
+    log(format!(
+        "账号 {}（{}）：签到流程结束，状态：{}",
+        account.name, account.id, status
+    ));
 
     Ok((
         acc,
@@ -372,7 +426,10 @@ async fn sign_app_idempotently(
     access_token: &str,
     account: &Account,
 ) -> Result<AppSigninResult, ApiError> {
-    match api.app_signin(access_token, &account.uid, &account.device_id).await {
+    match api
+        .app_signin(access_token, &account.uid, &account.device_id)
+        .await
+    {
         Ok((exp, gold)) => Ok(AppSigninResult {
             already_signed: Some(false),
             exp: Some(exp),
@@ -394,7 +451,10 @@ async fn get_all_game_roles(
     uid: &str,
     device_id: &str,
 ) -> Vec<GameRole> {
-    if let Ok(cards) = api.get_game_record_cards(access_token, uid, device_id).await {
+    if let Ok(cards) = api
+        .get_game_record_cards(access_token, uid, device_id)
+        .await
+    {
         if !cards.is_empty() {
             return cards
                 .into_iter()
@@ -413,7 +473,10 @@ async fn get_all_game_roles(
     let mut roles = Vec::new();
     let mut seen = HashSet::new();
     for game_id in crate::constants::GAME_IDS {
-        if let Ok(list) = api.get_game_roles(access_token, uid, device_id, game_id).await {
+        if let Ok(list) = api
+            .get_game_roles(access_token, uid, device_id, game_id)
+            .await
+        {
             for r in list {
                 if r.role_id.is_empty() || seen.contains(&r.role_id) {
                     continue;
@@ -438,7 +501,10 @@ async fn run_coin_tasks(
     opts: &RunOptions,
     log: &mut (dyn FnMut(String) + Send),
 ) -> Option<CoinTaskResult> {
-    let tasks = match api.get_user_tasks(access_token, &account.uid, &account.device_id).await {
+    let tasks = match api
+        .get_user_tasks(access_token, &account.uid, &account.device_id)
+        .await
+    {
         Ok(t) => t,
         Err(e) => {
             log(format!("账号 {}：获取金币任务失败：{}", account.id, e.0));
@@ -466,7 +532,10 @@ async fn run_coin_tasks(
     };
 
     if bbs_target > 0 {
-        match api.bbs_signin(access_token, &account.uid, &account.device_id).await {
+        match api
+            .bbs_signin(access_token, &account.uid, &account.device_id)
+            .await
+        {
             Ok(()) => result.bbs_signin = Some(true),
             Err(e) if is_already_signed(&e.0) => result.bbs_signin = Some(true),
             Err(e) => push_error(&mut result, format!("BBS 签到失败：{}", e.0)),
@@ -476,7 +545,10 @@ async fn run_coin_tasks(
     }
 
     let posts = if browse_target > 0 || like_target > 0 || share_target > 0 {
-        match api.get_recommend_post_list(access_token, &account.uid, &account.device_id).await {
+        match api
+            .get_recommend_post_list(access_token, &account.uid, &account.device_id)
+            .await
+        {
             Ok(p) => p,
             Err(e) => {
                 push_error(&mut result, format!("获取帖子列表失败：{}", e.0));
@@ -494,12 +566,23 @@ async fn run_coin_tasks(
             break;
         }
         sleep_range(700, 1500).await;
-        match api.get_post_full(access_token, &account.uid, &account.device_id, &post.post_id).await {
+        match api
+            .get_post_full(
+                access_token,
+                &account.uid,
+                &account.device_id,
+                &post.post_id,
+            )
+            .await
+        {
             Ok(full) => {
                 browsed.push(full);
                 result.browse_done += 1;
             }
-            Err(e) => push_error(&mut result, format!("浏览帖子 {} 失败：{}", post.post_id, e.0)),
+            Err(e) => push_error(
+                &mut result,
+                format!("浏览帖子 {} 失败：{}", post.post_id, e.0),
+            ),
         }
     }
 
@@ -518,9 +601,20 @@ async fn run_coin_tasks(
             continue;
         }
         sleep_range(500, 1000).await;
-        match api.like_post(access_token, &account.uid, &account.device_id, &post.post_id).await {
+        match api
+            .like_post(
+                access_token,
+                &account.uid,
+                &account.device_id,
+                &post.post_id,
+            )
+            .await
+        {
             Ok(()) => result.like_done += 1,
-            Err(e) => push_error(&mut result, format!("点赞帖子 {} 失败：{}", post.post_id, e.0)),
+            Err(e) => push_error(
+                &mut result,
+                format!("点赞帖子 {} 失败：{}", post.post_id, e.0),
+            ),
         }
     }
 
@@ -528,7 +622,16 @@ async fn run_coin_tasks(
     if share_target > 0 {
         let share_post = browsed.first().or_else(|| posts.first());
         if let Some(p) = share_post {
-            match api.share_post(access_token, &account.uid, &account.device_id, &p.post_id, &opts.share_platform).await {
+            match api
+                .share_post(
+                    access_token,
+                    &account.uid,
+                    &account.device_id,
+                    &p.post_id,
+                    &opts.share_platform,
+                )
+                .await
+            {
                 Ok(()) => result.share_done = 1,
                 Err(e) => push_error(&mut result, format!("分享帖子 {} 失败：{}", p.post_id, e.0)),
             }
@@ -546,12 +649,20 @@ async fn run_coin_tasks(
     log(format!(
         "账号 {}：金币任务：签到{} 浏览{}/{} 点赞{}/{} 分享{}{}",
         account.id,
-        if result.bbs_signin == Some(true) { "✓" } else { "×" },
+        if result.bbs_signin == Some(true) {
+            "✓"
+        } else {
+            "×"
+        },
         result.browse_done,
         result.browse_target,
         result.like_done,
         result.like_target,
-        if result.share_done >= result.share_target { "✓".to_string() } else { format!("{}/{}", result.share_done, result.share_target) },
+        if result.share_done >= result.share_target {
+            "✓".to_string()
+        } else {
+            format!("{}/{}", result.share_done, result.share_target)
+        },
         match (result.today_coin, result.limit_coin) {
             (Some(t), Some(l)) => format!(" 今日金币{}/{}", t, l),
             _ => String::new(),
@@ -636,8 +747,14 @@ async fn run_cloud_duration(
             } else {
                 "今日已领".to_string()
             };
-            let remained = info.remained.map(|r| format!("，剩余 {r} 分钟")).unwrap_or_default();
-            log(format!("账号 {}：云异环时长：{}{}", account.id, text, remained));
+            let remained = info
+                .remained
+                .map(|r| format!("，剩余 {r} 分钟"))
+                .unwrap_or_default();
+            log(format!(
+                "账号 {}：云异环时长：{}{}",
+                account.id, text, remained
+            ));
             (
                 Some(CloudDurationResult {
                     status: "success".into(),
@@ -745,8 +862,15 @@ pub fn summary_text(result: &RunResult) -> String {
             }
         }
         for g in &acc.game_signins {
-            let reward = g.reward.as_ref().map(|r| format!("，奖励 {} x{}", r.name, r.num)).unwrap_or_default();
-            let days = g.days.map(|d| format!("，本月第 {d} 天")).unwrap_or_default();
+            let reward = g
+                .reward
+                .as_ref()
+                .map(|r| format!("，奖励 {} x{}", r.name, r.num))
+                .unwrap_or_default();
+            let days = g
+                .days
+                .map(|d| format!("，本月第 {d} 天"))
+                .unwrap_or_default();
             let status = if g.already_signed == Some(true) {
                 "今日已签到".to_string()
             } else if g.success {
@@ -766,12 +890,20 @@ pub fn summary_text(result: &RunResult) -> String {
         if let Some(ct) = &acc.coin_tasks {
             lines.push(format!(
                 "- 金币任务：签到{} 浏览{}/{} 点赞{}/{} 分享{}{}",
-                if ct.bbs_signin == Some(true) { "✓" } else { "×" },
+                if ct.bbs_signin == Some(true) {
+                    "✓"
+                } else {
+                    "×"
+                },
                 ct.browse_done,
                 ct.browse_target,
                 ct.like_done,
                 ct.like_target,
-                if ct.share_done >= ct.share_target { "✓".to_string() } else { format!("{}/{}", ct.share_done, ct.share_target) },
+                if ct.share_done >= ct.share_target {
+                    "✓".to_string()
+                } else {
+                    format!("{}/{}", ct.share_done, ct.share_target)
+                },
                 match (ct.today_coin, ct.limit_coin) {
                     (Some(t), Some(l)) => format!(" 今日金币{}/{}", t, l),
                     _ => String::new(),
@@ -794,11 +926,20 @@ pub fn summary_text(result: &RunResult) -> String {
 
 fn format_cloud(cd: &CloudDurationResult) -> String {
     match cd.status.as_str() {
-        "skipped" => format!("- 云异环时长：跳过（{}）", cd.skipped_reason.as_deref().unwrap_or("未执行")),
-        "failed" => format!("- 云异环时长：失败（{}）", cd.error.as_deref().unwrap_or("未知错误")),
+        "skipped" => format!(
+            "- 云异环时长：跳过（{}）",
+            cd.skipped_reason.as_deref().unwrap_or("未执行")
+        ),
+        "failed" => format!(
+            "- 云异环时长：失败（{}）",
+            cd.error.as_deref().unwrap_or("未知错误")
+        ),
         _ => {
             let gave = cd.gave.unwrap_or(0.0);
-            let remained = cd.remained.map(|r| format!("，剩余 {r} 分钟")).unwrap_or_default();
+            let remained = cd
+                .remained
+                .map(|r| format!("，剩余 {r} 分钟"))
+                .unwrap_or_default();
             if gave > 0.0 {
                 format!("- 云异环时长：+{gave} 分钟{remained}")
             } else {

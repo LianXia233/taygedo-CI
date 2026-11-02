@@ -107,7 +107,8 @@ fn default_crypto_policy() -> String {
 /// 对 `crate::web` 公开：`update_config` 在收到空 `lan_cidrs` 时需回到该默认值，
 /// 避免用户清空字段后落入空集合（既不放行任何内网、也无法恢复）。
 pub fn default_lan_cidrs() -> String {
-    "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,169.254.0.0/16,::1/128,fc00::/7,fe80::/10".into()
+    "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,169.254.0.0/16,::1/128,fc00::/7,fe80::/10"
+        .into()
 }
 
 fn default_schedule() -> String {
@@ -168,12 +169,15 @@ pub struct KeyRing {
 impl KeyRing {
     /// 从密钥环解出 32 字节私钥。
     pub fn secret_bytes(&self) -> Result<[u8; 32], String> {
-        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
         let raw = URL_SAFE_NO_PAD
             .decode(self.identity_secret.trim())
             .map_err(|_| "identity_secret 不是合法 base64url".to_string())?;
         if raw.len() != 32 {
-            return Err(format!("identity_secret 长度应为 32 字节，实际 {}", raw.len()));
+            return Err(format!(
+                "identity_secret 长度应为 32 字节，实际 {}",
+                raw.len()
+            ));
         }
         let mut out = [0u8; 32];
         out.copy_from_slice(&raw);
@@ -182,7 +186,7 @@ impl KeyRing {
 
     /// 生成新的密钥环。
     pub fn generate() -> Self {
-        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
         let secret = crate::protocol::x25519_generate_secret();
         Self {
             version: 1,

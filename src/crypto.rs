@@ -8,11 +8,11 @@
 //!
 //! v1 口令哈希（单轮 sha256）仅用于向后兼容校验，新密码一律按 v2 写入。
 
-use aes_gcm::{Aes256Gcm, KeyInit, aead::Aead};
 use aes_gcm::aead::generic_array::GenericArray;
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use rand::{Rng, RngCore};
-use scrypt::{Params, scrypt};
+use scrypt::{scrypt, Params};
 
 use crate::models::EncryptedPassword;
 
@@ -52,7 +52,9 @@ pub fn encrypt_password(password: &str, credential_key: &str) -> EncryptedPasswo
     let key = derive_scrypt_key(credential_key, &salt);
     let cipher = Aes256Gcm::new_from_slice(&key).expect("32 字节 key");
     let nonce = GenericArray::from_slice(&iv);
-    let ct = cipher.encrypt(nonce, password.as_bytes()).expect("加密失败");
+    let ct = cipher
+        .encrypt(nonce, password.as_bytes())
+        .expect("加密失败");
 
     // aes-gcm 的 encrypt 返回 ciphertext||tag（tag 16 字节）
     let (data, tag) = ct.split_at(ct.len() - 16);
@@ -69,7 +71,10 @@ pub fn encrypt_password(password: &str, credential_key: &str) -> EncryptedPasswo
 }
 
 /// 解密密码。
-pub fn decrypt_password(encrypted: &EncryptedPassword, credential_key: &str) -> Result<String, String> {
+pub fn decrypt_password(
+    encrypted: &EncryptedPassword,
+    credential_key: &str,
+) -> Result<String, String> {
     if encrypted.alg != "AES-256-GCM" {
         return Err("不支持的加密密码格式".into());
     }
@@ -86,9 +91,15 @@ pub fn decrypt_password(encrypted: &EncryptedPassword, credential_key: &str) -> 
         }
     };
 
-    let iv = URL_SAFE_NO_PAD.decode(&encrypted.iv).map_err(|_| "iv 解码失败")?;
-    let tag = URL_SAFE_NO_PAD.decode(&encrypted.tag).map_err(|_| "tag 解码失败")?;
-    let data = URL_SAFE_NO_PAD.decode(&encrypted.data).map_err(|_| "data 解码失败")?;
+    let iv = URL_SAFE_NO_PAD
+        .decode(&encrypted.iv)
+        .map_err(|_| "iv 解码失败")?;
+    let tag = URL_SAFE_NO_PAD
+        .decode(&encrypted.tag)
+        .map_err(|_| "tag 解码失败")?;
+    let data = URL_SAFE_NO_PAD
+        .decode(&encrypted.data)
+        .map_err(|_| "data 解码失败")?;
 
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| "key 长度错误")?;
     let nonce = GenericArray::from_slice(&iv);

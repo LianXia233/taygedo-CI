@@ -3,6 +3,7 @@ mod constants;
 mod crypto;
 mod crypto_storage;
 mod login;
+mod luci_session;
 mod models;
 mod protocol;
 mod runner;
@@ -59,7 +60,13 @@ async fn main() {
         .expect("绑定端口失败");
 
     // 计算可点击的访问地址：若绑定 0.0.0.0 则展示 localhost/127.0.0.1
-    let display_url = if bind_addr.ip().is_unspecified() {
+    //
+    // OpenWrt 集成模式下没有内置 WebUI，入口是 LuCI 菜单，因此不展示
+    // "浏览器打开 :8787" 这类会误导的访问地址。
+    let openwrt = service::is_openwrt();
+    let display_url = if openwrt {
+        "LuCI 菜单：服务 → 塔吉多签到".to_string()
+    } else if bind_addr.ip().is_unspecified() {
         format!("http://127.0.0.1:{}", bind_addr.port())
     } else {
         format!("http://{}", bind_addr)
@@ -72,6 +79,8 @@ async fn main() {
 
     let auth_note = if state.no_auth {
         "免鉴权模式 (内网放行)".to_string()
+    } else if service::luci_session_required() {
+        "LuCI 会话 (OpenWrt 鉴权)".to_string()
     } else {
         "账号密码登录".to_string()
     };
@@ -102,6 +111,14 @@ async fn main() {
     println!("║  身份指纹: {:<35} ║", state.crypto.identity_fingerprint());
     println!("╚════════════════════════════════════════════╝");
 
+    // OpenWrt 集成模式：明确说明入口与鉴权归属，避免使用者继续找 WebUI 端口。
+    if openwrt {
+        println!();
+        println!("[OpenWrt 集成模式] 内置 WebUI 已退役：本服务不提供网页界面与自有登录。");
+        println!("  唯一入口：LuCI 菜单「服务 → 塔吉多签到」");
+        println!("  鉴权：由 LuCI/ubus 会话负责（本服务只接受受信内网来源的会话请求）");
+    }
+
     // 初始随机口令：仅在 stdout 出现一次，**不写入日志缓冲区**（日志可经 API 读取）。
     if let Some(pwd) = state.initial_password.as_deref() {
         println!();
@@ -119,8 +136,10 @@ async fn main() {
 
     // Windows 桌面端：启动后自动用默认浏览器打开 WebUI。
     // 服务器 / OpenWrt / Docker 无桌面环境，仅在 Windows 下执行，避免无意义弹窗。
+    // OpenWrt 集成模式没有 WebUI 入口（`display_url` 是 LuCI 菜单名而非 URL），
+    // 因此即使运行在 Windows 上也不自动打开浏览器。
     #[cfg(target_os = "windows")]
-    {
+    if !openwrt {
         let open_url = display_url.clone();
         tokio::spawn(async move {
             // 稍等，确保 axum 已开始监听，避免浏览器首请求连不上

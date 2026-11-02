@@ -148,9 +148,14 @@ pub fn canonical_bytes(m: &Manifest) -> Vec<u8> {
 }
 
 /// 生成并签名清单。
-pub fn build(identity: &ServerIdentity, generated_at: u64) -> Manifest {
+///
+/// `include_webui` 为 false 时（OpenWrt 集成模式）不把首页 `/` 列入清单：
+/// 该模式下不提供内置 WebUI 界面，首页路由返回 404，若仍列出会让前端的
+/// 逐资源哈希校验整体失败。
+pub fn build(identity: &ServerIdentity, generated_at: u64, include_webui: bool) -> Manifest {
     let mut files: Vec<FileEntry> = ASSETS
         .iter()
+        .filter(|(path, _)| include_webui || *path != "/")
         .map(|(path, content)| FileEntry {
             path: (*path).to_string(),
             sha256: sha256_hex(content.as_bytes()),
@@ -203,7 +208,7 @@ mod tests {
 
     #[test]
     fn manifest_covers_every_asset() {
-        let m = build(&id(), 1);
+        let m = build(&id(), 1, true);
         assert_eq!(m.files.len(), ASSETS.len());
         assert!(m
             .files
@@ -217,9 +222,22 @@ mod tests {
     }
 
     #[test]
+    fn openwrt_manifest_excludes_webui_index() {
+        // OpenWrt 集成模式：首页不提供，清单必须同步剔除 `/`，
+        // 否则前端逐资源校验会因 404 整体失败（连带 LuCI 加密客户端不可用）。
+        let m = build(&id(), 1, false);
+        assert_eq!(m.files.len(), ASSETS.len() - 1);
+        assert!(!m.files.iter().any(|f| f.path == "/"));
+        assert!(m
+            .files
+            .iter()
+            .any(|f| f.path == "/static/taygedo-crypto.js"));
+    }
+
+    #[test]
     fn manifest_signature_verifies() {
         let id = id();
-        let m = build(&id, 12345);
+        let m = build(&id, 12345, true);
         let sig = super::super::decode_fixed::<64>(m.sig.as_ref().unwrap()).unwrap();
         assert!(super::super::identity::verify(
             &id.public_key(),
@@ -231,7 +249,7 @@ mod tests {
     #[test]
     fn tampering_with_any_field_breaks_signature() {
         let id = id();
-        let m = build(&id, 12345);
+        let m = build(&id, 12345, true);
         let sig = super::super::decode_fixed::<64>(m.sig.as_ref().unwrap()).unwrap();
 
         // 改哈希
@@ -265,7 +283,7 @@ mod tests {
     #[test]
     fn canonical_is_stable_regardless_of_input_order() {
         let id = id();
-        let mut m = build(&id, 1);
+        let mut m = build(&id, 1, true);
         let a = canonical_bytes(&m);
         m.files.reverse();
         assert_eq!(a, canonical_bytes(&m));

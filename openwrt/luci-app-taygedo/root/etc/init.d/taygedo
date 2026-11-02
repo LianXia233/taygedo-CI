@@ -7,19 +7,19 @@ USE_PROCD=1
 PROG=/usr/bin/taygedo-rs
 
 start_service() {
-    local enabled port data_dir web_password no_auth
-    local crypto_policy lan_cidrs lan_no_auth
+    local enabled port data_dir
+    local crypto_policy lan_cidrs lan_no_auth no_auth luci_session_check
     config_load 'taygedo'
     config_get_bool enabled 'main' 'enabled' 0
     [ "$enabled" -eq 0 ] && return 0
 
     config_get port 'main' 'port' '8787'
     config_get data_dir 'main' 'data_dir' '/etc/taygedo'
-    config_get web_password 'main' 'web_password' ''
     config_get_bool no_auth 'main' 'no_auth' 1
     config_get crypto_policy 'main' 'crypto_policy' 'auto'
     config_get lan_cidrs 'main' 'lan_cidrs' ''
     config_get_bool lan_no_auth 'main' 'lan_no_auth' 1
+    config_get_bool luci_session_check 'main' 'luci_session_check' 1
 
     [ -d "$data_dir" ] || mkdir -p "$data_dir"
     # 密钥目录权限：长期身份私钥 + 配置加密主密钥落在此目录，必须仅 root 可读。
@@ -31,24 +31,34 @@ start_service() {
         chmod 600 "$data_dir/keys"/* 2>/dev/null
     fi
 
-    # 职责划分（LuCI 与 WebUI 解耦）：
-    # - UCI 只管「服务级」配置：启停 / 端口 / 数据目录 / WebUI 密码 /
-    #   免鉴权开关 / 加密策略与内网网段；
+    # 运行版本与鉴权口径（OpenWrt 集成模式）：
+    # - 内置 WebUI 已退役，LuCI 是唯一入口；TAYGEDO_EDITION=openwrt 让后端
+    #   明确按集成模式运行（不下发内置前端页面、不生成自助登录口令）。
+    # - 登录与鉴权交给 OpenWrt：LuCI 页面把自身会话号（ubus_rpc_session）随
+    #   请求带给后端，后端调用本机 ubus `session get` 判定有效性，本服务不签发
+    #   任何自有凭据。
+    # - luci_session_check=0 仅用于排障：退回"仅受信内网来源放行"，请勿长期开启。
+    #
+    # 职责划分：
+    # - UCI 只管「服务级」配置：启停 / 端口 / 数据目录 / 鉴权模式 /
+    #   加密策略与内网网段；
     # - 「业务级」配置（默认签到时间 / 金币任务 / 云时长 / 分享平台）统一由
-    #   config.json 管理，LuCI 页面与独立 WebUI 都通过 /api/config 读写同一份数据，
-    #   二者数据互通、互不覆盖。重启服务不会再用 UCI 旧值覆盖 WebUI 的修改。
+    #   config.json 管理，LuCI 页面通过 /api/config 读写。
+    # - no_auth / lan_no_auth 为历史选项，仅在 luci_session_check=0 的排障路径下
+    #   还有意义（见上方说明），默认配置下不参与判定。
 
     procd_open_instance
     procd_set_param command "$PROG"
     procd_set_param env \
+        TAYGEDO_EDITION="openwrt" \
         TAYGEDO_LISTEN="0.0.0.0:${port}" \
         TAYGEDO_DATA_DIR="$data_dir" \
-        TAYGEDO_NO_AUTH="$no_auth" \
+        TAYGEDO_LUCI_SESSION_CHECK="$luci_session_check" \
         TAYGEDO_CRYPTO_POLICY="$crypto_policy" \
+        TAYGEDO_NO_AUTH="$no_auth" \
         TAYGEDO_LAN_NO_AUTH="$lan_no_auth"
     # 空值不传，交由后端回落到内置默认网段（避免传空串把白名单清空）
     [ -n "$lan_cidrs" ] && procd_append_param env TAYGEDO_LAN_CIDRS="$lan_cidrs"
-    [ -n "$web_password" ] && procd_append_param env TAYGEDO_WEB_PASSWORD="$web_password"
     procd_set_param respawn 3600 5 5
     procd_set_param stdout 1
     procd_set_param stderr 1

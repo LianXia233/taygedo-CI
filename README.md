@@ -12,9 +12,11 @@
 [![Release](https://img.shields.io/badge/Release-v0.6.0-orange?style=flat-square)](https://github.com/LianXia233/taygedo-CI/releases)
 
 <p align="center">
-  📦 <b>下载单文件、双击即启</b>，全部操作在<b>现代化白色 Material Design 3、自适应双端</b>的 WebUI 中完成。<br>
-  ⚡ <b>深度适配 OpenWrt 主线与原生 LuCI 界面</b>，统一视觉体验，内置端到端应用层加密安全通道。
+  📦 <b>下载单文件、双击即启</b>，Windows / Debian 下全部操作在<b>现代化白色 Material Design 3、自适应双端</b>的内置 WebUI 中完成。<br>
+  ⚡ <b>深度适配 OpenWrt 主线与原生 LuCI 界面</b>：OpenWrt 上 <b>LuCI 是唯一入口</b>（内置 WebUI 已退役），登录与鉴权交给 OpenWrt，链路默认走端到端应用层加密。
 </p>
+
+> 维护边界：内置 WebUI 在 OpenWrt 目标上已退役且**不再维护**；它仅在 Windows / Linux 独立部署时继续可用。
 
 </div>
 
@@ -22,7 +24,7 @@
 
 > [!TIP]
 > **两层加密：链路上的，和磁盘上的**  
-> 1. **传输层（应用层加密 v2）**：WebUI / LuCI 与后端之间的正文采用 **X25519 + HKDF-SHA256 + XChaCha20-Poly1305**，并由服务端 **Ed25519** 对完整握手 Transcript 与前端资源清单签名。公共网络、交换机镜像、共享 Wi-Fi 下被动抓包拿不到口令与 Token。详见 [docs/security-transport.md](docs/security-transport.md)。  
+> 1. **传输层（应用层加密 v2）**：WebUI / LuCI 与后端之间的正文采用 **X25519 + HKDF-SHA256 + XChaCha20-Poly1305**，并由服务端 **Ed25519** 对完整握手 Transcript 与前端资源清单签名。公共网络、交换机镜像、共享 Wi-Fi 下被动抓包拿不到业务正文。详见 [docs/security-transport.md](docs/security-transport.md)。  
 > 2. **存储层（加密存储）**：`accounts.json` / `config.json` / `state.json` / `keyring.json` 全部以 **XChaCha20-Poly1305** 密文落盘，主密钥按平台分别交给 systemd 凭据 / Windows DPAPI / root 0600 文件保护。磁盘、备份、镜像泄露都拿不到明文。详见 [docs/encrypted-storage.md](docs/encrypted-storage.md)。
 
 > [!NOTE]
@@ -36,7 +38,7 @@
 
 ## 🚀 三步上手（零门槛）
 
-全程通过浏览器完成：添加账号、设置签到时间、查看审计日志与全局配置均在 Web 界面搞定。
+全程通过浏览器完成：Windows / Debian 使用内置 WebUI，OpenWrt 使用 LuCI 菜单，二者均可添加账号、设置签到时间、查看审计日志与全局配置。
 
 <div align="center">
   <img src="docs/images/install-path.svg" alt="安装路径选择" width="800" style="max-width: 100%; height: auto;" />
@@ -47,23 +49,27 @@
 | :---: | :--- | :--- | :--- |
 | **① 下载** | 到 [Releases](https://github.com/LianXia233/taygedo-CI/releases) 下载 zip 并解压 | 下载对应架构的 `.deb` 包 | 下载对应架构的 `.ipk` 或 `.apk` |
 | **② 运行** | **双击 `taygedo-rs.exe`**<br>*(自动唤起默认浏览器)* | `sudo dpkg -i taygedo-rs_*.deb`<br>`sudo systemctl enable --now taygedo-rs` | `opkg install` 或 `apk add`<br>*(安装完成后自动注册服务并启动)* |
-| **③ 使用** | 浏览器打开 `http://127.0.0.1:8787`，用**首次启动生成的随机初始口令**登录 | 浏览器打开 `http://<服务器IP>:8787`，输入 `journalctl` 打印的口令登录 | 进入 LuCI 菜单：**服务 → 塔吉多签到**<br>*(默认开启内网免密直连)* |
+| **③ 使用** | 浏览器打开 `http://127.0.0.1:8787`，用**首次启动生成的随机初始口令**登录 | 浏览器打开 `http://<服务器IP>:8787`，输入 `journalctl` 打印的口令登录 | 进入 LuCI 菜单：**服务 → 塔吉多签到**<br>*(唯一入口；登录与鉴权由 OpenWrt 负责)* |
 
 > [!IMPORTANT]
 > **关键安全须知**
-> - **初始随机口令**：从 `0.5.0` 起彻底弃用固定 `admin/admin`。首次启动会自动生成高强度随机口令，**仅在启动横幅（控制台 / 系统日志）中打印一次**，登录后请立即在「设置」中修改。
+> - **初始随机口令**：从 `0.5.0` 起彻底弃用固定 `admin/admin`。首次启动会自动生成高强度随机口令，**仅在启动横幅（控制台 / 系统日志）中打印一次**，登录后请立即在「设置」中修改。该口令仅适用于 Windows / Linux 独立部署的 WebUI；**OpenWrt 上不生成、也不使用任何应用自有口令**。
+> - **OpenWrt 鉴权口径**：内置 WebUI 在 OpenWrt 上已退役，LuCI 是唯一入口。服务端不再校验自有 Token，而是校验 LuCI 会话（`ubus_rpc_session`，由本机 rpcd 判定有效性），并只接受受信内网来源的请求。
 > - **智能自适应加密**：加密默认开启（`crypto_policy=auto`）。局域网访问明文直通以节省嵌入式 CPU 算力，一旦请求来源脱离内网白名单便自动强制端到端加密，无需繁琐配置。
 
 ---
 
 ## 🎨 界面展示（White Material Design 3）
 
+> 下图是 **Windows / Debian 独立部署的内置 WebUI**。OpenWrt 上该 WebUI 已退役，
+> 请使用 LuCI 菜单「服务 → 塔吉多签到」，两者视觉风格一致。
+
 <div align="center">
   <img src="docs/images/webui-preview.png" alt="塔吉多自动签到 WebUI 预览" width="800" style="max-width: 100%; height: auto;" />
-  <p><sub>图 2：WebUI 主界面预览（白色 MD3 风格、看板统计、卡片管理与实时审计流）</sub></p>
+  <p><sub>图 2：内置 WebUI 主界面预览（白色 MD3 风格、看板统计、卡片管理与实时审计流）</sub></p>
 </div>
 
-访问 `http://<host>:8787`，使用启动日志输出的随机初始口令登录：
+独立部署时访问 `http://<host>:8787`，使用启动日志输出的随机初始口令登录：
 
 - **极简纯白 MD3 美学**：采用 Material Design 3 设计规范，精调纯白卡片面板与柔和阴影，辅以微透明毛玻璃效果（`backdrop-filter: blur(20px)`），视觉通透轻盈。
 - **精美壁纸与新版角色头像**：保持经典精美背景壁纸（`uu4H/bg1.jpg`），叠加白昼毛玻璃遮罩；默认预置高清二次元粉发角色头像（Retina 级高清 Base64 直出，零外链零加载延迟）。
@@ -85,15 +91,15 @@
 </div>
 
 ### 易用与交互
-- **开箱即用，零门槛**：单文件绿色分发，双击解压即用；所有操作集成于 Web 界面，无需配置复杂命令行参数。
+- **开箱即用，零门槛**：单文件绿色分发，双击解压即用；所有操作集成于 Web 界面（OpenWrt 为 LuCI），无需配置复杂命令行参数。
 - **白色 MD3 响应式 UI**：统一 WebUI 与 LuCI 视觉体验，支持手机/PC 双端响应式流动排版与微动效。
-- **实时日志看板**：WebUI 实时输出带毫秒级时间戳的详细流水审计日志。
+- **实时日志看板**：界面实时输出带毫秒级时间戳的详细流水审计日志。
 
 ### 账号与多模式登录
 - **多账号管理**：支持录入任意数量的游戏账号，独立调度、互相隔离。
 - **双模态认证**：
   - **密码登录**：密码在本地经由 `scrypt + AES-256-GCM` 加密落盘，向下兼容上游数据格式。
-  - **短信验证码登录**：WebUI 支持一键下发短信验证码，快速免密授权。
+  - **短信验证码登录**：界面支持一键下发短信验证码，快速免密授权。
 
 ### 自动化调度与执行
 - **精确时区调度**：独立调度器严格锁死**北京时间（UTC+8）**运行，消除宿主机时区影响；跨平台（Windows / Linux / OpenWrt）触发时刻完全一致。
@@ -103,10 +109,10 @@
 - **高可用会话自动续期**：`accessToken` 失效 $\rightarrow$ 自动调用 `refreshToken` $\rightarrow$ 失败再经由 `laohuToken` 重建会话 $\rightarrow$ 仍失败则通过加密凭据静默重登。
 
 ### 安全防护与加固
-- **双重认证鉴权**：API 访问受 Token 鉴权保护（7 天有效期）。口令哈希使用 **scrypt（N=16384, r=8, p=1）+ 恒定时间比对**（旧 `sha256` 单轮哈希首次登录自动原地升级）。修改密码后已签发 Token 瞬间全部吊销，登录接口内置失败速率限制（HTTP 429）。
-- **内网免鉴权模式（可选）**：通过环境变量 `TAYGEDO_NO_AUTH=1` 或 OpenWrt UCI `option no_auth '1'`（默认已开）启用，内网环境直接免密控制。非内网来源严格阻断放行。
+- **鉴权随运行目标切换**：Windows / Linux 独立部署使用应用自有 Token（7 天有效期）；OpenWrt 上不再校验自有 Token，改为校验 LuCI/ubus 会话，登录态完全由 OpenWrt 维护。口令哈希使用 **scrypt（N=16384, r=8, p=1）+ 恒定时间比对**（旧 `sha256` 单轮哈希首次登录自动原地升级），修改密码后已签发 Token 瞬间全部吊销，登录接口内置失败速率限制（HTTP 429）。
+- **来源限制**：业务接口只接受受信内网来源（`lan_cidrs`）的请求；OpenWrt 上再叠加 LuCI 会话校验，二者缺一即拒绝。
 - **应用层端到端加密**：全链路采用 **X25519 临时密钥交换 + HKDF-SHA256 + AES-256-GCM**，提供前向保密、单调递增 Nonce 防重放与 AAD 上下文绑定。实测嗅探环境下账号密码与 Token 暴露频次为 **0 次**。
-- **全局控制面板**：配置默认执行时间、金币打卡任务、云游戏时长、分享平台、管理密码变更及安全退出。
+- **全局控制面板**：配置默认执行时间、金币打卡任务、云游戏时长、分享平台；独立部署下还可变更管理口令与安全退出（OpenWrt 上由 LuCI 负责登录与账号）。
 - **日志审计流**：右侧内置高刷新率实时运行终端。
 
 ---
@@ -213,29 +219,31 @@
    ```
 
 2. **开箱即用状态**  
-   安装脚本自动完成注册并拉起服务，`/etc/config/taygedo` 默认注入 `enabled '1'` 与 `no_auth '1'`。直接打开路由器管理界面：**服务 → 塔吉多签到** 即可直连控制面板。
+   安装脚本自动完成注册并拉起服务，`/etc/config/taygedo` 默认注入 `enabled '1'` 与 `luci_session_check '1'`。直接打开路由器管理界面：**服务 → 塔吉多签到** 即可使用。
 
-3. **免鉴权模式特性**  
-   - **已开启免鉴权（默认）**：局域网访问 LuCI 直接免密联动后端 API。
-   - **未开免鉴权**：LuCI 提示认证引导卡片，点击右上角「外部 WebUI」跳转至 `:8787` 输入随机口令登录。
+3. **入口与鉴权口径（OpenWrt）**  
+   - **LuCI 是唯一入口**：后端内置 WebUI 已退役——访问 `:8787` 的首页返回 404（`code=webui_retired`），不再提供登录页与自助改密，也不再生成随机初始口令。
+   - **登录交给 OpenWrt**：LuCI 页面把当前 LuCI 会话号（`ubus_rpc_session`）以 `X-TGD-Luci-Session` 头随请求带给后端；后端调用本机 `ubus call session get` 由 rpcd 判定会话有效性，失效即 401，本服务不签发也不校验任何自有凭据。
+   - **来源限制**：会话请求还必须来自 `lan_cidrs` 受信网段，否则 403（`code=untrusted_source`）。
+   - **已废弃端点**：`POST /api/login`、`POST /api/password`、`POST /api/logout` 在 OpenWrt 上返回 410 Gone（`code=deprecated_endpoint`），仅非 OpenWrt 平台可用。
    - **解耦机制**：UCI（`/etc/config/taygedo`）专注服务级控制（启停/端口/网段）；业务配置（签到时刻/任务开关）由 `config.json` 托管，重启服务互不覆盖。
 
    | 维度 | 说明 |
    | :--- | :--- |
    | **生效边界** | 仅作用于 `/api/*` REST 接口，**不改变 LuCI 原生系统的认证机制与 ACL** |
-   | **放行约束** | 需同时满足 `no_auth=1` 且请求 IP 命中 `lan_cidrs` 白名单；公网流量严格拒绝 |
-   | **网络安全** | 仅建议在受信任局域网启用；若直接暴露公网映射，请置为 `no_auth=0` |
+   | **鉴权约束** | 需同时满足「LuCI 会话有效」且请求 IP 命中 `lan_cidrs` 白名单；公网流量严格拒绝 |
+   | **排障降级** | `option luci_session_check '0'` 可临时退回「仅受信内网放行」，请勿长期开启 |
    | **加密隔离** | 与 `crypto_policy` 独立互不干扰，非受信任网段自动强制密文传输 |
 
 4. **UCI 控制命令参考**  
    ```sh
-   # 切换免鉴权模式
-   uci set taygedo.main.no_auth=1 && uci commit taygedo && /etc/init.d/taygedo restart
+   # 排障：临时退回「仅受信内网放行」（默认 1，走 LuCI 会话校验）
+   uci set taygedo.main.luci_session_check=0 && uci commit taygedo && /etc/init.d/taygedo restart
 
    # 修改监听端口
    uci set taygedo.main.port=8787 && uci commit taygedo && /etc/init.d/taygedo restart
 
-   # 查看运行日志与提取初始随机口令
+   # 查看运行日志
    /etc/init.d/taygedo status
    logread | grep taygedo
    ```
@@ -249,7 +257,7 @@
   <p><sub>图 4：每日定时签到执行流程时序</sub></p>
 </div>
 
-- **控制台登录**：0.5.0 起首次生成随机口令（控制台仅输出一次），登录后务必在「设置」中修改口令（长度 $\ge$ 8），成功后原所有 Token 立即作废。
+- **控制台登录（仅 Windows / Linux）**：0.5.0 起首次生成随机口令（控制台仅输出一次），登录后务必在「设置」中修改口令（长度 $\ge$ 8），成功后原所有 Token 立即作废。**OpenWrt 上不生成口令、也不需要登录**：从 LuCI 菜单进入即可，鉴权由 LuCI 会话承担。
 - **绑定账号**：在「添加账号」弹窗中，根据需求选择账号密码认证或短信验证码直登。
 - **设置时刻**：可在「全局设置」指定统一打卡时刻，亦可在各账号卡片上单独定制差异化执行时间。
 - **手动触发**：点击卡片上的「立即签到」可随时手动拉起全流程任务。
@@ -280,12 +288,14 @@ cargo run --release
 | :--- | :--- | :--- |
 | `TAYGEDO_LISTEN` | `0.0.0.0:8787` | HTTP 监听地址与绑定端口 |
 | `TAYGEDO_DATA_DIR` | `data` | 数据持久化存放目录 |
-| `TAYGEDO_WEB_PASSWORD` | 无 | 显式指定初始管理密码（未配置则使用 CSPRNG 动态生成，仅首次初始化有效） |
+| `TAYGEDO_WEB_PASSWORD` | 无 | 显式指定初始管理密码（未配置则使用 CSPRNG 动态生成，仅首次初始化有效）。**OpenWrt 集成模式下忽略**：不生成、也不使用应用自有口令 |
 | `TAYGEDO_DEFAULT_SCHEDULE` | 无 | 覆盖全局默认签到时刻（格式：`HH:MM`） |
 | `TAYGEDO_COIN_TASKS` | 无 | 覆盖金币打卡任务开关（`true` / `false`） |
 | `TAYGEDO_CLOUD_DURATION` | 无 | 覆盖云异环时长开关（`true` / `false`） |
 | `TAYGEDO_SHARE_PLATFORM` | 无 | 覆盖分享渠道标记 |
-| `TAYGEDO_NO_AUTH` | `false` | 免登录模式开关（`1/true/yes/on` 启用） |
+| `TAYGEDO_EDITION` | 自动检测 | 运行版本：`openwrt` / `standalone`。未设置时按 `/etc/openwrt_release` 是否存在判定 |
+| `TAYGEDO_LUCI_SESSION_CHECK` | `true` | 仅 OpenWrt 生效：是否要求 LuCI 会话（`1` 校验 ubus 会话，`0` 退回仅受信内网放行，排障用） |
+| `TAYGEDO_NO_AUTH` | `false` | 免鉴权模式开关（`1/true/yes/on` 启用）。仅在 OpenWrt + `TAYGEDO_LUCI_SESSION_CHECK=0` 时生效 |
 
 ### Windows 交叉编译
 
@@ -316,7 +326,8 @@ cargo +stable-x86_64-pc-windows-gnu build --release
 
 `openwrt/luci-app-taygedo/` 提供了规范的 LuCI 扩展工程：
 
-- **体验完全对齐**：原生 JavaScript 视图层与独立 WebUI 功能高度一致。
+- **LuCI 是唯一入口**：OpenWrt 上内置 WebUI 已退役（非破坏式保留源码，仅在该目标下默认不启用、不下发）；LuCI 视图承载全部交互。
+- **鉴权交给 OpenWrt**：LuCI 页面携带 `L.env.sessionid` 作为 `X-TGD-Luci-Session`，后端用本机 `ubus call session get` 校验；应用自有登录接口在该目标下返回 410。
 - **服务分层解耦**：LuCI 页面基于 RESTful API 直连交互；UCI 仅维护进程级状态。
 - **进程生命周期管理**：结合 `procd` 体系实现崩溃拉起、热加载与守护。
 
@@ -335,6 +346,12 @@ openwrt/luci-app-taygedo/
 ```
 
 编译方法：将该目录置于 OpenWrt 源码树的 `package/` 或 自定义 feeds 中，执行 `make menuconfig` 勾选 `LuCI → Applications → luci-app-taygedo` 后编译。
+
+**包内容边界**：包只安装 `/usr/bin/taygedo-rs`、LuCI 视图/菜单/ACL、UCI 默认配置与 init 脚本；
+不安装任何独立的 WebUI 前端文件。内置 WebUI 的页面资源是通过 `include_str!` 编译进二进制的，
+因此「退役」落在运行期：`TAYGEDO_EDITION=openwrt`（init 脚本注入）下 `/` 返回 404、
+`/api/login` 等自有登录接口返回 410，但仍保留 `/static/*`（LuCI 页面需要它加载加密客户端与完整性校验器）。
+非 OpenWrt 目标（Windows / Debian / 源码运行）行为不变。
 
 ---
 
@@ -365,7 +382,7 @@ openwrt/luci-app-taygedo/
 | 请求绑定 | AAD | `kid ‖ sid ‖ seq ‖ method ‖ path?query ‖ nonce` |
 | 响应绑定 | AAD | 追加 `req_seq`；客户端校验 `rseq == 请求 seq` |
 | 防重放 | 滑动窗口（4096） | 仅在 AEAD 成功**之后**消费序号，伪造报文不能挤掉合法序号 |
-| 前端资源完整性 | **Ed25519 签名清单** + 逐文件 SHA-256 | 11 个资源；校验不通过则业务 JS 不执行、登录按钮禁用 |
+| 前端资源完整性 | **Ed25519 签名清单** + 逐文件 SHA-256 | 独立部署 11 个资源（含首页）；OpenWrt 10 个（首页已退役、不入清单）；校验不通过则业务 JS 不执行 |
 
 **握手流程（浏览器视角）**
 
@@ -404,9 +421,9 @@ openwrt/luci-app-taygedo/
 > 不是"解密失败后自动回退"。任何解密/认证失败都只会返回加密层错误。
 > 当前策略在 `/api/meta`（`crypto_policy` / `crypto_required`）里公开可查。
 >
-> WebUI 会跟随该策略：读到 `never` 时改用明文请求（否则服务端不解密，
+> WebUI / LuCI 都跟随该策略：读到 `never` 时改用明文请求（否则服务端不解密，
 > 登录等 POST 会拿到密文而失败），其余策略一律发加密信封。
-> 抓包对照时把策略临时设为 `never` 即可，WebUI 无需重新编译。
+> 抓包对照时把策略临时设为 `never` 即可，前端无需重新编译。
 
 ### 三、前端资源完整性（纯 HTTP 下必须正视的问题）
 
@@ -415,12 +432,13 @@ openwrt/luci-app-taygedo/
 ```
 web_guard.js → 拉 /static/manifest.json → 用 identity_pub 验签
              → 与 localStorage 里固定的指纹比对
-             → 逐文件 SHA-256 比对（共 11 个资源，含 / 首页 HTML）
+             → 逐文件 SHA-256 比对（独立部署 11 个资源，含 / 首页 HTML；
+               OpenWrt 10 个，首页已退役故不在清单内）
              → 全部通过才置 window.TgdIntegrity.ok = true
 ```
 
-`taygedo-crypto.js` 每次握手前强制检查该标志；`ui.html` 在失败时**禁用登录**并
-显示原因。即"校验不过就用不了"，不是"警告一下继续用"。
+`taygedo-crypto.js` 每次握手前强制检查该标志；独立部署的 `ui.html` 在失败时**禁用登录**并
+显示原因，LuCI 页面则在失败时拒绝建立加密会话。即"校验不过就用不了"，不是"警告一下继续用"。
 
 **必须知情的限制**：首次访问时的 TOFU 窗口无法消除——那一刻客户端还没有任何
 可信锚点。缓解办法是部署后立即核对一次指纹并记录下来，后续任何变更都会被拒绝。
@@ -547,19 +565,20 @@ OpenWrt 为 `keys/master.key`（root `0600`，目录 `0700`）。
   <p><sub>图 9：网关拦截与分层认证过滤体系</sub></p>
 </div>
 
-所有受保护接口的请求体都是**加密信封**（`POST` 放 body，`GET`/`HEAD` 放 `X-TGD-Envelope` 头），
-Token 放在 `Authorization: Bearer <token>`（位于信封内部，随正文一起加密；0.5.0 起已废弃 Cookie
-凭据传递以阻断 CSRF）。未建立加密会话时业务接口返回 `428`。
+所有受保护接口的请求体都是**加密信封**（`POST` 放 body，`GET`/`HEAD` 放 `X-TGD-Envelope` 头）。
+认证方式随运行目标切换：独立部署用 `Authorization: Bearer <token>`（位于信封内部，随正文一起加密；
+0.5.0 起已废弃 Cookie 凭据传递以阻断 CSRF）；**OpenWrt 上用 `X-TGD-Luci-Session: <ubus_rpc_session>`**，
+且来源必须命中 `lan_cidrs`。未建立加密会话时业务接口返回 `428`。
 
 | 方法 | API 路径 | 认证要求 | 作用说明 |
 | :---: | :--- | :---: | :--- |
 | `POST` | `/api/crypto/handshake` | 公开 | 加密通道握手：换临时密钥 + 服务端 Ed25519 签完整 Transcript |
 | `GET` | `/api/secure/identity` | 公开 | 服务端身份公钥 / `kid` / 指纹（供客户端固定与核对） |
 | `GET` | `/static/manifest.json` | 公开 | 前端资源签名清单（Ed25519 签名 + 逐文件 SHA-256） |
-| `POST` | `/api/login` | 公开 | 凭据登录认证（触发限速：60 秒内失败 5 次返回 HTTP 429） |
-| `GET` | `/api/meta` | 公开 | 读取服务端环境参数、加密约束策略与改密要求 |
-| `POST` | `/api/password` | 鉴权 | 修改管理员登录账号及口令（成功后既有 Token 瞬间吊销） |
-| `POST` | `/api/logout` | 鉴权 | 注销 Token 并立即销毁关联的加密上下文 |
+| `POST` | `/api/login` | 公开 | 凭据登录认证（触发限速：60 秒内失败 5 次返回 HTTP 429）。**OpenWrt 已废弃：410 Gone** |
+| `GET` | `/api/meta` | 公开 | 读取服务端环境参数、加密约束策略、运行版本与鉴权模式 |
+| `POST` | `/api/password` | 鉴权 | 修改管理员登录账号及口令（成功后既有 Token 瞬间吊销）。**OpenWrt 已废弃：410 Gone** |
+| `POST` | `/api/logout` | 鉴权 | 注销 Token 并立即销毁关联的加密上下文。**OpenWrt 为空操作（返回 `deprecated: true`）** |
 | `GET` | `/api/accounts` | 鉴权 | 拉取账号摘要列表（敏感字段脱敏输出） |
 | `POST` | `/api/accounts` | 鉴权 | 录入并登录新游戏账号（支持密码或验证码） |
 | `DELETE`| `/api/accounts/{id}` | 鉴权 | 删除指定账号配置与关联数据 |
@@ -634,10 +653,17 @@ docs/security-transport.md  # 传输协议 v2 规格
 1. 确认主服务进程正常存活且未异常退出。
 2. 确认系统防火墙或公网安全组已放行相应端口（默认 8787）。
 3. 检查监听地址是否设定为 `0.0.0.0:8787` 而不是局限于本地回环 `127.0.0.1`。
+
+> OpenWrt 上没有 WebUI 入口：访问 `:8787` 首页会返回 404（`code=webui_retired`），
+> 请改用 LuCI 菜单「服务 → 塔吉多签到」。若 LuCI 页面提示未通过鉴权，
+> 先确认请求来源在 `lan_cidrs` 内、且 LuCI 会话未过期。
 </details>
 
 <details>
 <summary><b>Q2: 遗忘了 WebUI 管理员密码怎么办？</b></summary>
+
+> 仅适用于 Windows / Linux 独立部署。OpenWrt 上不存在应用自有口令——登录与鉴权
+> 由 LuCI 负责，忘记密码请走 OpenWrt 的 LuCI 账号恢复流程。
 
 `config.json` 现在是**密文**，不能直接用编辑器改（改了会导致认证失败）。请用官方流程：
 
@@ -673,7 +699,7 @@ systemctl start taygedo-rs
 
 <details>
 <summary><b>Q6: 手机移动端浏览器可以正常管理吗？</b></summary>
-可以。WebUI 已经过全尺寸自适应适配，手机横竖屏均可直接访问、添加账号与查看实时日志。
+可以。内置 WebUI 与 LuCI 视图均已做全尺寸自适应适配，手机横竖屏均可直接访问、添加账号与查看实时日志。
 </details>
 
 <details>
@@ -706,8 +732,9 @@ systemctl start taygedo-rs   # 日志里的 Key ID 应与备份时一致
    或你手动替换了 `ui.html`。控制台会给出具体是哪个文件哈希不符。
    **这不是可以忽略的警告**——请恢复原文件，或重新构建二进制。
 
-> 外部覆盖 `/etc/taygedo/ui.html` 会让签名清单里的 `/` 哈希对不上，WebUI 会拒绝启动。
+> 外部覆盖 `/etc/taygedo/ui.html`（仅独立部署）会让签名清单里的 `/` 哈希对不上，WebUI 会拒绝启动。
 > 如需热替换界面，必须用同一身份密钥重新生成并签名清单。
+> OpenWrt 上首页已不在清单内（退役），因此不再受此约束；但 `/static/*` 仍逐文件校验。
 </details>
 
 <details>

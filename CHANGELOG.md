@@ -9,6 +9,47 @@
 > 0.5.0 起首次启动一律由 CSPRNG 随机生成初始口令，仅在启动横幅打印一次。
 > 以 [README](README.md) 的说明为准。
 
+## [Unreleased]
+
+### 变更 · OpenWrt 上退役内置 WebUI（LuCI 唯一入口）
+
+- **OpenWrt 目标不再提供内置 WebUI**：`GET /` 返回 `404`（`code=webui_retired`），
+  不再下发首页、登录页与自助改密界面；入口统一为 LuCI 菜单「服务 → 塔吉多签到」。
+  非破坏式实现——`src/ui.html` 等源码保留，仅在该目标下默认不启用。
+- **登录与鉴权交给 OpenWrt**：LuCI 视图把 `L.env.sessionid`（`ubus_rpc_session`）
+  放进 `X-TGD-Luci-Session` 头，服务端调用本机 `ubus call session get` 由 rpcd
+  判定有效性，并要求来源命中 `lan_cidrs`；不通过分别返回 `401 luci_session_*`
+  或 `403 untrusted_source`。校验结果短 TTL 缓存，超时/ubus 不可用一律 fail-closed。
+- **应用自有登录端点在该目标下废弃**：`POST /api/login`、`POST /api/password`
+  返回 `410 Gone`（`code=deprecated_endpoint`）；`POST /api/logout` 返回
+  `{"ok":true,"deprecated":true}`。三个端点仅非 OpenWrt 平台可用。
+- **不再生成随机初始口令**：OpenWrt 上不生成、也不使用任何应用自有口令；
+  `TAYGEDO_WEB_PASSWORD` 在该目标下忽略。
+- **前端资源清单按目标裁剪**：OpenWrt 上 `/static/manifest.json` 不再包含 `/`
+  （首页已退役），资源数由 11 降为 10，避免 `web_guard.js` 去校验一个必然 404
+  的首页而导致整体完整性校验失败。`/static/*` 仍逐文件校验。
+- **平台判定可显式覆盖**：新增 `TAYGEDO_EDITION=openwrt|standalone`（未设置时
+  按 `/etc/openwrt_release` 是否存在判定）；新增 `TAYGEDO_LUCI_SESSION_CHECK`
+  作为排障开关（`0` 退回"仅受信内网放行"，等价旧的 `no_auth + lan_no_auth`）。
+- **LuCI 前端同步调整**：移除「外部 WebUI」按钮、改密区块与「内网免鉴权放行」
+  开关；鉴权失败页改为解释 LuCI 会话状态并提供重新加载；启动探测改走带会话头的
+  API 路径，按错误码区分来源拒绝 / 会话缺失 / 会话失效 / 服务未运行。
+- **OpenWrt 包同步**：init 脚本注入 `TAYGEDO_EDITION=openwrt` 与
+  `TAYGEDO_LUCI_SESSION_CHECK`，不再传递 WebUI 口令；UCI 新增
+  `luci_session_check`，并把 `web_password` / `no_auth` / `lan_no_auth` 标注为
+  已废弃；包描述与 ACL 说明改为"LuCI 唯一入口、鉴权交给 OpenWrt"。
+
+> **维护边界**：内置 WebUI 在 OpenWrt 目标上已退役且**不再维护**；
+> 它仅在 Windows / Linux 独立部署时保持现状，非 OpenWrt 构建与运行行为不变。
+
+### 验证
+
+- `cargo fmt --all -- --check`、`cargo clippy --all-targets -- -D warnings`、
+  `cargo test --all-targets` 与 `cargo build` 结果见 PR 描述。
+- 改动文件行尾均为 LF（CRLF 计数为 0）。
+- `ubus session get` 路径需在真机 OpenWrt 上验证；本机只能覆盖到格式校验、
+  JSON 解析与 fail-closed 分支的单测，PR 描述中已标注。
+
 ## [0.6.0] - 2026-11-02
 
 > **破坏性安全升级**：配置不再以明文落盘，WebUI 通信协议升级到 `taygedo/v2`。

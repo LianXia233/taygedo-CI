@@ -11,7 +11,7 @@ config taygedo 'main'
 	# LuCI 页面与独立 WebUI 均通过 /api/config 读写，二者数据互通、互不覆盖。
 	option no_auth '1'
 
-	# ---- 应用层加密（X25519 + HKDF-SHA256 + AES-256-GCM）----
+	# ---- 应用层加密（X25519 + HKDF-SHA256 + XChaCha20-Poly1305）----
 	# 加密策略，三选一：
 	#   auto   —— 内网（见 lan_cidrs）明文直通，非内网来源强制加密（默认，最省 CPU）
 	#   always —— 所有来源都要求加密，未加密请求返回 428
@@ -28,3 +28,13 @@ config taygedo 'main'
 	# 内网来源是否享受免鉴权放行。设为 0 后即使 no_auth=1，非内网来源也不放行，
 	# 可防止「免鉴权开关误开 + 服务暴露到公网」演变为完全开放。
 	option lan_no_auth '1'
+
+	# ---- 配置文件静态加密（XChaCha20-Poly1305 + HKDF-SHA256）----
+	# /etc/taygedo 下的 accounts.json / config.json / state.json / keyring.json
+	# 一律以密文落盘，主密钥位于 /etc/taygedo/keys/master.key（root:root 0600）。
+	# OpenWrt 没有 systemd 凭据 / TPM，也不使用 Windows DPAPI，因此密钥保护
+	# 依赖文件系统权限本身：**请确保 /etc/taygedo 与 keys/ 均为 0700 root:root**。
+	#
+	# 密钥丢失 = 既有密文永久不可解（无法恢复，只能删库重建）。
+	# 备份时请把 keys/master.key 一并离线保管，且不要与密文放在同一介质上。
+	# 轮换密钥：/usr/bin/taygedo-rs --rotate-storage-key

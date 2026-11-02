@@ -2,12 +2,141 @@
 
 本文件记录塔吉多自动签到（Rust 版）的所有版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.5.2`。
+> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.6.0`。
 
 > **关于初始口令的重要提示**：`admin / admin` 这类固定初始口令**仅存在于 0.5.0 之前的历史版本**，
 > 下方旧版本条目（如 0.2.0）中的相关描述是当时的事实记录，**不代表当前行为**。
 > 0.5.0 起首次启动一律由 CSPRNG 随机生成初始口令，仅在启动横幅打印一次。
 > 以 [README](README.md) 的说明为准。
+
+## [0.6.0] - 2026-11-02
+
+> **破坏性安全升级**：配置不再以明文落盘，WebUI 通信协议升级到 `taygedo/v2`。
+> 升级前请先阅读 [docs/encrypted-storage.md](docs/encrypted-storage.md) 的「备份与恢复」一节，
+> 并确认 `keys/master.key` 可与密文分开备份。
+> 旧版（0.5.x）数据目录**可直接使用**，首次启动会自动迁移并保留加密备份。
+
+### 新增 · 配置文件静态加密
+
+- **全部受管文件密文化**：`accounts.json` / `config.json` / `state.json` / `keyring.json`
+  一律以 **XChaCha20-Poly1305 + HKDF-SHA256** 密文落盘，OS CSPRNG 生成 salt/nonce。
+- **统一信封格式**：Magic `TGDENV01` + 格式版本 + 算法号 + KeyID(16B) + Salt(32B) +
+  Nonce(24B) + 密文长度 + 密文 + Tag(16B)；解析严格校验边界，截断/追加/零长度一律拒绝。
+- **AAD 绑定文件逻辑身份**：`taygedo/storage/aad/v1` + 版本 + 算法 + KeyID + 身份，
+  跨文件搬移、跨目录搬移、跨主密钥解密全部在解密前失败。
+- **三平台主密钥保护**：Debian 优先 systemd `LoadCredentialEncrypted`（TPM2）、
+  回落 root `0600` 文件；Windows 用 DPAPI（默认用户作用域，可用
+  `TAYGEDO_DPAPI_MACHINE=1` 切机器作用域）；OpenWrt 用 root `0600` 文件，
+  不依赖 systemd/TPM，不影响 procd 与 LuCI。
+- **旧版明文自动迁移**：识别格式 → 按身份校验 JSON 结构 → 加密 → 临时文件 →
+  回读校验 → 原子替换 → 保留**加密**备份（`.enc-bak-<ts>`，最多 3 份）→ 记录 journal。
+  支持中断续做、幂等、失败不覆盖原文件、不删除明文。
+- **密钥轮换**：`taygedo-rs --rotate-storage-key`，新密钥先落 `master.key.pending`，
+  逐文件重加密后原子提升；中断后**一次重启即可续做完成**。
+- **绝不静默丢数据**：密钥缺失/损坏、密文认证失败、权限过宽 → 启动期 `[fatal]` 退出并
+  保留原文件；运行期返回 `Err`。不再有「损坏就改名 `.corrupt-*` 后返回默认配置」的行为。
+- **文件系统防护**：`O_NOFOLLOW`、`fstat` 校验 `nlink==1` 与属主、权限严格 `0600`、
+  `O_EXCL` 随机临时名、`fsync` 文件与目录、`fs4` 排他锁防并发实例。
+
+### 新增 · 应用层加密协议 v2
+
+- **协议重写为 `taygedo/v2`**：Ed25519 长期身份 + X25519 临时密钥交换 +
+  HKDF-SHA256 + **XChaCha20-Poly1305**（替换 v1 的 AES-256-GCM 与计数器 nonce）。
+- **握手签完整 Transcript**：版本 + 双方临时公钥 + 双方随机数 + 身份公钥 + sid + ts，
+  并由服务端 Ed25519 签名；客户端验签 + 指纹比对（TOFU）后才派生 c2s/s2c。
+- **请求/响应 AAD 绑定** `kid ‖ sid ‖ seq ‖ method ‖ path?query ‖ nonce`，
+  响应额外绑定 `req_seq`；客户端校验 `rseq`，防响应替换与乱序错配。
+- **防重放改为滑动窗口**（4096）：解决并发乱序请求与「严格递增」冲突；
+  仅在 AEAD 成功后消费序号，伪造报文不能挤掉合法序号。
+- **前端资源完整性**：`/static/manifest.json` 由 Ed25519 签名，覆盖 11 个资源
+  （含首页 HTML）；`web_guard.js` 验签 + 指纹比对 + 逐文件 SHA-256，
+  不通过则**业务 JS 不执行、登录按钮禁用**。
+- **纯 JS 密码学**：内置 `@noble/ciphers`、`@noble/curves`、`@noble/hashes`
+  （MIT，Cure53 审计），因为普通 HTTP 属于非安全上下文，`crypto.subtle` 不可用。
+- **GET/HEAD 信封走 `X-TGD-Envelope` 头**：`fetch` 与 undici 不允许 GET 带 body；
+  头与 body 走同一校验路径，两者并存直接 `400 malformed`。
+- **服务端结构拆分**：`web_security/` 下新增 `error.rs`、`session.rs`、`middleware.rs`，
+  加解密中间件从 `web.rs` 移出，业务 handler 只看到明文 JSON。
+- **新增接口**：`GET /api/secure/identity`（身份公钥与指纹）、`GET /static/manifest.json`。
+
+### 变更
+
+- `Store` 对外 API 改为返回 `Result`：`load_accounts()` / `load_config()` / `load_state()` /
+  `load_keyring()`。调用方必须处理错误，不再有"读失败返回默认值"的路径。
+- `AppState::new` 返回 `Result`，存储层失败 → `[fatal]` 退出（不再带病启动）。
+- 启动横幅新增「配置加密」与「Key ID」两行；`/api/meta` 新增 `crypto_proto` /
+  `crypto_alg` / `crypto_identity_kid`。
+- 删除 `src/session.rs`（v1 会话状态机），由 `web_security/` 取代。
+- 传输层不再使用 AES-256-GCM（v1 的计数器 nonce 方案整体退役），因此 README 里
+  关于 aarch64 `aes_armv8` 编译参数的性能/侧信道提示**不再适用于传输加密**。
+  注意：`aes` / `aes-gcm` 依赖仍然保留——它们分别用于游戏接口的签名计算
+  （`protocol.rs`）与账号凭据的二次加密（`crypto.rs`），与本次改造无关。
+- 质量门禁抽成可复用工作流 `.github/workflows/quality.yml`（fmt / clippy
+  `-D warnings` / `cargo test` / 真实二进制端到端协议测试），触发条件为
+  `pull_request`(main) / `workflow_dispatch` / `workflow_call`：PR 打开或更新即可
+  看到结论，`build.yml` 的 `release` 通过 `uses:` 复用同一份定义并 `needs` 它。
+  抽成单一来源而不是复制两份，是因为两份脚本必然漂移，且漂移方向通常是
+  "PR 上跑的那份悄悄放宽了"。
+- `.github/workflows/build.yml` 新增 `audit` 作业（RustSec advisory，非阻塞）：
+  一条与本次改动无关的新 advisory 不应把发布流水线卡死；结论在 Actions 里
+  显式可见，由维护者评估后单独升级依赖。
+- 原有 Windows / musl x86_64 / musl aarch64 / debian / openwrt(ipk+apk) /
+  release 流程保持不变。
+- `scripts/package.sh`：deb 的 systemd unit 补充 systemd 凭据用法说明，postinst
+  收紧 `/var/lib/taygedo` 与 `keys/` 权限；OpenWrt `init.d` 兜底 `chmod 700/600`。
+- README 的加密章节重写，明确区分「传输加密」与「存储加密」，并如实列出
+  本次已验证与**尚未在真机验证**的项目。
+
+### 修复
+
+- **续做轮换后仍用旧密钥**：`resume_rotation` 会把 `master.key.pending` 提升为正式密钥，
+  但进程内 `StorageCrypto` 仍持旧密钥，导致本次启动读新密文必然 `KeyIdMismatch`
+  ——等于要求用户重启两次。现在续做成功后立即重新装载主密钥。
+  （新增测试 `interrupted_rotation_is_resumed_in_one_start`，去掉修复即失败。）
+- **CI 首次运行拦下的两处 lint**（本地 rustc 1.93 不报，CI 用 1.99 才触发）：
+  - `clippy::for_kv_map`（`src/protocol.rs`）：遍历 `BTreeMap` 却丢弃 key，
+    改为 `data.values()`。语义等价——`BTreeMap` 本就按 key 字典序迭代。
+  - `clippy::result_large_err`（`src/web_security/middleware.rs`）：中间件返回
+    `Result<Response, Response>`，`Err` 变体 128 字节。这是 axum 的既定约定
+    （`Err` 必须实现 `IntoResponse`），装箱只会多一次堆分配、不减少实际成本，
+    因此加 `#[allow]` 并写明理由，而不是为了消 lint 去改签名。
+- **`crypto_policy=never` 下 WebUI 不可用**（Codex 评审 P2）：WebUI 此前无条件
+  发加密信封，而 `never` 策略下中间件不解密，登录等 POST 会让业务 handler
+  收到密文 JSON 而失败。`src/ui.html` 现在先读 `/api/meta` 的 `crypto_policy`，
+  仅在 `never` 时改走明文请求，其余策略保持信封路径（不回退明文）。
+- **非 2xx 响应对调用方不可读**（Codex 评审 P2）：业务错误（如 401）同样被
+  中间件加密，但 `static/taygedo-crypto.js` 在 `!r.ok` 分支直接返回密文，
+  调用方丢失真实错误；同时明文 `no_session` 被当成普通结果返回，
+  重握手逻辑永远不触发。现在按 `X-TGD-Enc` 标记（缺失时按信封结构）统一解密，
+  明文 `crypto_error` 则抛错进入「重建会话 + 重试一次」。
+- **LuCI 跨源预检缺少 `X-TGD-Envelope`**（Codex 评审 P2）：同主机不同端口时
+  GET/HEAD 信封走该请求头，而 `cors_middleware` 的
+  `Access-Control-Allow-Headers` 未声明它，浏览器会在预检阶段拦下请求。
+  现统一为常量 `ALLOWED_REQUEST_HEADERS`（预检响应与常规响应共用一处定义）。
+
+### 测试
+
+- 单元/集成测试 **97 passed / 0 failed**（Linux，`cargo test --all-targets`）。
+  Windows 本机为 **85 passed / 0 failed**：8 个既有 Unix 专用用例 + 本次新增
+  `#[cfg(unix)]` 门禁的 4 个用例（断言 `keys/master.key` 布局、密钥篡改、
+  轮换、续做轮换）在 Windows 上不适用，如实跳过而非改断言凑数。
+- 端到端协议测试 `scripts/e2e_web.mjs`：真实二进制 + 仓库内真实前端文件，
+  **26/26 通过**。覆盖：
+  - 清单验签 + 11 个资源哈希；
+  - 加载真实的 `web_guard.js` 对真实清单执行完整性校验：TOFU 首次、指纹已固定、
+    指纹变更被拒、资源被替换（哈希不符）被拒、资源恢复后自愈；
+  - 跨源预检声明 `X-TGD-Envelope`（对应本次 `cors_middleware` 修复）；
+  - 握手验签、登录、账号/配置/日志往返；
+  - 重放拒绝、跨接口搬移拒绝、GET 走头与 POST 走 body、正文与头并存拒绝、明文 428；
+  - 错误登录返回 401 且响应已解密（调用方拿到 `error` 而非密文）；
+  - 伪造会话 ID 触发 `no_session` 后自动重握手并成功（会话 ID 已更新）。
+- `cargo fmt --all -- --check` 与 `cargo clippy --all-targets -- -D warnings` 均无输出。
+- 上述 fmt / clippy / 测试在 **rustc 1.99.1**（与 CI 同版本）下复验通过。此前本地
+  为 1.93，有两条新 lint 未触发，已由 PR 门禁拦下并修正——这也是把质量门禁放到
+  PR 上的直接理由：本地版本落后时，"我这儿是干净的"并不等于 CI 干净。
+- `scripts/e2e_web.mjs` 的 vendor 模块动态 import 改为 `pathToFileURL`：
+  原先传裸文件路径，Windows 下被 ESM loader 判为未知 scheme（`Received protocol 'c:'`），
+  该缺陷只在非 Linux 本地复跑时暴露，CI 不受影响。
 
 ## [0.5.2] - 2026-11-01
 

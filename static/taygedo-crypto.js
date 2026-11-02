@@ -1,42 +1,37 @@
 /*
- * taygedo 应用层加密客户端（浏览器侧，基于 WebCrypto）
+ * taygedo 应用层加密客户端（协议 v2）
  *
- * 协议：X25519 ECDH → HKDF-SHA256 → 双向 AES-256-GCM，与 Rust 后端 src/session.rs 一一对应。
+ * 设计要点见 docs/security-transport.md。核心约束：
  *
- * ## 用法
+ * 1. 纯 HTTP 下 `crypto.subtle` 不存在，因此**全部**密码学操作走内置
+ *    noble 纯 JS 实现（X25519 / Ed25519 / HKDF-SHA256 / XChaCha20-Poly1305）。
+ * 2. 握手响应必须用**固定过的**服务端 Ed25519 公钥验签；验签失败即中止，
+ *    绝不"先建立会话再校验"。
+ * 3. 每条消息的 AAD 绑定 method + path + sid + seq + 方向 + nonce，
+ *    密文无法跨接口/跨会话搬移。
+ * 4. 没有明文回退：拿不到加密能力就抛错，由界面显示"无法建立安全会话"。
  *
- *   var C = TaygedoCrypto.create({
- *     baseUrl: '',                       // 可选，默认同源
- *     probePath: '/api/crypto/handshake' // 握手路径
- *   });
- *   C.ready().then(function () { ... C.request('/api/accounts', 'GET') ... });
- *
- * ## 关键约束
- *
- * - `request()` 返回解析后的 JSON。内部自动完成握手、序号管理、加解密。
- * - 若后端策略为 auto 且当前来源属内网，握手可省略，`request()` 直接明文直通。
- * - **不要在外部手动构造 Authorization 之外的头**；序号由本模块单调维护。
- * - 会话失效（PRE_CONDITION_REQUIRED / crypto_error）时自动重新握手并重试一次。
- *
- * ## 安全说明
- *
- * - 客户端私钥为内存中的临时 `CryptoKey`（non-extractable 由 WebCrypto 保证），
- *   页面关闭即销毁，不落盘、不进 localStorage。
- * - 会话密钥仅存在于内存。
- * - 为抵御中间人，可将 `identity_pub` 与已知指纹比对（见 `verifyIdentity`）。
+ * 用法：
+ *   var C = TaygedoCrypto.create({ baseUrl: '' });
+ *   C.ready().then(function(){ return C.request('/api/accounts','GET'); });
  */
 (function (global) {
   'use strict';
 
-  var PROTO = 'taygedo/v1';
-  var ALG_LABEL = 'X25519+HKDF-SHA256+AES-256-GCM';
+  var PROTO = 'taygedo/v2';
+  var ALG_LABEL = 'X25519+HKDF-SHA256+XChaCha20-Poly1305';
+  var PIN_KEY = 'taygedo_identity_pin';
+  var SID_RE = /^[0-9a-f]{32}$/;
+  var KID_RE = /^[0-9a-f]{16}$/;
 
-  // ---- base64url 工具 ----
+  // ---------------------------------------------------------------- 工具
+
   function b64uEncode(bytes) {
     var s = '';
     for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
     return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
+
   function b64uDecode(str) {
     var s = String(str).replace(/-/g, '+').replace(/_/g, '/');
     while (s.length % 4) s += '=';
@@ -45,410 +40,361 @@
     for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
   }
+
   function concat() {
     var total = 0, i;
     for (i = 0; i < arguments.length; i++) total += arguments[i].length;
     var out = new Uint8Array(total), off = 0;
-    for (i = 0; i < arguments.length; i++) {
-      out.set(arguments[i], off);
-      off += arguments[i].length;
-    }
+    for (i = 0; i < arguments.length; i++) { out.set(arguments[i], off); off += arguments[i].length; }
     return out;
   }
+
+  function utf8(s) { return new TextEncoder().encode(s); }
+  function fromUtf8(b) { return new TextDecoder().decode(b); }
+
+  function ascii(s) {
+    var out = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xff;
+    return out;
+  }
+
   function u64be(n) {
-    // JS 数值安全范围内的大端 64 位编码
-    var buf = new ArrayBuffer(8);
-    var view = new DataView(buf);
-    view.setUint32(0, Math.floor(n / 4294967296), false);
-    view.setUint32(4, n >>> 0, false);
+    var buf = new ArrayBuffer(8), v = new DataView(buf);
+    v.setUint32(0, Math.floor(n / 4294967296), false);
+    v.setUint32(4, n >>> 0, false);
     return new Uint8Array(buf);
   }
-  function utf8Encode(s) { return new TextEncoder().encode(s); }
-  function utf8Decode(b) { return new TextDecoder().decode(b); }
 
-  /** 检测 WebCrypto 是否可用（含 X25519 支持）。
-   *  HTTP 非安全上下文下 `crypto.subtle` 为 undefined，需提前降级。 */
-  function webcryptoAvailable() {
-    return !!(global.crypto && global.crypto.subtle && global.crypto.getRandomValues);
+  /** 与 Rust `push_lp()` 一致：u16 大端长度 + 内容。 */
+  function lp(str) {
+    var b = utf8(str);
+    if (b.length > 65535) throw new Error('字段过长');
+    var head = new Uint8Array([(b.length >>> 8) & 0xff, b.length & 0xff]);
+    return concat(head, b);
   }
 
-  function CryptoClient(opts) {
+  function hex(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += ('0' + bytes[i].toString(16)).slice(-2);
+    return s;
+  }
+
+  function randomBytes(n) {
+    var b = new Uint8Array(n);
+    global.crypto.getRandomValues(b);
+    return b;
+  }
+
+  function Client(opts) {
     opts = opts || {};
     this.baseUrl = opts.baseUrl || '';
     this.handshakePath = opts.handshakePath || '/api/crypto/handshake';
-    this.sid = null;
-    this.c2sKey = null;      // CryptoKey
-    this.s2cKey = null;      // CryptoKey
-    this.c2sPrefix = null;   // Uint8Array(4)
-    this.s2cPrefix = null;   // Uint8Array(4)
-    this.nextSeq = 1;        // 客户端 → 服务端 序号
-    this.nextRespSeq = 1;    // 服务端 → 客户端 序号
-    this.identityPub = null; // 服务端长期身份公钥（base64url）
-    this.serverAlg = null;
-    this.handshakePromise = null;
-    this.enabled = false;
-    this.lastError = null;
-    // 避免重复握手：并发调用共享同一个 in-flight Promise
-    this._inflight = null;
+    this.pinKey = opts.pinKey || PIN_KEY;
+    this.reset();
   }
 
-  /** 派生会话密钥（客户端侧复现服务端 HKDF 流程）。 */
-  CryptoClient.prototype._derive = function (sharedBits, salt) {
-    var self = this;
-    return global.crypto.subtle
-      .importKey('raw', sharedBits, { name: 'HKDF' }, false, ['deriveBits'])
-      .then(function (hkdfKey) {
-        function derive(infoStr, len) {
-          return global.crypto.subtle.deriveBits(
-            {
-              name: 'HKDF',
-              hash: 'SHA-256',
-              salt: salt,
-              info: utf8Encode(infoStr)
-            },
-            hkdfKey,
-            len * 8
-          ).then(function (bits) { return new Uint8Array(bits); });
-        }
-        // 与服务端顺序严格一致：master → c2s / s2c → nonce prefix
-        return derive('taygedo/v1/aead', 32).then(function (masterBits) {
-          return global.crypto.subtle
-            .importKey('raw', masterBits, { name: 'HKDF' }, false, ['deriveBits'])
-            .then(function (masterKey) {
-              function derive2(infoStr, len) {
-                return global.crypto.subtle.deriveBits(
-                  {
-                    name: 'HKDF',
-                    hash: 'SHA-256',
-                    salt: salt,
-                    info: utf8Encode(infoStr)
-                  },
-                  masterKey,
-                  len * 8
-                ).then(function (bits) { return new Uint8Array(bits); });
-              }
-              return Promise.all([
-                derive2('taygedo/v1/c2s', 32),
-                derive2('taygedo/v1/s2c', 32),
-                derive2('taygedo/v1/nonce/c2s', 4),
-                derive2('taygedo/v1/nonce/s2c', 4)
-              ]);
-            });
-        });
-      })
-      .then(function (r) {
-        var c2sBits = r[0], s2cBits = r[1];
-        self.c2sPrefix = r[2];
-        self.s2cPrefix = r[3];
-        return Promise.all([
-          global.crypto.subtle.importKey('raw', c2sBits, { name: 'AES-GCM' }, false, ['encrypt']),
-          global.crypto.subtle.importKey('raw', s2cBits, { name: 'AES-GCM' }, false, ['decrypt'])
-        ]);
-      })
-      .then(function (keys) {
-        self.c2sKey = keys[0];
-        self.s2cKey = keys[1];
-      });
+  Client.prototype.reset = function () {
+    this.sid = null;
+    this.kid = null;
+    this.c2s = null;
+    this.s2c = null;
+    this.nextSeq = 1;
+    this.identityPub = null;
+    this.identityFingerprint = null;
+    this.serverAlg = null;
+    this.enabled = false;
+    this.lastError = null;
+    this._inflight = null;
   };
 
-  /** 执行握手。 */
-  CryptoClient.prototype.handshake = function () {
-    var self = this;
-    if (self._inflight) return self._inflight;
-
-    self._inflight = (function () {
-      if (!webcryptoAvailable()) {
-        // 无 WebCrypto：交由调用方决定降级策略
-        return Promise.reject(new Error('WEBCRYPTO_UNAVAILABLE'));
-      }
-      // X25519 在部分内核版本才支持；不支持时明确报错而非静默降级
-      if (!global.crypto.subtle.generateKey) {
-        return Promise.reject(new Error('WEBCRYPTO_UNAVAILABLE'));
-      }
-
-      var kp;
-      return global.crypto.subtle
-        .generateKey({ name: 'X25519' }, false, ['deriveBits'])
-        .catch(function () {
-          // 浏览器不支持 X25519
-          throw new Error('X25519_UNSUPPORTED');
-        })
-        .then(function (pair) {
-          kp = pair;
-          return global.crypto.subtle.exportKey('raw', kp.publicKey);
-        })
-        .then(function (rawPub) {
-          var clientPub = new Uint8Array(rawPub);
-          var clientNonce = new Uint8Array(16);
-          global.crypto.getRandomValues(clientNonce);
-
-          return fetch(self.baseUrl + self.handshakePath, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              client_pub: b64uEncode(clientPub),
-              client_nonce: b64uEncode(clientNonce)
-            })
-          })
-            .then(function (r) {
-              return r.json().catch(function () { return {}; }).then(function (j) {
-                if (!r.ok) {
-                  var err = new Error(j.error || ('握手失败 HTTP ' + r.status));
-                  err.crypto_error = j.crypto_error;
-                  err.status = r.status;
-                  throw err;
-                }
-                return j;
-              });
-            })
-            .then(function (j) {
-              var serverPub = b64uDecode(j.server_pub);
-              var serverNonce = b64uDecode(j.server_nonce);
-
-              // 服务端算法协商校验：协议不符直接拒绝，避免降级
-              if (j.proto && j.proto !== PROTO) {
-                throw new Error('协议版本不匹配：' + j.proto);
-              }
-
-              var serverKey = global.crypto.subtle.importKey(
-                'raw', serverPub, { name: 'X25519' }, false, []
-              );
-              return serverKey.then(function (sk) {
-                return global.crypto.subtle.deriveBits(
-                  { name: 'X25519', public: sk },
-                  kp.privateKey,
-                  256
-                );
-              }).then(function (sharedBits) {
-                // salt = client_pub || server_pub || client_nonce || server_nonce
-                var salt = concat(clientPub, serverPub, clientNonce, serverNonce);
-                return self._derive(sharedBits, salt).then(function () {
-                  self.sid = j.sid;
-                  self.identityPub = j.identity_pub || null;
-                  self.serverAlg = j.alg || null;
-                  self.nextSeq = 1;
-                  self.nextRespSeq = 1;
-                  self.enabled = true;
-                  return j;
-                });
-              });
-            });
-        });
-
-      return self._inflight;
-    })();
-
-    // 无论成败都释放 in-flight 句柄，允许后续重试
-    self._inflight.catch(function () {}).then(function () { self._inflight = null; });
-    return self._inflight;
-  };
-
-  /** 确保会话可用。`required` 为 true 时失败将 reject。 */
-  CryptoClient.prototype.ready = function (required) {
-    var self = this;
-    if (self.sid && self.c2sKey) return Promise.resolve(true);
-    if (!webcryptoAvailable()) {
-      return required
-        ? Promise.reject(new Error('当前页面非安全上下文，浏览器已禁用 WebCrypto；请通过 https 或 localhost 访问'))
-        : Promise.resolve(false);
+  /** 内置密码学库是否就绪。 */
+  Client.prototype._vendor = function () {
+    if (!global.TgdVendorReady) {
+      return Promise.reject(new Error('内置密码学库未加载'));
     }
-    return self.handshake().then(function () { return true; })
-      .catch(function (e) {
-        self.lastError = e;
-        if (required) throw e;
-        return false;
-      });
-  };
-
-  CryptoClient.prototype._aad = function (direction, seq, extraSeq) {
-    // 与服务端 build_aad 完全一致：sid || direction(1B) || seq(8B) [|| reqSeq(8B)]
-    var sidBytes = utf8Encode(this.sid);
-    var parts = [sidBytes, new Uint8Array([direction]), u64be(seq)];
-    if (extraSeq !== undefined) parts.push(u64be(extraSeq));
-    return concat.apply(null, parts);
-  };
-
-  CryptoClient.prototype._nonce = function (prefix, seq) {
-    return concat(prefix, u64be(seq));
-  };
-
-  /** 加密请求体，返回 { seq, body }。 */
-  CryptoClient.prototype.encryptBody = function (plaintext) {
-    var self = this;
-    var seq = self.nextSeq++;
-    var nonce = self._nonce(self.c2sPrefix, seq);
-    var aad = self._aad(0, seq);
-    var data = typeof plaintext === 'string' ? utf8Encode(plaintext) : plaintext;
-    return global.crypto.subtle
-      .encrypt({ name: 'AES-GCM', iv: nonce, additionalData: aad, tagLength: 128 }, self.c2sKey, data)
-      .then(function (ct) {
-        return { seq: seq, body: b64uEncode(new Uint8Array(ct)) };
-      });
-  };
-
-  /** 解密响应体。 */
-  CryptoClient.prototype.decryptBody = function (reqSeq, b64) {
-    var self = this;
-    var seq = self.nextRespSeq++;
-    var nonce = self._nonce(self.s2cPrefix, seq);
-    var aad = self._aad(1, seq, reqSeq);
-    var ct = b64uDecode(b64);
-    return global.crypto.subtle
-      .decrypt({ name: 'AES-GCM', iv: nonce, additionalData: aad, tagLength: 128 }, self.s2cKey, ct)
-      .then(function (pt) { return utf8Decode(new Uint8Array(pt)); });
+    return global.TgdVendorReady.then(function (v) {
+      if (!v) throw new Error('内置密码学库不可用');
+      return v;
+    });
   };
 
   /**
-   * 发起请求。
-   *
-   * @param path    路径（如 '/api/accounts'）
-   * @param method  HTTP 方法
-   * @param body    可选，对象则 JSON 序列化
-   * @param extraHeaders 可选，附加头（如 Authorization）
+   * 资源完整性门禁：未通过校验时拒绝建立会话。
+   * 由 /static/web_guard.js 设置 window.TgdIntegrity。
    */
-  CryptoClient.prototype.request = function (path, method, body, extraHeaders) {
+  Client.prototype._requireIntegrity = function () {
+    var g = global.TgdIntegrity;
+    if (!g) {
+      // guard 脚本缺失（被剥离/被拦截）——按失败处理，不给"静默跳过"留口子
+      throw new Error('缺少资源完整性校验模块，已拒绝建立加密会话');
+    }
+    if (!g.ok) {
+      throw new Error('前端资源完整性校验失败：' + (g.error || '未知原因'));
+    }
+  };
+
+  Client.prototype.handshake = function () {
     var self = this;
+    if (self._inflight) return self._inflight;
+
+    self._inflight = self._vendor().then(function (v) {
+      self._requireIntegrity();
+
+      var priv = randomBytes(32);
+      var pub = v.x25519.getPublicKey(priv);
+      var clientNonce = randomBytes(32);
+
+      return fetch(self.baseUrl + self.handshakePath, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          proto: PROTO,
+          client_pub: b64uEncode(pub),
+          client_nonce: b64uEncode(clientNonce)
+        })
+      }).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          if (!r.ok || !j.ok) {
+            var err = new Error(j.error || ('握手失败 HTTP ' + r.status));
+            err.crypto_error = j.crypto_error;
+            err.status = r.status;
+            throw err;
+          }
+          return j;
+        });
+      }).then(function (j) {
+        // ---- 协议与类型校验（任何不符立即中止，不做兼容降级）----
+        if (j.proto !== PROTO) throw new Error('服务端协议版本不匹配：' + j.proto);
+        if (!KID_RE.test(String(j.kid || ''))) throw new Error('服务端 Key ID 非法');
+        if (!SID_RE.test(String(j.sid || ''))) throw new Error('会话 ID 非法');
+
+        var serverPub = b64uDecode(j.server_pub);
+        var serverNonce = b64uDecode(j.server_nonce);
+        var identityPub = b64uDecode(j.identity_pub);
+        var sig = b64uDecode(j.sig);
+        if (serverPub.length !== 32 || serverNonce.length !== 32 ||
+            identityPub.length !== 32 || sig.length !== 64) {
+          throw new Error('握手字段长度非法');
+        }
+
+        // ---- 重建 Transcript 并验签 ----
+        var transcript = concat(
+          ascii('taygedo/v2/handshake'), new Uint8Array([0]),
+          pub, clientNonce, serverPub, serverNonce, identityPub,
+          lp(String(j.sid)), u64be(Number(j.ts))
+        );
+
+        var ok = v.ed25519.verify(sig, transcript, identityPub);
+        if (!ok) throw new Error('服务端身份签名校验失败（可能存在中间人）');
+
+        // ---- 指纹固定校验（TOFU 之后必须一致）----
+        var fp = hex(v.sha256(identityPub).slice(0, 16));
+        var pinned = null;
+        try { pinned = global.localStorage.getItem(self.pinKey); } catch (e) { pinned = null; }
+        if (pinned && pinned !== fp) {
+          throw new Error('服务端身份指纹与已固定值不一致（' + pinned + ' ≠ ' + fp + '）');
+        }
+
+        // ---- 派生会话密钥 ----
+        var shared = v.x25519.getSharedSecret(priv, serverPub);
+        var salt = v.sha256(transcript);
+        var c2s = v.hkdf(v.sha256, shared, salt, utf8('taygedo/v2/c2s'), 32);
+        var s2c = v.hkdf(v.sha256, shared, salt, utf8('taygedo/v2/s2c'), 32);
+
+        // 临时私钥立即丢弃（JS 无法保证内存清零，至少解除引用）
+        priv = null;
+
+        self.sid = j.sid;
+        self.kid = j.kid;
+        self.c2s = c2s;
+        self.s2c = s2c;
+        self.nextSeq = 1;
+        self.identityPub = identityPub;
+        self.identityFingerprint = fp;
+        self.serverAlg = j.alg;
+        self.enabled = true;
+        return j;
+      });
+    });
+
+    self._inflight.catch(function () { self._inflight = null; });
+    return self._inflight;
+  };
+
+  /** 确保会话可用；失败即抛错（没有明文回退）。 */
+  Client.prototype.ready = function () {
+    var self = this;
+    if (self.sid && self.c2s) return Promise.resolve(true);
+    return self.handshake().then(function () { return true; });
+  };
+
+  Client.prototype._aad = function (domain, seq, method, path, nonce, extraSeq) {
+    var parts = [ascii(domain), new Uint8Array([0]),
+      lp(this.kid), lp(this.sid), u64be(seq)];
+    if (extraSeq !== undefined) parts.push(u64be(extraSeq));
+    parts.push(lp(method), lp(path), nonce);
+    return concat.apply(null, parts);
+  };
+
+  /**
+   * 发起一次加密请求。
+   * @param {string} path   API 路径（参与 AAD，必须与实际 URL 一致）
+   * @param {string} method HTTP 方法（参与 AAD）
+   * @param {*} body        对象则 JSON 序列化；undefined 表示无正文
+   * @param {object} extraHeaders 附加头（如 Authorization）
+   */
+  Client.prototype.request = function (path, method, body, extraHeaders) {
+    var self = this;
+    var mtd = (method || 'GET').toUpperCase();
     var attempt = 0;
 
     function once() {
       attempt++;
-      var headers = {};
-      var h = extraHeaders || {};
-      for (var k in h) if (Object.prototype.hasOwnProperty.call(h, k)) headers[k] = h[k];
+      var v;
+      return self.ready().then(function () {
+        return self._vendor();
+      }).then(function (vendor) {
+        v = vendor;
+        var headers = {};
+        var h = extraHeaders || {};
+        for (var k in h) if (Object.prototype.hasOwnProperty.call(h, k)) headers[k] = h[k];
 
-      var payload = undefined;
-      if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
-        payload = JSON.stringify(body);
+        var plaintext = '';
+        if (body !== undefined && mtd !== 'GET' && mtd !== 'HEAD') {
+          plaintext = JSON.stringify(body);
+        }
+
+        var seq = self.nextSeq++;
+        var nonce = randomBytes(24);
+        var aad = self._aad('taygedo/v2/req', seq, mtd, path, nonce);
+        var ct;
+        try {
+          ct = v.xchacha20poly1305(self.c2s, nonce, aad).encrypt(utf8(plaintext));
+        } catch (e) {
+          return Promise.reject(new Error('请求加密失败'));
+        }
+
+        var env = {
+          v: 2,
+          kid: self.kid,
+          sid: self.sid,
+          seq: seq,
+          n: b64uEncode(nonce),
+          ct: b64uEncode(ct)
+        };
+
+        headers['X-TGD-Session'] = self.sid;
+        headers['X-TGD-Seq'] = String(seq);
         headers['Content-Type'] = 'application/json';
-      }
 
-      function sendEncrypted() {
-        var reqSeq;
-        return (payload === undefined
-          ? Promise.resolve(null)
-          : self.encryptBody(payload)
-        )
-          .then(function (enc) {
-            if (enc) {
-              reqSeq = enc.seq;
-              headers['X-TGD-Session'] = self.sid;
-              headers['X-TGD-Seq'] = String(enc.seq);
-              headers['Content-Type'] = 'text/plain; charset=utf-8';
-            } else {
-              // 无正文的请求仍需携带会话与序号，服务端据此走加密分支
-              reqSeq = self.nextSeq++;
-              headers['X-TGD-Session'] = self.sid;
-              headers['X-TGD-Seq'] = String(reqSeq);
-            }
-            return fetch(self.baseUrl + path, {
-              method: method || 'GET',
-              headers: headers,
-              body: enc ? enc.body : undefined
-            });
-          })
-          .then(function (r) {
-            var enc = r.headers.get('X-TGD-Enc');
-            return r.text().then(function (text) {
-              if (enc === '1' && reqSeq !== null) {
-                return self.decryptBody(reqSeq, text).then(function (pt) {
-                  var data;
-                  try { data = JSON.parse(pt); } catch (e) { data = {}; }
-                  return { ok: r.ok, status: r.status, data: data };
-                });
+        // GET/HEAD：浏览器与 undici 都不允许带 body，信封改走请求头。
+        // 头里放的是同一个信封的 base64url，服务端走同一条解析与 AAD 校验路径。
+        var noBody = (mtd === 'GET' || mtd === 'HEAD');
+        var init = {
+          method: mtd,
+          headers: headers,
+          cache: 'no-store'
+        };
+        if (noBody) {
+          headers['X-TGD-Envelope'] = b64uEncode(utf8(JSON.stringify(env)));
+        } else {
+          init.body = JSON.stringify(env);
+        }
+
+        return fetch(self.baseUrl + path, init).then(function (r) {
+          return r.text().then(function (text) {
+            var parsed = null;
+            try { parsed = JSON.parse(text); } catch (e) { parsed = null; }
+            var marker = r.headers && r.headers.get ? r.headers.get('X-TGD-Enc') : null;
+            // 业务错误（非 2xx）同样会被中间件加密。必须不分状态统一解密，
+            // 否则调用方只拿到一串密文，丢掉真实错误信息。
+            // 标记缺失时（例如跨源未暴露该头）退化为按信封结构判断。
+            var encrypted = marker === '1' || (marker !== '0' && parsed && parsed.v === 2);
+            if (encrypted) {
+              var j = parsed;
+              if (!j || j.v !== 2) throw new Error('响应不是合法加密信封');
+              if (j.kid !== self.kid) throw new Error('响应 Key ID 不匹配');
+              if (j.sid !== self.sid) throw new Error('响应会话 ID 不匹配');
+              if (Number(j.rseq) !== seq) throw new Error('响应与请求不匹配（可能被替换）');
+
+              var rn = b64uDecode(j.n);
+              if (rn.length !== 24) throw new Error('响应 nonce 长度非法');
+              var raad = self._aad('taygedo/v2/res', Number(j.seq), mtd, path, rn, seq);
+              var pt;
+              try {
+                pt = v.xchacha20poly1305(self.s2c, rn, raad).decrypt(b64uDecode(j.ct));
+              } catch (e) {
+                throw new Error('响应解密失败（认证标签校验不通过）');
               }
-              var data;
-              try { data = JSON.parse(text); } catch (e) { data = {}; }
+              var data = {};
+              var s = fromUtf8(pt);
+              if (s.length) {
+                try { data = JSON.parse(s); } catch (e) { data = { raw: s }; }
+              }
               return { ok: r.ok, status: r.status, data: data };
-            });
-          });
-      }
-
-      // 尚未建立会话：先探测是否必须加密
-      if (!self.sid) {
-        return fetch(self.baseUrl + '/api/meta', {
-          method: 'GET',
-          headers: headers
-        })
-          .then(function (r) { return r.json().catch(function () { return {}; }); })
-          .then(function (meta) {
-            if (meta && meta.crypto_required) {
-              return self.ready(true).then(sendEncrypted);
             }
-            // 内网直通：明文请求
-            return fetch(self.baseUrl + path, {
-              method: method || 'GET',
-              headers: headers,
-              body: payload
-            }).then(function (r) {
-              return r.text().then(function (text) {
-                var data;
-                try { data = JSON.parse(text); } catch (e) { data = {}; }
-                return { ok: r.ok, status: r.status, data: data };
-              });
-            });
-          });
-      }
 
-      return sendEncrypted();
+            // 明文响应只可能来自显式策略分支（crypto_policy=never / 内网直通）
+            // 或加密层自身的错误。带 crypto_error 的必须抛错，
+            // 否则重试逻辑永远看不到 no_session / replay，页面会一直失败。
+            var pdata = parsed || {};
+            if (pdata.crypto_error) {
+              var err = new Error(pdata.error || pdata.crypto_error);
+              err.crypto_error = pdata.crypto_error;
+              err.status = r.status;
+              throw err;
+            }
+            return { ok: r.ok, status: r.status, data: pdata };
+          });
+        });
+      });
     }
 
-    return once().then(function (res) {
-      // 会话失效：重新握手后重试一次（避免无限循环）
-      var needRetry = res.status === 428 ||
-        (res.data && (res.data.crypto_error === 'no_session' ||
-          res.data.crypto_error === 'replay' ||
-          res.data.crypto_error === 'session_exhausted'));
-      if (needRetry && attempt < 2) {
+    return once().catch(function (e) {
+      // 会话失效类错误：重新握手后重试一次（不无限重试）
+      var code = e && e.crypto_error;
+      var retryable = code === 'no_session' || code === 'replay' || code === 'session_exhausted';
+      if (retryable && attempt < 2) {
         self.reset();
-        return self.ready(true).then(once);
+        return once();
       }
-      return res;
+      throw e;
     });
   };
 
-  /** 重置会话状态（下次请求将重新握手）。 */
-  CryptoClient.prototype.reset = function () {
-    this.sid = null;
-    this.c2sKey = null;
-    this.s2cKey = null;
-    this.c2sPrefix = null;
-    this.s2cPrefix = null;
-    this.nextSeq = 1;
-    this.nextRespSeq = 1;
-    this.enabled = false;
-    this._inflight = null;
+  /** 服务端身份指纹（32 字符十六进制）。 */
+  Client.prototype.fingerprint = function () {
+    return this.identityFingerprint;
   };
 
-  /**
-   * 校验服务端长期身份指纹。
-   *
-   * 用法：把服务端 data/keyring.json 对应公钥的 SHA-256 前 16 字节
-   * （十六进制）作为 `expected` 传入。首次可留空并在控制台打印指纹供人工核对。
-   */
-  CryptoClient.prototype.verifyIdentity = function (expected) {
-    if (!this.identityPub) return Promise.resolve(false);
-    return global.crypto.subtle
-      .digest('SHA-256', b64uDecode(this.identityPub))
-      .then(function (d) {
-        var hex = '';
-        var u = new Uint8Array(d);
-        for (var i = 0; i < u.length; i++) hex += ('0' + u[i].toString(16)).slice(-2);
-        var fp = hex.slice(0, 32);
-        if (expected) return hex.indexOf(String(expected).toLowerCase()) === 0;
-        // 未提供期望值时打印指纹，便于人工首次固化
-        if (global.console && console.info) {
-          console.info('[taygedo] 服务端身份指纹(SHA-256 前16字节): ' + fp);
-        }
-        return true;
-      });
+  /** 把当前身份指纹固定到 localStorage（操作者带外核对后调用）。 */
+  Client.prototype.pinIdentity = function (expected) {
+    var fp = expected || this.identityFingerprint;
+    if (!fp) return false;
+    try { global.localStorage.setItem(this.pinKey, String(fp).toLowerCase()); } catch (e) { return false; }
+    return true;
+  };
+
+  /** 读取已固定的指纹。 */
+  Client.prototype.pinnedFingerprint = function () {
+    try { return global.localStorage.getItem(this.pinKey); } catch (e) { return null; }
+  };
+
+  /** 从服务端获取身份信息（用于首次 TOFU 展示，不含任何私钥）。 */
+  Client.fetchIdentity = function (baseUrl) {
+    return fetch((baseUrl || '') + '/api/secure/identity', { cache: 'no-store' })
+      .then(function (r) { return r.json(); });
   };
 
   global.TaygedoCrypto = {
-    create: function (opts) { return new CryptoClient(opts); },
-    available: webcryptoAvailable,
+    create: function (opts) { return new Client(opts); },
+    fetchIdentity: Client.fetchIdentity,
     b64uEncode: b64uEncode,
     b64uDecode: b64uDecode,
     ALG_LABEL: ALG_LABEL,
-    PROTO: PROTO
+    PROTO: PROTO,
+    PIN_KEY: PIN_KEY,
+    _internals: { lp: lp, u64be: u64be, hex: hex }
   };
 })(window);

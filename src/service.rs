@@ -9,8 +9,8 @@ use crate::api::Api;
 use crate::login::{self, DeviceIdentity};
 use crate::models::{Account, AccountResult, Config, LogEntry, RunResult};
 use crate::runner::{self, RunOptions};
-use crate::session::CryptoManager;
 use crate::store::Store;
+use crate::web_security::CryptoManager;
 
 pub struct AppState {
     pub api: Api,
@@ -43,10 +43,15 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(data_dir: std::path::PathBuf) -> Arc<Self> {
-        let store = Store::new(data_dir);
-        let accounts = store.load_accounts();
-        let mut config = store.load_config();
+    /// 构造应用状态。
+    ///
+    /// 返回 `Err` 表示**不可启动**：主密钥缺失/损坏、密文认证失败、
+    /// 旧版数据无法迁移等。调用方必须打印原因并退出，不允许带着
+    /// "没有密钥"的状态继续提供服务（那会静默丢数据）。
+    pub fn new(data_dir: std::path::PathBuf) -> Result<Arc<Self>, String> {
+        let store = Store::new(data_dir)?;
+        let accounts = store.load_accounts()?;
+        let mut config = store.load_config()?;
 
         // 环境变量覆盖（向后兼容：高级用户可手动设置覆盖 config.json；
         // OpenWrt/LuCI 的 init.d 已不再传入业务配置，业务配置统一由 config.json 管理）
@@ -90,42 +95,41 @@ impl AppState {
         }
 
         // 用户名初始化（默认 admin）
-        if config.web_username.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+        if config
+            .web_username
+            .as_deref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+        {
             config.web_username = Some("admin".into());
         }
 
-        // 长期身份密钥环：不存在则生成；损坏则保留原文件并用内存临时密钥，
-        // 避免"悄悄重建"导致已固化客户端指纹的部署无法连接。
-        let keyring = match store.load_keyring() {
-            Some(kr) => match kr.secret_bytes() {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    eprintln!("[startup] keyring 私钥非法（{e}），改用内存临时密钥（不落盘）");
-                    None
-                }
-            },
-            None => None,
-        };
+        // 长期身份密钥环：不存在则生成；**损坏或解不开一律报错**。
+        //
+        // 旧实现在解析失败时"用内存临时密钥继续跑"，这在加密存储之后是危
+        // 险的：临时密钥意味着本次运行的身份与历史不一致，客户端指纹校验
+        // 会静默失效。现在改为显式失败，运维按 README 处理。
+        let keyring = store.load_keyring()?;
         let (identity_secret, keyring_created) = match keyring {
-            Some(s) => (s, false),
+            Some(kr) => {
+                let s = kr
+                    .secret_bytes()
+                    .map_err(|e| format!("keyring.json 中的身份私钥非法：{e}"))?;
+                (s, false)
+            }
             None => {
                 let kr = crate::models::KeyRing::generate();
                 let s = kr.secret_bytes().expect("新生成的密钥必合法");
-                match store.save_keyring_if_absent(&kr) {
-                    Ok(true) => (s, true),
-                    Ok(false) => {
-                        // 文件存在但内容不可用：不覆盖，本次运行使用内存临时密钥
-                        eprintln!("[startup] keyring.json 已存在但无法解析，本次使用内存临时密钥");
-                        (s, false)
-                    }
-                    Err(e) => {
-                        eprintln!("[startup] 保存 keyring 失败（{e}），继续使用内存临时密钥");
-                        (s, false)
-                    }
+                if store.save_keyring_if_absent(&kr)? {
+                    (s, true)
+                } else {
+                    return Err("keyring.json 在初始化期间被其它进程创建，且无法加载；\
+                         请检查数据目录权限后重试"
+                        .into());
                 }
             }
         };
-        let crypto = CryptoManager::new(identity_secret);
+        let crypto = CryptoManager::new(&identity_secret);
 
         // WebUI 口令初始化：优先环境变量；否则生成随机口令，杜绝默认 admin。
         let mut initial_password: Option<String> = None;
@@ -148,9 +152,7 @@ impl AppState {
         if config.web_password_version.is_none() {
             config.web_password_version = Some(crate::crypto::PWD_HASH_V1);
         }
-        store.save_config(&config).unwrap_or_else(|e| {
-            eprintln!("[startup] 保存 config 失败: {e}");
-        });
+        store.save_config(&config)?;
 
         // 免鉴权模式：环境变量 TAYGEDO_NO_AUTH=1/true/yes/on 时开启。
         // **OpenWrt 专享**：仅 OpenWrt（存在 /etc/openwrt_release）平台生效；
@@ -164,13 +166,13 @@ impl AppState {
 
         let lan = LanMatcher::new(&config.lan_cidrs);
 
-        let state = store.load_state();
+        let run_state = store.load_state()?;
         let app = Arc::new(Self {
             api: Api::new(),
             store,
             accounts: RwLock::new(accounts),
             config: RwLock::new(config),
-            state: RwLock::new(state),
+            state: RwLock::new(run_state),
             logs: std::sync::Mutex::new(Vec::new()),
             pending_devices: std::sync::Mutex::new(HashMap::new()),
             run_lock: Mutex::new(()),
@@ -194,6 +196,21 @@ impl AppState {
         if let Some(w) = app.store.keyring_permission_warning() {
             app.push_log("warn", format!("密钥文件权限过宽：{w}"));
         }
+        // 存储层自检结果：主密钥保护方式 / Key ID / 本次迁移情况。
+        // 只包含非敏感元数据，绝不输出密钥材料。
+        app.push_log("info", app.store.storage_summary());
+        if !app.store.key_protection().os_managed()
+            && crate::crypto_storage::platform::platform_supports_os_keystore()
+        {
+            app.push_log(
+                "warn",
+                format!(
+                    "主密钥当前由 {} 保护。检测到 systemd 凭据设施（$CREDENTIALS_DIRECTORY）可用，\
+                     建议改用 LoadCredentialEncrypted= 由 systemd（可配合 TPM2）托管，见 README「平台密钥保护」",
+                    app.store.key_protection().as_str()
+                ),
+            );
+        }
         if initial_password.is_some() {
             // 不再把明文口令写入日志缓冲区（日志可经 /api/logs 读取）。
             // 明文仅在 stdout 首次启动横幅中出现一次，供操作者记录。
@@ -215,7 +232,7 @@ impl AppState {
                 "免鉴权模式已开启（OpenWrt 专享）：API 无需登录即可访问，仅限内网使用".into(),
             );
         }
-        app
+        Ok(app)
     }
 
     /// 判定来源是否可享受免鉴权放行。
@@ -241,10 +258,7 @@ impl AppState {
 
     /// 按当前（可热更新的）内网网段判定来源 IP 是否属于 LAN。
     pub fn lan_matches(&self, ip: std::net::IpAddr) -> bool {
-        self.lan
-            .read()
-            .map(|m| m.contains(ip))
-            .unwrap_or(false)
+        self.lan.read().map(|m| m.contains(ip)).unwrap_or(false)
     }
 
     /// 用新的 CIDR 串替换内网匹配器（配置变更时热更新）。
@@ -254,7 +268,6 @@ impl AppState {
         *guard = Arc::new(matcher);
         Ok(())
     }
-
 
     pub fn push_log(&self, level: &str, message: String) {
         let ts = crate::time::log_ts();
@@ -289,7 +302,9 @@ impl AppState {
         }
         match (&config.web_password_hash, &config.web_password_salt) {
             (Some(hash), Some(salt)) => {
-                let version = config.web_password_version.unwrap_or(crate::crypto::PWD_HASH_V1);
+                let version = config
+                    .web_password_version
+                    .unwrap_or(crate::crypto::PWD_HASH_V1);
                 let computed = if version >= crate::crypto::PWD_HASH_V2 {
                     crate::crypto::hash_password_v2(password, salt)
                 } else {
@@ -328,11 +343,7 @@ impl AppState {
     }
 
     /// 修改登录账号与口令。成功后**吊销该用户全部会话**。
-    pub async fn set_credentials(
-        &self,
-        username: &str,
-        new_password: &str,
-    ) -> Result<(), String> {
+    pub async fn set_credentials(&self, username: &str, new_password: &str) -> Result<(), String> {
         {
             let mut config = self.config.write().await;
             if !username.trim().is_empty() {
@@ -365,7 +376,11 @@ impl AppState {
     #[allow(dead_code)]
     pub fn rotate_identity_key(&self) -> Result<(), String> {
         let mut kr = crate::models::KeyRing::generate();
-        let existing_gen = self.store.load_keyring().map(|k| k.generation).unwrap_or(0);
+        let existing_gen = self
+            .store
+            .load_keyring()?
+            .map(|k| k.generation)
+            .unwrap_or(0);
         kr.generation = existing_gen + 1;
         self.store.save_keyring(&kr)
     }
@@ -425,7 +440,6 @@ impl AppState {
     pub async fn must_change_password(&self) -> bool {
         self.config.read().await.web_password_must_change
     }
-
 
     /// 是否处于登录锁定。返回 Some(剩余秒数) 表示已锁定。
     pub fn login_lock_remaining(&self, username: &str) -> Option<i64> {
@@ -552,7 +566,10 @@ fn now_unix() -> i64 {
 }
 
 fn parse_bool_env(v: &str) -> bool {
-    matches!(v.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    matches!(
+        v.trim().to_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 /// 执行签到（手动触发或调度触发）。`only` 为 None 时运行全部账号。
@@ -587,11 +604,17 @@ pub async fn run_signin(state: &AppState, force: bool, only: Option<&[String]>) 
                 continue;
             }
         }
-        let already = state_map.get(&account.id).map(|d| d == &today).unwrap_or(false);
+        let already = state_map
+            .get(&account.id)
+            .map(|d| d == &today)
+            .unwrap_or(false);
         if !force && already {
             state.push_log(
                 "info",
-                format!("账号 {}（{}）：今日已成功签到，跳过", account.name, account.id),
+                format!(
+                    "账号 {}（{}）：今日已成功签到，跳过",
+                    account.name, account.id
+                ),
             );
             results.push(AccountResult {
                 id: account.id.clone(),
@@ -607,11 +630,15 @@ pub async fn run_signin(state: &AppState, force: bool, only: Option<&[String]>) 
             continue;
         }
 
-        state.push_log("info", format!("账号 {}（{}）：开始签到", account.name, account.id));
+        state.push_log(
+            "info",
+            format!("账号 {}（{}）：开始签到", account.name, account.id),
+        );
         let mut cb = |m: String| {
             state.push_log("info", m);
         };
-        match runner::run_account(&state.api, account, Some(&credential_key), &opts, &mut cb).await {
+        match runner::run_account(&state.api, account, Some(&credential_key), &opts, &mut cb).await
+        {
             Ok((updated, res)) => {
                 if let Some(&idx) = updated_by_id.get(account.id.as_str()) {
                     updated_accounts[idx] = updated;
@@ -673,7 +700,10 @@ pub async fn run_signin(state: &AppState, force: bool, only: Option<&[String]>) 
     state.push_log("info", result.summary.clone());
     state.push_log(
         "info",
-        format!("签到结束：成功 {}，失败 {}，跳过 {}", success_count, failed_count, skipped_count),
+        format!(
+            "签到结束：成功 {}，失败 {}，跳过 {}",
+            success_count, failed_count, skipped_count
+        ),
     );
 
     result
@@ -792,7 +822,9 @@ pub async fn login_account(
 
     // upsert by phone
     let mut accounts = state.accounts.write().await;
-    let existing = accounts.iter().position(|a| a.phone.as_deref() == Some(phone));
+    let existing = accounts
+        .iter()
+        .position(|a| a.phone.as_deref() == Some(phone));
     match existing {
         Some(idx) => {
             let old = &accounts[idx];
@@ -857,6 +889,6 @@ pub async fn set_schedule(state: &AppState, id: &str, time: Option<&str>) -> Res
             config.schedules.remove(id);
         }
     }
-    state.store.save_config(&config).map_err(|e| e)?;
+    state.store.save_config(&config)?;
     Ok(())
 }

@@ -67,4 +67,3 @@ pub fn spawn(state: Arc<AppState>) {
         }
     });
 }
-

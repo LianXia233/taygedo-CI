@@ -138,8 +138,12 @@ impl Api {
         let (code, msg, full) = parse_body(&text, "loginWithCaptcha", status)?;
 
         let result = full.get("result");
-        let token = result.and_then(|r| r.get("token")).and_then(value_to_string);
-        let user_id = result.and_then(|r| r.get("userId")).and_then(value_to_string);
+        let token = result
+            .and_then(|r| r.get("token"))
+            .and_then(value_to_string);
+        let user_id = result
+            .and_then(|r| r.get("userId"))
+            .and_then(value_to_string);
 
         if !is_ok(status) || code != 0 || token.is_none() || user_id.is_none() {
             return Err(api_error("loginWithCaptcha", status, code, &msg));
@@ -162,13 +166,21 @@ impl Api {
         headers.insert("robot-auth-type", HeaderValue::from_static("2"));
 
         let (status, text) = self
-            .post_form(&format!("{LAOHU_BASE_URL}/openApi/secureLogin"), headers, body)
+            .post_form(
+                &format!("{LAOHU_BASE_URL}/openApi/secureLogin"),
+                headers,
+                body,
+            )
             .await?;
         let (code, msg, full) = parse_body(&text, "loginWithPassword", status)?;
 
         let result = full.get("result");
-        let token = result.and_then(|r| r.get("token")).and_then(value_to_string);
-        let user_id = result.and_then(|r| r.get("userId")).and_then(value_to_string);
+        let token = result
+            .and_then(|r| r.get("token"))
+            .and_then(value_to_string);
+        let user_id = result
+            .and_then(|r| r.get("userId"))
+            .and_then(value_to_string);
 
         if !is_ok(status) || code != 0 || token.is_none() || user_id.is_none() {
             return Err(api_error("loginWithPassword", status, code, &msg));
@@ -204,11 +216,20 @@ impl Api {
         };
 
         let data = full.get("data");
-        let access_token = data.and_then(|d| d.get("accessToken")).and_then(value_to_string);
-        let refresh_token = data.and_then(|d| d.get("refreshToken")).and_then(value_to_string);
+        let access_token = data
+            .and_then(|d| d.get("accessToken"))
+            .and_then(value_to_string);
+        let refresh_token = data
+            .and_then(|d| d.get("refreshToken"))
+            .and_then(value_to_string);
         let uid = data.and_then(|d| d.get("uid")).and_then(value_to_string);
 
-        if !is_ok(status) || code != 0 || access_token.is_none() || refresh_token.is_none() || uid.is_none() {
+        if !is_ok(status)
+            || code != 0
+            || access_token.is_none()
+            || refresh_token.is_none()
+            || uid.is_none()
+        {
             return Err(api_error("userCenterLogin", status, code, &msg));
         }
         Ok((access_token.unwrap(), refresh_token.unwrap(), uid.unwrap()))
@@ -223,22 +244,35 @@ impl Api {
     ) -> Result<(u16, i64, String, serde_json::Value)> {
         let mut headers = HeaderMap::new();
         if profile == "official" {
-            headers.insert("Accept", HeaderValue::from_static("application/json, text/plain, */*"));
+            headers.insert(
+                "Accept",
+                HeaderValue::from_static("application/json, text/plain, */*"),
+            );
             headers.insert("Authorization", HeaderValue::from_static(""));
             headers.insert("appVersion", HeaderValue::from_static(TAYGEDO_APP_VER));
             headers.insert("platform", HeaderValue::from_static("android"));
             headers.insert("uid", HeaderValue::from_static("0"));
             headers.insert("debug-uid", HeaderValue::from_static("3"));
             headers.insert("deviceId", HeaderValue::from_str(device_id).unwrap());
-            headers.insert("ds", HeaderValue::from_str(&make_ds(now_seconds(), &make_nonce(), TAYGEDO_APP_VER)).unwrap());
+            headers.insert(
+                "ds",
+                HeaderValue::from_str(&make_ds(now_seconds(), &make_nonce(), TAYGEDO_APP_VER))
+                    .unwrap(),
+            );
         } else {
             headers.insert("authorization", HeaderValue::from_static(""));
-            headers.insert("appversion", HeaderValue::from_static(TAYGEDO_COMPAT_APP_VERSION));
+            headers.insert(
+                "appversion",
+                HeaderValue::from_static(TAYGEDO_COMPAT_APP_VERSION),
+            );
             headers.insert("platform", HeaderValue::from_static("android"));
             headers.insert("uid", HeaderValue::from_static(TAYGEDO_COMPAT_UID));
             headers.insert("deviceid", HeaderValue::from_str(device_id).unwrap());
         }
-        headers.insert("Content-Type", HeaderValue::from_static("application/x-www-form-urlencoded"));
+        headers.insert(
+            "Content-Type",
+            HeaderValue::from_static("application/x-www-form-urlencoded"),
+        );
         headers.insert("User-Agent", HeaderValue::from_static(NATIVE_USER_AGENT));
 
         let body = form_encode_pairs([
@@ -248,7 +282,11 @@ impl Api {
         ]);
 
         let (status, text) = self
-            .post_form(&format!("{TAYGEDO_BASE_URL}/usercenter/api/login"), headers, body)
+            .post_form(
+                &format!("{TAYGEDO_BASE_URL}/usercenter/api/login"),
+                headers,
+                body,
+            )
             .await?;
         let (code, msg, full) = parse_body(&text, "userCenterLogin", status)?;
         Ok((status, code, msg, full))
@@ -256,7 +294,11 @@ impl Api {
 
     // ---- 签到相关 ----
 
-    pub async fn refresh_token(&self, refresh_token: &str, device_id: &str    ) -> Result<(String, String, Option<String>)> {
+    pub async fn refresh_token(
+        &self,
+        refresh_token: &str,
+        device_id: &str,
+    ) -> Result<(String, String, Option<String>)> {
         // 修复：本端点与 app_signin 同源——同样要求 native 通道的 `ds` 签名头。
         // 缺失时上游恒返回 `code=22 invalid request`，该错误不含 "REFRESH_REJECTED_402"，
         // 会令 refresh_or_rebuild_session 误判为「非 402」而跳过 laohuToken 重建、直接失败。
@@ -265,17 +307,27 @@ impl Api {
         let headers = native_common_headers(refresh_token, "0", device_id);
 
         let (status, text) = self
-            .post_form(&format!("{TAYGEDO_BASE_URL}/usercenter/api/refreshToken"), headers, String::new())
+            .post_form(
+                &format!("{TAYGEDO_BASE_URL}/usercenter/api/refreshToken"),
+                headers,
+                String::new(),
+            )
             .await?;
 
         if status == 402 {
-            return Err(ApiError("REFRESH_REJECTED_402: refreshToken 已失效，请重新登录".into()));
+            return Err(ApiError(
+                "REFRESH_REJECTED_402: refreshToken 已失效，请重新登录".into(),
+            ));
         }
 
         let (code, msg, full) = parse_body(&text, "refreshToken", status)?;
         let data = full.get("data");
-        let access_token = data.and_then(|d| d.get("accessToken")).and_then(value_to_string);
-        let refresh_token = data.and_then(|d| d.get("refreshToken")).and_then(value_to_string);
+        let access_token = data
+            .and_then(|d| d.get("accessToken"))
+            .and_then(value_to_string);
+        let refresh_token = data
+            .and_then(|d| d.get("refreshToken"))
+            .and_then(value_to_string);
         let uid = data.and_then(|d| d.get("uid")).and_then(value_to_string);
 
         if !is_ok(status) || code != 0 || access_token.is_none() || refresh_token.is_none() {
@@ -284,9 +336,17 @@ impl Api {
         Ok((access_token.unwrap(), refresh_token.unwrap(), uid))
     }
 
-    pub async fn get_bind_role(&self, access_token: &str, uid: &str, game_id: &str) -> Result<Option<(String, Option<String>)>> {
+    pub async fn get_bind_role(
+        &self,
+        access_token: &str,
+        uid: &str,
+        game_id: &str,
+    ) -> Result<Option<(String, Option<String>)>> {
         let mut headers = HeaderMap::new();
-        headers.insert("Authorization", HeaderValue::from_str(access_token).unwrap());
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(access_token).unwrap(),
+        );
         let url = format!(
             "{TAYGEDO_BASE_URL}/apihub/api/getGameBindRole?uid={}&gameId={}",
             url_encode(uid),
@@ -299,7 +359,9 @@ impl Api {
             return Err(api_error("getBindRole", status, code, &msg));
         }
         let role_id = data.and_then(|d| d.get("roleId")).and_then(value_to_string);
-        let role_name = data.and_then(|d| d.get("roleName")).and_then(value_to_string);
+        let role_name = data
+            .and_then(|d| d.get("roleName"))
+            .and_then(value_to_string);
         Ok(role_id.map(|rid| (rid, role_name)))
     }
 
@@ -312,7 +374,10 @@ impl Api {
     ) -> Result<Vec<GameRoleRaw>> {
         let mut headers = HeaderMap::new();
         headers.insert("platform", HeaderValue::from_static("android"));
-        headers.insert("authorization", HeaderValue::from_str(access_token).unwrap());
+        headers.insert(
+            "authorization",
+            HeaderValue::from_str(access_token).unwrap(),
+        );
         headers.insert("uid", HeaderValue::from_str(uid).unwrap());
         headers.insert("deviceid", HeaderValue::from_str(device_id).unwrap());
         headers.insert("appversion", HeaderValue::from_static("1.1.0"));
@@ -376,7 +441,9 @@ impl Api {
             }
             let bind = card.get("bindRoleInfo");
             let role_id = bind.and_then(|b| b.get("roleId")).and_then(value_to_string);
-            let role_name = bind.and_then(|b| b.get("roleName")).and_then(value_to_string);
+            let role_name = bind
+                .and_then(|b| b.get("roleName"))
+                .and_then(value_to_string);
             out.push(GameRecordCard {
                 game_id: game_id.unwrap(),
                 game_name: card.get("gameName").and_then(value_to_string),
@@ -421,7 +488,12 @@ impl Api {
     }
 
     pub async fn get_signin_state(&self, access_token: &str, game_id: &str) -> Result<i64> {
-        let (headers, url) = h5_request(access_token, "GET", "/apihub/awapi/signin/state", &[("gameId", game_id)]);
+        let (headers, url) = h5_request(
+            access_token,
+            "GET",
+            "/apihub/awapi/signin/state",
+            &[("gameId", game_id)],
+        );
         let (status, text) = self.get_text(&url, headers).await?;
         let (code, msg, full) = parse_body(&text, "getSigninState", status)?;
         let days = full
@@ -434,8 +506,17 @@ impl Api {
         Ok(days.unwrap())
     }
 
-    pub async fn get_signin_rewards(&self, access_token: &str, game_id: &str) -> Result<Vec<(String, i64)>> {
-        let (headers, url) = h5_request(access_token, "GET", "/apihub/awapi/sign/rewards", &[("gameId", game_id)]);
+    pub async fn get_signin_rewards(
+        &self,
+        access_token: &str,
+        game_id: &str,
+    ) -> Result<Vec<(String, i64)>> {
+        let (headers, url) = h5_request(
+            access_token,
+            "GET",
+            "/apihub/awapi/sign/rewards",
+            &[("gameId", game_id)],
+        );
         let (status, text) = self.get_text(&url, headers).await?;
         let (code, msg, full) = parse_body(&text, "getSigninRewards", status)?;
         let arr = full.get("data").and_then(|d| d.as_array());
@@ -444,14 +525,22 @@ impl Api {
         }
         let mut out = Vec::new();
         for item in arr.unwrap() {
-            let name = item.get("name").and_then(value_to_string).unwrap_or_default();
+            let name = item
+                .get("name")
+                .and_then(value_to_string)
+                .unwrap_or_default();
             let num = item.get("num").and_then(value_to_i64).unwrap_or(0);
             out.push((name, num));
         }
         Ok(out)
     }
 
-    pub async fn game_signin(&self, access_token: &str, role_id: &str, game_id: &str) -> Result<()> {
+    pub async fn game_signin(
+        &self,
+        access_token: &str,
+        role_id: &str,
+        game_id: &str,
+    ) -> Result<()> {
         let body = form_encode_pairs([("roleId", role_id), ("gameId", game_id)]);
         let (headers, url) = h5_request_with_body(access_token, "POST", "/apihub/awapi/sign");
         let (status, text) = self.post_form(&url, headers, body).await?;
@@ -478,13 +567,19 @@ impl Api {
         );
         let (status, text) = self.get_text(&url, headers).await?;
         let (code, msg, full) = parse_body(&text, "getUserTasks", status)?;
-        let list = full.get("data").and_then(|d| d.get("task_list1")).and_then(|t| t.as_array());
+        let list = full
+            .get("data")
+            .and_then(|d| d.get("task_list1"))
+            .and_then(|t| t.as_array());
         if !is_ok(status) || code != 0 || list.is_none() {
             return Err(api_error("getUserTasks", status, code, &msg));
         }
         let mut out = Vec::new();
         for t in list.unwrap() {
-            let code_key = t.get("code").or_else(|| t.get("taskKey")).and_then(value_to_string);
+            let code_key = t
+                .get("code")
+                .or_else(|| t.get("taskKey"))
+                .and_then(value_to_string);
             if let Some(code_key) = code_key {
                 if code_key.is_empty() {
                     continue;
@@ -539,21 +634,34 @@ impl Api {
         // 原实现仅识别 `data.list` 或 `data` 本身为数组，导致解析恒为 None，
         // 进而令金币任务中的浏览 / 点赞 / 分享子任务全部无法执行。
         // 此处按 list → posts → data 的顺序依次尝试，兼容多种响应形态。
-        let raw = full.get("data").and_then(|d| d.get("list")).and_then(|l| l.as_array())
-            .or_else(|| full.get("data").and_then(|d| d.get("posts")).and_then(|l| l.as_array()))
+        let raw = full
+            .get("data")
+            .and_then(|d| d.get("list"))
+            .and_then(|l| l.as_array())
+            .or_else(|| {
+                full.get("data")
+                    .and_then(|d| d.get("posts"))
+                    .and_then(|l| l.as_array())
+            })
             .or_else(|| full.get("data").and_then(|d| d.as_array()));
         if !is_ok(status) || code != 0 || raw.is_none() {
             return Err(api_error("getRecommendPostList", status, code, &msg));
         }
         let mut out = Vec::new();
         for item in raw.unwrap() {
-            let post_id = item.get("postId").or_else(|| item.get("id")).and_then(value_to_string);
+            let post_id = item
+                .get("postId")
+                .or_else(|| item.get("id"))
+                .and_then(value_to_string);
             if let Some(pid) = post_id {
                 let liked = item
                     .get("selfOperation")
                     .and_then(|s| s.get("liked"))
                     .and_then(|l| l.as_bool());
-                out.push(RecommendPost { post_id: pid, liked });
+                out.push(RecommendPost {
+                    post_id: pid,
+                    liked,
+                });
             }
         }
         Ok(out)
@@ -584,7 +692,10 @@ impl Api {
             .and_then(|d| d.get("selfOperation"))
             .and_then(|s| s.get("liked"))
             .and_then(|l| l.as_bool());
-        Ok(RecommendPost { post_id: post_id.to_string(), liked })
+        Ok(RecommendPost {
+            post_id: post_id.to_string(),
+            liked,
+        })
     }
 
     pub async fn like_post(
@@ -637,7 +748,8 @@ impl Api {
     }
 
     pub async fn get_user_coin_task_state(&self, access_token: &str) -> Result<CoinState> {
-        let (headers, url) = h5_request(access_token, "GET", "/apihub/api/getUserCoinTaskState", &[]);
+        let (headers, url) =
+            h5_request(access_token, "GET", "/apihub/api/getUserCoinTaskState", &[]);
         let (status, text) = self.get_text(&url, headers).await?;
         let (code, msg, full) = parse_body(&text, "getUserCoinTaskState", status)?;
         let data = full.get("data");
@@ -676,12 +788,19 @@ impl Api {
         let body = signed_body(data, CLOUD_APP_KEY, true);
 
         let mut headers = HeaderMap::new();
-        headers.insert("Content-Type", HeaderValue::from_static("application/x-www-form-urlencoded"));
+        headers.insert(
+            "Content-Type",
+            HeaderValue::from_static("application/x-www-form-urlencoded"),
+        );
         headers.insert("User-Agent", HeaderValue::from_static("okhttp/3.12.1"));
         headers.insert("Host", HeaderValue::from_static("user.laohu.com"));
 
         let (status, text) = self
-            .post_form(&format!("{LAOHU_BASE_URL}/cloud/game/getUserInfo"), headers, body)
+            .post_form(
+                &format!("{LAOHU_BASE_URL}/cloud/game/getUserInfo"),
+                headers,
+                body,
+            )
             .await?;
         let (code, msg, full) = parse_body(&text, "cloudGetUserInfo", status)?;
         let result = full.get("result");
@@ -716,7 +835,12 @@ impl Api {
         Ok((status, text))
     }
 
-    async fn post_form(&self, url: &str, headers: HeaderMap, body: String) -> Result<(u16, String)> {
+    async fn post_form(
+        &self,
+        url: &str,
+        headers: HeaderMap,
+        body: String,
+    ) -> Result<(u16, String)> {
         let resp = self
             .client
             .post(url)
@@ -744,7 +868,10 @@ impl Default for Api {
 
 fn laohu_headers() -> HeaderMap {
     let mut m = HeaderMap::new();
-    m.insert("Content-Type", HeaderValue::from_static("application/x-www-form-urlencoded;charset=UTF-8"));
+    m.insert(
+        "Content-Type",
+        HeaderValue::from_static("application/x-www-form-urlencoded;charset=UTF-8"),
+    );
     m.insert("User-Agent", HeaderValue::from_static(LAOHU_USER_AGENT));
     m
 }
@@ -752,12 +879,18 @@ fn laohu_headers() -> HeaderMap {
 fn native_common_headers(access_token: &str, uid: &str, device_id: &str) -> HeaderMap {
     let mut m = HeaderMap::new();
     m.insert("Accept", HeaderValue::from_static("application/json"));
-    m.insert("Authorization", HeaderValue::from_str(access_token).unwrap());
+    m.insert(
+        "Authorization",
+        HeaderValue::from_str(access_token).unwrap(),
+    );
     m.insert("appversion", HeaderValue::from_static(TAYGEDO_APP_VER));
     m.insert("platform", HeaderValue::from_static("android"));
     m.insert("uid", HeaderValue::from_str(uid).unwrap());
     m.insert("deviceid", HeaderValue::from_str(device_id).unwrap());
-    m.insert("ds", HeaderValue::from_str(&make_ds(now_seconds(), &make_nonce(), TAYGEDO_APP_VER)).unwrap());
+    m.insert(
+        "ds",
+        HeaderValue::from_str(&make_ds(now_seconds(), &make_nonce(), TAYGEDO_APP_VER)).unwrap(),
+    );
     m.insert("User-Agent", HeaderValue::from_static(NATIVE_USER_AGENT));
     m
 }
@@ -788,19 +921,31 @@ fn native_request_with_body(
     _body: &[(&str, &str)],
 ) -> (HeaderMap, String) {
     let mut headers = native_common_headers(access_token, uid, device_id);
-    headers.insert("Content-Type", HeaderValue::from_static("application/x-www-form-urlencoded"));
+    headers.insert(
+        "Content-Type",
+        HeaderValue::from_static("application/x-www-form-urlencoded"),
+    );
     (headers, format!("{TAYGEDO_BASE_URL}{path}"))
 }
 
 fn h5_headers(access_token: &str, with_body: bool) -> HeaderMap {
     let mut m = HeaderMap::new();
     m.insert("Accept", HeaderValue::from_static("application/json"));
-    m.insert("Authorization", HeaderValue::from_str(access_token).unwrap());
+    m.insert(
+        "Authorization",
+        HeaderValue::from_str(access_token).unwrap(),
+    );
     m.insert("Origin", HeaderValue::from_static(H5_ORIGIN));
-    m.insert("Referer", HeaderValue::from_str(&format!("{H5_ORIGIN}/")).unwrap());
+    m.insert(
+        "Referer",
+        HeaderValue::from_str(&format!("{H5_ORIGIN}/")).unwrap(),
+    );
     m.insert("User-Agent", HeaderValue::from_static(H5_USER_AGENT));
     if with_body {
-        m.insert("Content-Type", HeaderValue::from_static("application/x-www-form-urlencoded"));
+        m.insert(
+            "Content-Type",
+            HeaderValue::from_static("application/x-www-form-urlencoded"),
+        );
     }
     m
 }
@@ -821,12 +966,17 @@ fn h5_request(
 }
 
 fn h5_request_with_body(access_token: &str, _method: &str, path: &str) -> (HeaderMap, String) {
-    (h5_headers(access_token, true), format!("{TAYGEDO_BASE_URL}{path}"))
+    (
+        h5_headers(access_token, true),
+        format!("{TAYGEDO_BASE_URL}{path}"),
+    )
 }
 
 fn parse_body(text: &str, endpoint: &str, status: u16) -> Result<(i64, String, serde_json::Value)> {
     if text.trim().is_empty() {
-        return Err(ApiError(format!("{endpoint} 返回了无效 JSON（HTTP {status}，响应为空）")));
+        return Err(ApiError(format!(
+            "{endpoint} 返回了无效 JSON（HTTP {status}，响应为空）"
+        )));
     }
     let v: serde_json::Value = serde_json::from_str(text)
         .map_err(|_| ApiError(format!("{endpoint} 返回了无效 JSON（HTTP {status}）")))?;
@@ -844,7 +994,9 @@ fn api_error(endpoint: &str, status: u16, code: i64, msg: &str) -> ApiError {
     if !m.is_empty() && m.to_lowercase() != "ok" {
         return ApiError(format!("{endpoint}：{m}（HTTP {status}，code={code}）"));
     }
-    ApiError(format!("{endpoint} 请求失败（HTTP {status}，code={code}，msg={m}）"))
+    ApiError(format!(
+        "{endpoint} 请求失败（HTTP {status}，code={code}，msg={m}）"
+    ))
 }
 
 fn value_to_i64(v: &serde_json::Value) -> Option<i64> {

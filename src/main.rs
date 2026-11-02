@@ -1,16 +1,17 @@
 mod api;
 mod constants;
 mod crypto;
+mod crypto_storage;
 mod login;
 mod models;
 mod protocol;
 mod runner;
 mod scheduler;
 mod service;
-mod session;
 mod store;
 mod time;
 mod web;
+mod web_security;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -20,12 +21,33 @@ async fn main() {
     let data_dir = std::env::var("TAYGEDO_DATA_DIR").unwrap_or_else(|_| "data".to_string());
     let listen = std::env::var("TAYGEDO_LISTEN").unwrap_or_else(|_| "0.0.0.0:8787".to_string());
 
-    let state = service::AppState::new(PathBuf::from(&data_dir));
+    // 运维子命令：密钥轮换。必须在建立 AppState 之前单独处理，
+    // 因为它要求"先取锁 → 重新加密全部文件 → 提升新密钥"的独占流程。
+    if std::env::args().any(|a| a == "--rotate-storage-key") {
+        std::process::exit(rotate_storage_key_cli(&data_dir));
+    }
+
+    // 存储层初始化失败 = 不可启动。绝不带着"没有密钥/没迁移完"的状态
+    // 继续对外提供服务——那会在下一次写入时静默覆盖掉用户数据。
+    let state = match service::AppState::new(PathBuf::from(&data_dir)) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[fatal] 启动失败：{e}");
+            eprintln!("[fatal] 数据目录：{data_dir}");
+            eprintln!(
+                "[fatal] 请勿删除数据目录中的密文文件；恢复步骤见 README「加密存储 / 故障恢复」。"
+            );
+            std::process::exit(1);
+        }
+    };
     let bind_addr: SocketAddr = listen.parse().expect("TAYGEDO_LISTEN 格式应为 host:port");
 
     state.push_log(
         "info",
-        format!("塔吉多自动签到 Rust 版已启动，数据目录：{}", data_dir),
+        format!(
+            "塔吉多自动签到 Rust 版已启动，数据目录：{}",
+            state.store.data_dir().display()
+        ),
     );
 
     // 启动每日定时调度
@@ -57,8 +79,8 @@ async fn main() {
     // 读取加密策略用于横幅展示（不暴露任何密钥材料）
     let crypto_policy = state.config.read().await.crypto_policy.clone();
     let crypto_note = match crypto_policy.as_str() {
-        "always" => "应用层加密: 强制 (X25519+AES-256-GCM)",
-        "never" => "应用层加密: 已关闭",
+        "always" => "应用层加密: 强制 (v2)",
+        "never" => "应用层加密: 已关闭 (明文传输)",
         _ => "应用层加密: 内网明文/外网强制",
     };
 
@@ -70,6 +92,14 @@ async fn main() {
     println!("║  鉴权: {:<38} ║", auth_note);
     println!("║  {}{:.<39}║", crypto_note, "");
     println!("║  数据目录: {:<35} ║", data_dir);
+    println!(
+        "║  配置加密: XChaCha20-Poly1305 / {:<12} ║",
+        state.store.key_protection().as_str()
+    );
+    println!("║  Key ID  : {:<35} ║", state.store.key_id_hex());
+    // 传输层身份指纹：供**带外核对**（TOFU 首次信任窗口的唯一缓解手段）。
+    // 打印它是安全的：指纹是公钥的哈希，不是密钥材料。
+    println!("║  身份指纹: {:<35} ║", state.crypto.identity_fingerprint());
     println!("╚════════════════════════════════════════════╝");
 
     // 初始随机口令：仅在 stdout 出现一次，**不写入日志缓冲区**（日志可经 API 读取）。
@@ -105,7 +135,10 @@ async fn main() {
                 Ok(code) => {
                     state.push_log(
                         "warn",
-                        format!("自动打开 WebUI 失败（退出码 {}），请手动访问 {}", code, open_url),
+                        format!(
+                            "自动打开 WebUI 失败（退出码 {}），请手动访问 {}",
+                            code, open_url
+                        ),
                     );
                 }
                 Err(e) => {
@@ -126,4 +159,33 @@ async fn main() {
     )
     .await
     .expect("服务运行失败");
+}
+
+/// `--rotate-storage-key` 实现：轮换配置加密主密钥。
+///
+/// 流程（详见 `crypto_storage::migration::rotate_key`）：
+/// 新密钥先落 `keys/master.key.pending` → 逐文件用旧密钥解密、新密钥重加密
+/// → 全部成功后把 pending 提升为正式主密钥。中途崩溃下次启动会自动续做。
+fn rotate_storage_key_cli(data_dir: &str) -> i32 {
+    let path = PathBuf::from(data_dir);
+    let mut store = match store::Store::new(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[fatal] 无法打开数据目录：{e}");
+            return 1;
+        }
+    };
+    let old = store.key_id_hex();
+    match store.rotate_storage_key() {
+        Ok(new_id) => {
+            println!("主密钥已轮换：{old} -> {new_id}");
+            println!("旧的加密备份（*.rotate-bak-{old}）保留在数据目录中，确认无误后可手动删除。");
+            0
+        }
+        Err(e) => {
+            eprintln!("[fatal] 密钥轮换失败：{e}");
+            eprintln!("[fatal] 数据未被破坏；若存在 keys/master.key.pending，下次启动会自动续做。");
+            1
+        }
+    }
 }

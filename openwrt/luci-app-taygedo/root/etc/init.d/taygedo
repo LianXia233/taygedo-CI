@@ -22,9 +22,14 @@ start_service() {
     config_get_bool lan_no_auth 'main' 'lan_no_auth' 1
 
     [ -d "$data_dir" ] || mkdir -p "$data_dir"
-    # 密钥目录权限：长期身份私钥落在此目录，必须仅 root 可读。
+    # 密钥目录权限：长期身份私钥 + 配置加密主密钥落在此目录，必须仅 root 可读。
     # overlayfs 上首次创建时补设 700，避免升级/重建后继承宽松权限。
+    # （二进制自身也会在创建 keys/ 时设 0700，这里是升级路径的兜底。）
     chmod 700 "$data_dir" 2>/dev/null
+    if [ -d "$data_dir/keys" ]; then
+        chmod 700 "$data_dir/keys" 2>/dev/null
+        chmod 600 "$data_dir/keys"/* 2>/dev/null
+    fi
 
     # 职责划分（LuCI 与 WebUI 解耦）：
     # - UCI 只管「服务级」配置：启停 / 端口 / 数据目录 / WebUI 密码 /

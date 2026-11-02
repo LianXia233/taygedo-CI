@@ -2,9 +2,9 @@
 
 use std::collections::BTreeMap;
 
+use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::Aes128;
-use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rand::Rng;
 use url::form_urlencoded;
 
@@ -18,7 +18,8 @@ pub fn md5_hex(s: &str) -> String {
 /// 老虎 / 云平台签名：按 key 字典序拼接 value，再拼 secret，取 MD5。
 pub fn sign(data: &BTreeMap<String, String>, secret: &str) -> String {
     let mut joined = String::new();
-    for (_k, v) in data.iter() {
+    // BTreeMap 的 values() 已按 key 字典序迭代，无需显式取 key。
+    for v in data.values() {
         joined.push_str(v);
     }
     joined.push_str(secret);
@@ -61,13 +62,20 @@ pub fn make_nonce() -> String {
 
 /// ds 签名：`{ts},{nonce},{md5(ts+nonce+appVer+secret)}`
 pub fn make_ds(timestamp: u64, nonce: &str, app_version: &str) -> String {
-    let signature = md5_hex(&format!("{}{}{}{}", timestamp, nonce, app_version, TAYGEDO_DS_SECRET));
+    let signature = md5_hex(&format!(
+        "{}{}{}{}",
+        timestamp, nonce, app_version, TAYGEDO_DS_SECRET
+    ));
     format!("{},{},{}", timestamp, nonce, signature)
 }
 
 /// 老虎 Android 基础参数。
 /// `version_field` 为 `versionCode` 时带 `imei`/`versionCode`；否则带 `mac`/`version`。
-pub fn laohu_base_params(device_id: &str, t: &str, version_field: &str) -> BTreeMap<String, String> {
+pub fn laohu_base_params(
+    device_id: &str,
+    t: &str,
+    version_field: &str,
+) -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
     m.insert("adm".into(), String::new());
     m.insert("appId".into(), LAOHU_APP_ID.into());
@@ -93,7 +101,11 @@ pub fn laohu_base_params(device_id: &str, t: &str, version_field: &str) -> BTree
 
 /// 生成带签名的表单体。
 /// `include_empty` 为 true 时保留空值字段，否则剔除空值（与上游 formEncodeNonEmpty 一致）。
-pub fn signed_body(mut data: BTreeMap<String, String>, secret: &str, include_empty: bool) -> String {
+pub fn signed_body(
+    mut data: BTreeMap<String, String>,
+    secret: &str,
+    include_empty: bool,
+) -> String {
     let sign = sign(&data, secret);
     data.insert("sign".into(), sign);
     form_encode(&data, include_empty)
@@ -133,13 +145,19 @@ pub fn random_hex_32() -> String {
 /// 当前秒级时间戳
 pub fn now_seconds() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 /// 当前毫秒级时间戳
 pub fn now_millis() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
 }
 
 // ---------------------------------------------------------------------------
@@ -177,10 +195,7 @@ pub fn random_32() -> [u8; 32] {
 ///
 /// 结果为全零时返回 `None`——全零共享密钥意味着对端提交了低阶点，
 /// 属主动攻击特征，必须拒绝而非静默使用。
-pub fn x25519_diffie_hellman(
-    our_secret: &[u8; 32],
-    peer_public: &[u8; 32],
-) -> Option<[u8; 32]> {
+pub fn x25519_diffie_hellman(our_secret: &[u8; 32], peer_public: &[u8; 32]) -> Option<[u8; 32]> {
     use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
     let sk = StaticSecret::from(*our_secret);
     let pk = PublicKey::from(*peer_public);
@@ -192,24 +207,6 @@ pub fn x25519_diffie_hellman(
     }
 }
 
-/// HKDF-SHA256 派生指定长度的密钥。
-///
-/// `salt` 必须包含双方公钥（提供会话绑定性，抵御未知密钥共享攻击），
-/// `info` 用作域分隔，保证同一共享密钥派生出不同用途的子密钥。
-pub fn hkdf_sha256(
-    ikm: &[u8],
-    salt: &[u8],
-    info: &[u8],
-    out_len: usize,
-) -> Vec<u8> {
-    use hkdf::Hkdf;
-    use sha2::Sha256;
-    let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
-    let mut out = vec![0u8; out_len];
-    hk.expand(info, &mut out).expect("HKDF 输出长度合法");
-    out
-}
-
 /// 恒定时间比较（转发，便于 protocol 层直接使用）。
 ///
 /// 预留：供后续在 protocol 层做密钥/摘要比对时复用；
@@ -218,4 +215,3 @@ pub fn hkdf_sha256(
 pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     crate::crypto::constant_time_eq(a, b)
 }
-

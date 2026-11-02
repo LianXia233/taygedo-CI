@@ -14,6 +14,34 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # 0) 质量门禁（定义在 .github/workflows/quality.yml）
+  #
+  # 抽成可复用工作流，是因为同一份检查要在两个时机跑：
+  #   - PR 打开/更新时（pull_request）：评审看代码前就拿到结论；
+  #   - 发布之前（下面的 release 通过 needs 依赖本作业）：挡住 Release。
+  # 复制两份脚本必然漂移，所以这里只做调用。
+  # ---------------------------------------------------------------------------
+  quality:
+    uses: ./.github/workflows/quality.yml
+
+  # ---------------------------------------------------------------------------
+  # 0b) 依赖安全审计（RustSec advisory）
+  #
+  # 非阻塞：advisory 数据库每天都在变，一条与本次改动无关的新 advisory
+  # 不应把整条发布流水线卡死。失败的结论会明确显示在 Actions 里，
+  # 由维护者评估后单独升级依赖。
+  # ---------------------------------------------------------------------------
+  audit:
+    name: dependency-audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
   # 1) 编译各平台二进制
   # ---------------------------------------------------------------------------
   build:
@@ -243,7 +271,7 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: release
-    needs: [build, debian, openwrt]
+    needs: [quality, build, debian, openwrt]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

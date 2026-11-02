@@ -24,7 +24,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::{ConnectInfo, Path, Query, State};
-use axum::http::{header, HeaderName, HeaderValue, Method, StatusCode};
+use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post};
@@ -32,24 +32,25 @@ use axum::{Json, Router};
 use serde::Deserialize;
 
 use crate::service::{self, AppState};
-use crate::session::{self, CryptoError};
+use crate::web_security::middleware::crypto_middleware;
+use crate::web_security::{self, CryptoError};
 
-/// 加密会话标识头。
-const HDR_SID: HeaderName = HeaderName::from_static("x-tgd-session");
-/// 加密请求序号头（十进制）。
-const HDR_SEQ: HeaderName = HeaderName::from_static("x-tgd-seq");
-/// 响应标记头：告知客户端该响应是否已加密。
-const HDR_ENC: HeaderName = HeaderName::from_static("x-tgd-enc");
 /// 握手路径。
 const HANDHAKE_PATH: &str = "/api/crypto/handshake";
 
 pub fn router(state: Arc<AppState>) -> Router {
-    // 公开路由：首页 + 登录 + 加密握手 + 服务元信息
+    // 公开路由：首页 + 登录 + 加密握手 + 服务元信息 + 身份公钥 + 静态资源
+    //
+    // 说明：静态资源（含签名清单）必须公开可读——客户端要先拿到它们才能
+    // 建立加密会话。它们的完整性由 Ed25519 签名清单保证，而不是靠鉴权。
     let public = Router::new()
         .route("/", get(index))
         .route("/api/login", post(login_api))
         .route("/api/meta", get(meta_api))
-        .route(HANDHAKE_PATH, post(handshake_api));
+        .route(HANDHAKE_PATH, post(handshake_api))
+        .route("/api/secure/identity", get(identity_api))
+        .route("/static/manifest.json", get(manifest_api))
+        .route("/static/{*path}", get(static_asset));
 
     // 受保护路由：所有业务 API
     let protected = Router::new()
@@ -62,16 +63,32 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/password", post(change_password))
         .route("/api/logout", post(logout_api))
         .route("/api/logs", get(get_logs))
-        .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
 
     public
         .merge(protected)
         // 顺序敏感：cors 最外层 → crypto 次之 → auth 最内层。
         // axum 的 layer 是"后加的先执行"，故先 merge/auth 再 crypto 再 cors。
-        .layer(middleware::from_fn_with_state(state.clone(), crypto_middleware))
-        .layer(middleware::from_fn_with_state(state.clone(), cors_middleware))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crypto_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            cors_middleware,
+        ))
         .with_state(state)
 }
+
+/// 跨源预检允许的请求头。
+///
+/// 必须与前端实际发送的头一致：`X-TGD-Envelope` 是 GET/HEAD 的信封载体，
+/// 漏掉它会让 LuCI（同主机不同端口）在预检阶段就被浏览器拦下。
+const ALLOWED_REQUEST_HEADERS: &str =
+    "Authorization, Content-Type, X-TGD-Session, X-TGD-Seq, X-TGD-Envelope";
 
 /// CORS 中间件：来源白名单。
 ///
@@ -92,7 +109,9 @@ async fn cors_middleware(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let allowed = origin.as_deref().map(|o| is_origin_allowed(o, &req, &state));
+    let allowed = origin
+        .as_deref()
+        .map(|o| is_origin_allowed(o, &req, &state));
 
     if req.method() == Method::OPTIONS {
         let mut builder = Response::builder().status(StatusCode::NO_CONTENT);
@@ -106,13 +125,10 @@ async fn cors_middleware(
                 )
                 .header(
                     header::ACCESS_CONTROL_ALLOW_HEADERS,
-                    "Authorization, Content-Type, X-TGD-Session, X-TGD-Seq",
+                    ALLOWED_REQUEST_HEADERS,
                 )
                 // 仅对白名单来源声明可变头，便于前端读取加密标记
-                .header(
-                    header::ACCESS_CONTROL_EXPOSE_HEADERS,
-                    "X-TGD-Enc",
-                )
+                .header(header::ACCESS_CONTROL_EXPOSE_HEADERS, "X-TGD-Enc")
                 .header(header::ACCESS_CONTROL_MAX_AGE, "600");
         }
         return Ok(builder.body(axum::body::Body::empty()).unwrap());
@@ -132,7 +148,7 @@ async fn cors_middleware(
         );
         h.insert(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
-            HeaderValue::from_static("Authorization, Content-Type, X-TGD-Session, X-TGD-Seq"),
+            HeaderValue::from_static(ALLOWED_REQUEST_HEADERS),
         );
         h.insert(
             header::ACCESS_CONTROL_EXPOSE_HEADERS,
@@ -153,7 +169,10 @@ fn is_origin_allowed(origin: &str, req: &axum::extract::Request, state: &Arc<App
         return false;
     }
     // 显式白名单优先（额外来源由环境变量提供，避免硬编码任何主机名）
-    if allowed_origins_from_env().iter().any(|o| o.eq_ignore_ascii_case(origin)) {
+    if allowed_origins_from_env()
+        .iter()
+        .any(|o| o.eq_ignore_ascii_case(origin))
+    {
         return true;
     }
     let origin_host = extract_host(origin);
@@ -203,246 +222,63 @@ fn extract_host(s: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// 应用层加密中间件
-// ---------------------------------------------------------------------------
-
-/// 加密中间件：解密请求体、加密响应体。
-///
-/// 仅作用于 `/api/*`；握手端点、静态资源、非 API 路径直接透传。
-async fn crypto_middleware(
-    State(state): State<Arc<AppState>>,
-    req: axum::extract::Request,
-    next: Next,
-) -> Result<Response, Response> {
-    let path = req.uri().path().to_string();
-    let method = req.method().clone();
-
-    // 握手端点自行管理（免鉴权、带独立限速），中间件不介入
-    if path == HANDHAKE_PATH {
-        return Ok(next.run(req).await);
-    }
-    // 非 API 路径（首页、静态资源）不加密
-    if !path.starts_with("/api/") {
-        return Ok(next.run(req).await);
-    }
-
-    let peer_ip = req
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|ci| ci.0.ip());
-
-    let policy = state.config.read().await.crypto_policy.clone();
-    let require_enc = match policy.as_str() {
-        "always" => true,
-        "never" => false,
-        // auto：内网来源（LAN 白名单）可明文；其余来源必须加密
-        _ => match peer_ip {
-            Some(ip) => !state.lan_matches(ip),
-            // 无法识别来源时按"必须加密"处理（更安全的一侧）
-            None => true,
-        },
-    };
-
-    let sid = req
-        .headers()
-        .get(HDR_SID)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let seq = req
-        .headers()
-        .get(HDR_SEQ)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<u64>().ok());
-
-    // 客户端的握手探测：GET /api/crypto/handshake 之外，用 X-TGD-Probe 头探测
-    // 是否要求加密，避免前端为一次探测就建立完整会话。
-    let is_probe = req.headers().contains_key("x-tgd-probe");
-
-    let (sid, seq) = match (sid, seq) {
-        (Some(sid), Some(seq)) => (sid, seq),
-        _ => {
-            if require_enc && !is_probe {
-                return Err(crypto_error_response(
-                    StatusCode::PRECONDITION_REQUIRED,
-                    "crypto_required",
-                    "该来源需要启用应用层加密，请先刷新页面完成握手",
-                ));
-            }
-            // 明文直通（auto 下的内网来源，或 policy=never）
-            let mut resp = next.run(req).await;
-            resp.headers_mut()
-                .insert(HDR_ENC, HeaderValue::from_static("0"));
-            return Ok(resp);
-        }
-    };
-
-    // ---- 解密请求体 ----
-    let (parts, body) = req.into_parts();
-    let raw = match axum::body::to_bytes(body, MAX_BODY_BYTES).await {
-        Ok(b) => b,
-        Err(_) => {
-            return Err(crypto_error_response(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "body_too_large",
-                "请求体过大",
-            ))
-        }
-    };
-
-    let plaintext = if raw.is_empty() {
-        // 空体（如 GET）无需解密
-        Vec::new()
-    } else {
-        let env = match std::str::from_utf8(&raw) {
-            Ok(s) => s,
-            Err(_) => {
-                return Err(crypto_error_response(
-                    StatusCode::BAD_REQUEST,
-                    "malformed",
-                    "加密报文应为 base64url 文本",
-                ))
-            }
-        };
-        let ct = match session::decode_envelope(env) {
-            Ok(c) => c,
-            Err(e) => return Err(crypto_error_response(e.status(), e.public_code(), e.public_message())),
-        };
-        match state.crypto.decrypt_request(&sid, seq, &ct) {
-            Ok((pt, _)) => pt,
-            Err(e) => return Err(crypto_error_response(e.status(), e.public_code(), e.public_message())),
-        }
-    };
-
-    // 重建请求：替换 body 为明文，并保留原始 headers/uri
-    let mut rebuilt = axum::extract::Request::from_parts(parts, axum::body::Body::from(plaintext));
-    // 解密后内容为 JSON，显式声明，避免 handler 的 Json 提取器因缺 Content-Type 失败
-    if method != Method::GET && method != Method::HEAD {
-        rebuilt.headers_mut().insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-    }
-    // 把当前加密会话号透传给下游 handler（登录成功后据此标记会话已认证）
-    rebuilt.extensions_mut().insert(CryptoSid(sid.clone()));
-
-    // ---- 执行下游 ----
-    let resp = next.run(rebuilt).await;
-
-    // ---- 加密响应体 ----
-    let (mut parts, body) = resp.into_parts();
-    let body_bytes = match axum::body::to_bytes(body, MAX_BODY_BYTES).await {
-        Ok(b) => b,
-        Err(_) => {
-            return Err(crypto_error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "body_read_failed",
-                "读取响应体失败",
-            ))
-        }
-    };
-
-    // 无需加密的情形：无正文 / 已非 2xx 且为空（如 204）
-    if body_bytes.is_empty() {
-        parts.headers.insert(HDR_ENC, HeaderValue::from_static("0"));
-        return Ok(Response::from_parts(parts, axum::body::Body::empty()));
-    }
-
-    match state.crypto.encrypt_response(&sid, seq, &body_bytes) {
-        Ok(ct) => {
-            let encoded = session::encode_envelope(&ct);
-            parts.headers.insert(HDR_ENC, HeaderValue::from_static("1"));
-            parts.headers.insert(
-                header::CONTENT_TYPE,
-                HeaderValue::from_static("text/plain; charset=utf-8"),
-            );
-            // 加密后长度变化，移除原 Content-Length 让 axum 重算
-            parts.headers.remove(header::CONTENT_LENGTH);
-            Ok(Response::from_parts(parts, axum::body::Body::from(encoded)))
-        }
-        Err(e) => Err(crypto_error_response(
-            e.status(),
-            e.public_code(),
-            e.public_message(),
-        )),
-    }
-}
-
-/// 请求体上限（32 MiB，足以覆盖文件上传；加密后 base64 膨胀约 1.34 倍，
-/// 故此处按解密前原始长度计）。
-const MAX_BODY_BYTES: usize = 34 * 1024 * 1024;
-
-/// 构造加密层错误响应。响应体为明文 JSON（便于客户端区分加密层与业务层错误）。
-fn crypto_error_response(status: StatusCode, code: &str, msg: &str) -> Response {
-    let mut resp = (
-        status,
-        Json(serde_json::json!({ "error": msg, "crypto_error": code })),
-    )
-        .into_response();
-    resp.headers_mut()
-        .insert(HDR_ENC, HeaderValue::from_static("0"));
-    resp
-}
-
-impl CryptoError {
-    /// 映射为 HTTP 状态码。
-    pub fn status(&self) -> StatusCode {
-        match self {
-            CryptoError::NoSession => StatusCode::PRECONDITION_REQUIRED,
-            CryptoError::Replay | CryptoError::AuthFailed | CryptoError::Malformed => {
-                StatusCode::BAD_REQUEST
-            }
-            CryptoError::Exhausted => StatusCode::TOO_MANY_REQUESTS,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // 握手
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 struct HandshakeReq {
-    /// 客户端 X25519 公钥（base64url，32 字节）。
+    /// 协议版本，必须为 `taygedo/v2`。
+    proto: String,
+    /// 客户端临时 X25519 公钥（base64url，32 字节）。
     client_pub: String,
-    /// 客户端随机数（base64url，16 字节）。
+    /// 客户端随机数（base64url，32 字节）。
     client_nonce: String,
 }
 
-/// 握手：建立加密会话。免鉴权（加密层必须在鉴权之前建立）。
+/// 握手：建立加密会话。免鉴权（会话必须在鉴权之前建立）。
 ///
-/// 带来源级速率限制，避免被用于资源耗尽。
+/// 响应中包含服务端 Ed25519 对完整 Transcript 的签名；客户端**必须**先
+/// 用固定过的公钥验签，验不过就中止——这是抵御中间人的关键一步。
 async fn handshake_api(
     State(state): State<Arc<AppState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(req): Json<HandshakeReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let peer = addr.ip().to_string();
-    if !state.crypto.allow_handshake(&peer) {
+
+    // 协议版本必须完全匹配：不认识就拒绝，不做"按老版本兼容"的降级
+    if req.proto != crate::web_security::protocol::PROTO {
         return Err((
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(serde_json::json!({
-                "error": "握手过于频繁，请稍后重试",
-                "crypto_error": "rate_limited"
-            })),
+            StatusCode::BAD_REQUEST,
+            Json(crate::web_security::handshake_error_body(
+                &CryptoError::Unsupported,
+            )),
         ));
     }
 
-    let client_pub = session::decode_fixed::<32>(&req.client_pub).map_err(|_| {
+    if !state.crypto.allow_handshake(&peer) {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(crate::web_security::handshake_error_body(
+                &CryptoError::RateLimited,
+            )),
+        ));
+    }
+
+    let client_pub = web_security::decode_fixed::<32>(&req.client_pub).map_err(|_| {
         (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "client_pub 应为 32 字节 base64url 的 X25519 公钥",
-                "crypto_error": "malformed"
-            })),
+            Json(crate::web_security::handshake_error_body(
+                &CryptoError::Malformed,
+            )),
         )
     })?;
-    let client_nonce = session::decode_fixed::<16>(&req.client_nonce).map_err(|_| {
+    let client_nonce = web_security::decode_fixed::<32>(&req.client_nonce).map_err(|_| {
         (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "client_nonce 应为 16 字节 base64url",
-                "crypto_error": "malformed"
-            })),
+            Json(crate::web_security::handshake_error_body(
+                &CryptoError::Malformed,
+            )),
         )
     })?;
 
@@ -452,24 +288,72 @@ async fn handshake_api(
         .map_err(|e| {
             (
                 e.status(),
-                Json(serde_json::json!({
-                    "error": e.public_message(),
-                    "crypto_error": e.public_code()
-                })),
+                Json(crate::web_security::handshake_error_body(&e)),
             )
         })?;
 
-    Ok(Json(serde_json::json!({
+    Ok(Json(
+        serde_json::to_value(&out.response).unwrap_or_else(|_| serde_json::json!({"ok": false})),
+    ))
+}
+
+/// 服务端身份公钥与指纹。
+///
+/// 仅返回**公钥**与指纹，不含任何私钥材料。客户端首次访问（TOFU）用它
+/// 展示指纹供操作者带外核对；核对之后指纹被固定在本地，后续握手强制比对。
+async fn identity_api(State(state): State<Arc<AppState>>) -> Response {
+    let body = serde_json::json!({
         "ok": true,
-        "sid": out.sid,
-        "server_pub": session::encode_fixed(&out.server_pub),
-        "server_nonce": session::encode_fixed(&out.server_nonce),
-        // 服务端长期身份公钥：客户端可固化校验以抵御中间人
-        "identity_pub": session::encode_fixed(&state.crypto.server_identity_public()),
-        "expires_in": out.expires_in,
-        "alg": "X25519+HKDF-SHA256+AES-256-GCM",
-        "proto": "taygedo/v1",
-    })))
+        "proto": crate::web_security::protocol::PROTO,
+        "alg": crate::web_security::protocol::ALG,
+        "kid": state.crypto.identity_kid(),
+        "identity_pub": web_security::b64(&state.crypto.identity_public()),
+        "fingerprint": state.crypto.identity_fingerprint(),
+        "pin_hint": "首次使用请通过带外渠道（启动横幅 / SSH）核对该指纹，然后在浏览器中固定它",
+    });
+    let mut resp = Json(body).into_response();
+    resp.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    resp
+}
+
+/// 签名清单缓存。清单内容在编译期嵌入，运行期不会变化，
+/// 只有身份密钥（随进程）会变，因此缓存在进程内即可。
+static MANIFEST_CACHE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+
+/// 静态资源签名清单。
+async fn manifest_api(State(state): State<Arc<AppState>>) -> Response {
+    let bytes = MANIFEST_CACHE.get_or_init(|| {
+        let m = web_security::manifest::build(
+            state.crypto.identity(),
+            web_security::now_unix().max(0) as u64,
+        );
+        serde_json::to_vec(&m).unwrap_or_else(|_| b"{}".to_vec())
+    });
+    let mut resp = Response::new(axum::body::Body::from(bytes.clone()));
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json; charset=utf-8"),
+    );
+    resp.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    resp
+}
+
+/// 静态资源（编译期嵌入，与实际签名的字节完全一致）。
+async fn static_asset(Path(path): Path<String>) -> Response {
+    let full = format!("/static/{path}");
+    let Some(content) = web_security::manifest::asset(&full) else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let mut resp = Response::new(axum::body::Body::from(content));
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(web_security::manifest::content_type(&full)),
+    );
+    resp.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    resp
 }
 
 // ---------------------------------------------------------------------------
@@ -613,7 +497,11 @@ async fn meta_api(
         "no_auth": no_auth,
         "crypto_policy": cfg.crypto_policy,
         "crypto_required": require_enc,
-        "crypto_proto": "taygedo/v1",
+        // 协议版本与算法：客户端据此判断"能不能用安全通道"，
+        // 不认识就拒绝，而不是退回明文。
+        "crypto_proto": crate::web_security::protocol::PROTO,
+        "crypto_alg": crate::web_security::protocol::ALG,
+        "crypto_identity_kid": state.crypto.identity_kid(),
         "must_change_password": cfg.web_password_must_change,
     }))
 }
@@ -735,8 +623,14 @@ async fn login_api(
     state.reset_login_fails(&parsed.username);
 
     // ④ 历史 v1 口令哈希就地升级为 scrypt
-    if state.upgrade_password_hash_if_legacy(&parsed.password).await {
-        state.push_log("info", "已将该口令哈希从 v1(sha256) 升级为 v2(scrypt)".into());
+    if state
+        .upgrade_password_hash_if_legacy(&parsed.password)
+        .await
+    {
+        state.push_log(
+            "info",
+            "已将该口令哈希从 v1(sha256) 升级为 v2(scrypt)".into(),
+        );
     }
 
     let token = state.issue_token(&parsed.username);
@@ -783,7 +677,8 @@ async fn change_password(
     let body = axum::body::to_bytes(req.into_body(), 64 * 1024)
         .await
         .map_err(|_| err("请求体读取失败"))?;
-    let parsed: PasswordReq = serde_json::from_slice(&body).map_err(|_| err("请求体不是合法 JSON"))?;
+    let parsed: PasswordReq =
+        serde_json::from_slice(&body).map_err(|_| err("请求体不是合法 JSON"))?;
 
     if parsed.new_password.len() < 8 {
         return Err(err("新密码至少 8 位"));
@@ -827,7 +722,10 @@ async fn change_password(
     // 改账号名或改口令都要重建凭据；set_credentials 内部会吊销全部会话
     // （含加密会话）并清除"必须改口令"标记，因此改密后旧 token 与旧握手
     // 密钥立即失效。
-    if let Err(e) = state.set_credentials(&target_user, &parsed.new_password).await {
+    if let Err(e) = state
+        .set_credentials(&target_user, &parsed.new_password)
+        .await
+    {
         return Err(err(&e));
     }
 
@@ -905,7 +803,9 @@ async fn send_code(
     service::send_code(&state, req.phone.trim())
         .await
         .map_err(|e| err(&e))?;
-    Ok(Json(serde_json::json!({ "ok": true, "message": "验证码已发送" })))
+    Ok(Json(
+        serde_json::json!({ "ok": true, "message": "验证码已发送" }),
+    ))
 }
 
 async fn delete_account(
@@ -972,7 +872,9 @@ async fn update_config(
         if !c.trim().is_empty() {
             let parsed = service::LanMatcher::from_cidrs(c);
             if parsed.is_err() {
-                return Err(err("lan_cidrs 含非法网段，应形如 192.168.0.0/16,10.0.0.0/8"));
+                return Err(err(
+                    "lan_cidrs 含非法网段，应形如 192.168.0.0/16,10.0.0.0/8",
+                ));
             }
         }
         new_cidrs = Some(c.trim().to_string());

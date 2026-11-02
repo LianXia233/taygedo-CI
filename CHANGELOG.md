@@ -2,7 +2,7 @@
 
 本文件记录塔吉多自动签到（Rust 版）的所有版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.7.0`。
+> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.7.1`。
 
 > **关于初始口令的重要提示**：`admin / admin` 这类固定初始口令**仅存在于 0.5.0 之前的历史版本**，
 > 下方旧版本条目（如 0.2.0）中的相关描述是当时的事实记录，**不代表当前行为**。
@@ -10,6 +10,20 @@
 > 以 [README](README.md) 的说明为准。
 
 ## [Unreleased]
+
+（暂无）
+
+## [0.7.1] - 2026-11-03
+
+### 概要
+
+- **彻底移除内置 WebUI**：首页 `/`、登录 / 登出 / 改密接口、WebUI 专用静态资源与清单条目、
+  `web_password` 等配置项一并删除，`GET /` 直接 404。
+- **OpenWrt 改为 LuCI 经 rpcd/ucode 内部通道访问后端**：不再有浏览器侧加密前端，
+  页面只调 `luci.taygedo`，由服务端 curl 回环 `127.0.0.1:<port>`。
+- **鉴权边界收敛到 rpcd ACL**：会话号只认 rpcd 注入的服务端真值，方法粒度读写授权。
+- **修复 ubus 会话解析与冷会话自调用死锁**：`parse_session_get` 兼容 `{"values":{"username":...}}`；
+  后端在 OpenWrt + 回环路径不再嵌套 `ubus call session get`。
 
 ### 破坏性变更 · 内置 WebUI 彻底移除，OpenWrt 改走内部 ucode/rpcd 通道
 

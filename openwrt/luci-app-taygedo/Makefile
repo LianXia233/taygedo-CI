@@ -6,7 +6,8 @@
 #   - 数据经 rpcd 内部通道取得：页面调用 ubus 对象 luci.taygedo，由
 #     /usr/share/rpcd/ucode/luci.taygedo 在服务端以 curl 调本机回环
 #     http://127.0.0.1:<port>；后端只监听 127.0.0.1，不对 LAN 暴露；
-#   - 鉴权由 OpenWrt 负责（LuCI/ubus 会话，后端用 ubus session get 校验）。
+#   - 鉴权由 OpenWrt 负责（LuCI/ubus 会话，鉴权边界是 rpcd ACL；后端在回环
+#     路径只校验会话号形态，不再嵌套 ubus session get）。
 #
 # 两种构建方式（二选一）：
 #   A. 预编译二进制下载（默认）：从 GitHub Release 下载对应架构的 musl 二进制。
@@ -18,7 +19,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-taygedo
-PKG_VERSION:=0.7.0
+PKG_VERSION:=0.7.1
 PKG_RELEASE:=1
 PKG_LICENSE:=GPL-3.0
 PKG_LICENSE_FILES:=LICENSE

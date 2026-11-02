@@ -19,13 +19,26 @@
 //!   都视为会话无效，不做"看起来能用就放行"的降级。
 //! - 结果做短 TTL 缓存：避免每个 API 请求都 fork 一次 ubus。有效会话缓存 30s，
 //!   无效结果缓存 3s（防止无效会话把 ubus 打满）。
+//! - 校验有并发上限，并且到点**强制终止** ubus 子进程：`Command::output()` 会一直
+//!   阻塞到子进程自行退出，而 `spawn_blocking` 一旦开始就无法取消。只靠 `timeout`
+//!   丢弃句柄的话，ubus 卡死时阻塞线程与子进程会持续堆积，因此这两条都要做。
 
 use std::collections::HashMap;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use tokio::sync::Semaphore;
+
 /// 单次 ubus 调用超时。路由器负载高时 ubus 仍应在数十毫秒内返回。
 const UBUS_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// 同时在跑的 ubus 校验上限。
+///
+/// 拿不到许可时直接按无效处理（fail-closed），不做排队——排队会让请求方在
+/// 超时之后才开始校验，等于把压力延后放大。上限本身要足够小，避免大量伪造
+/// 会话号把路由器的进程/线程资源打满。
+const UBUS_CONCURRENCY: usize = 4;
 
 /// 有效会话的缓存时长。
 const TTL_VALID: Duration = Duration::from_secs(30);
@@ -41,6 +54,11 @@ type Cache = Mutex<HashMap<String, (bool, Instant)>>;
 fn cache() -> &'static Cache {
     static CACHE: OnceLock<Cache> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn permits() -> &'static Semaphore {
+    static PERMITS: OnceLock<Semaphore> = OnceLock::new();
+    PERMITS.get_or_init(|| Semaphore::new(UBUS_CONCURRENCY))
 }
 
 /// 会话号形态校验。
@@ -65,15 +83,24 @@ pub async fn validate(sid: &str) -> bool {
         return hit;
     }
 
+    // 并发闸门：拿不到许可就直接按无效处理（fail-closed），不做排队。
+    // 许可被移进阻塞任务内部，任务彻底结束才释放，因此即使外层已超时，
+    // 仍在收尾的 ubus 调用依然受 UBUS_CONCURRENCY 约束。
+    let permit = match tokio::time::timeout(UBUS_TIMEOUT, permits().acquire()).await {
+        Ok(Ok(p)) => p,
+        _ => return false,
+    };
+
     let sid_owned = sid.to_string();
-    let ok = match tokio::time::timeout(
-        UBUS_TIMEOUT,
-        tokio::task::spawn_blocking(move || call_ubus_session_get(&sid_owned)),
-    )
-    .await
-    {
+    let handle = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        call_ubus_session_get(&sid_owned)
+    });
+
+    let ok = match tokio::time::timeout(UBUS_TIMEOUT, handle).await {
         Ok(Ok(v)) => v,
-        // 超时 / 线程 panic：一律按无效处理（fail-closed）
+        // 超时 / 线程 panic：一律按无效处理（fail-closed）。
+        // 阻塞任务本身无法取消，但它会在内部到点杀掉 ubus 子进程后自行退出。
         _ => false,
     };
 
@@ -105,15 +132,44 @@ fn store(sid: &str, ok: bool) {
 ///
 /// ubus 二进制名可由 `TAYGEDO_UBUS_BIN` 指定（默认 `ubus`，走 PATH，
 /// 不硬编码固件绝对路径）。
+///
+/// 不使用 `Command::output()`：它会一直阻塞到子进程自行退出，ubus 卡死时
+/// 阻塞线程永远收不回来。这里自己轮询 `try_wait`，到 `UBUS_TIMEOUT` 仍未退出
+/// 就 `kill()` + `wait()` 回收，保证阻塞任务在有界时间内结束。
 fn call_ubus_session_get(sid: &str) -> bool {
     let bin = std::env::var("TAYGEDO_UBUS_BIN").unwrap_or_else(|_| "ubus".to_string());
     let arg = format!("{{\"ubus_rpc_session\":\"{sid}\"}}");
-    let out = std::process::Command::new(bin)
+    let mut child = match Command::new(bin)
         .args(["call", "session", "get", &arg])
-        .output();
-    match out {
-        Ok(o) if o.status.success() => parse_session_get(&String::from_utf8_lossy(&o.stdout)),
-        _ => false,
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    let deadline = Instant::now() + UBUS_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) => return false,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            // 超时或 try_wait 出错：强制终止并回收，绝不让子进程留在后台。
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+
+    match child.wait_with_output() {
+        Ok(o) => parse_session_get(&String::from_utf8_lossy(&o.stdout)),
+        Err(_) => false,
     }
 }
 

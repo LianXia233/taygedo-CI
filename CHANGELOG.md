@@ -20,6 +20,10 @@
   放进 `X-TGD-Luci-Session` 头，服务端调用本机 `ubus call session get` 由 rpcd
   判定有效性，并要求来源命中 `lan_cidrs`；不通过分别返回 `401 luci_session_*`
   或 `403 untrusted_source`。校验结果短 TTL 缓存，超时/ubus 不可用一律 fail-closed。
+- **会话校验有资源上界**：同时最多 4 个 ubus 校验在跑（拿不到许可直接按无效处理，
+  不排队）；单次调用到 2s 仍未退出就 `kill()` 并回收子进程。两者都必需——
+  `spawn_blocking` 无法取消、`Command::output()` 会一直等到子进程退出，只丢弃
+  超时句柄会让阻塞线程与 ubus 子进程在压力下堆积。
 - **应用自有登录端点在该目标下废弃**：`POST /api/login`、`POST /api/password`
   返回 `410 Gone`（`code=deprecated_endpoint`）；`POST /api/logout` 返回
   `{"ok":true,"deprecated":true}`。三个端点仅非 OpenWrt 平台可用。

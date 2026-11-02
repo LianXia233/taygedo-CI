@@ -416,6 +416,10 @@ file:/static/vendor/...=<sha256>:<size>
      `username` 非空即通过。缺头 `401 luci_session_missing`，判定失败
      `401 luci_session_invalid`。校验结果按 `sid` 做短 TTL 缓存（有效 30s / 无效 3s），
      超时（2s）或 ubus 不可用一律 **fail-closed**（按无效处理）。
+  3. 校验有资源上界：同时最多 4 个 ubus 调用在跑，拿不到许可直接按无效处理（不排队）；
+     单个调用到 2s 仍未退出就 `kill()` 并回收子进程。二者都必需——`spawn_blocking`
+     一旦开始无法取消，`Command::output()` 又会一直等到子进程自行退出，若只丢弃
+     超时句柄，ubus 卡死时阻塞线程与子进程会持续堆积。
 - 会话号格式先做严格白名单（8–128 位 ASCII 字母数字），因为它会被拼进 JSON
   传给 `ubus`，不做校验等于把注入面交给请求方。
 - 应用自有登录端点在该模式下**已废弃**：`POST /api/login` 与 `POST /api/password`

@@ -1,17 +1,17 @@
-//! 密码学原语：口令哈希、凭据加密、应用层会话加密。
+//! 密码学原语：凭据加密、应用层会话加密。
 //!
-//! 包含三部分：
-//! 1. **口令哈希**（v2 scrypt）：用于 WebUI 登录口令，抗离线暴力破解；
-//! 2. **凭据加密**（scrypt + AES-256-GCM）：用于账号密码的静态存储；
-//! 3. **应用层会话加密**（X25519 ECDH + HKDF-SHA256 + AES-256-GCM）：
-//!    用于 HTTP 之上的请求/响应正文加密，见 `session.rs`。
+//! 包含两部分：
+//! 1. **凭据加密**（scrypt + AES-256-GCM）：用于账号密码的静态存储；
+//! 2. **应用层会话加密**（X25519 ECDH + HKDF-SHA256 + AES-256-GCM）：
+//!    用于 HTTP 之上的请求/响应正文加密，见 `web_security`。
 //!
-//! v1 口令哈希（单轮 sha256）仅用于向后兼容校验，新密码一律按 v2 写入。
+//! 内置 WebUI 已移除，因此不再有"登录口令哈希"这一层：OpenWrt 上鉴权由
+//! LuCI/ubus 会话负责，独立部署只接受受信来源（回环/内网白名单）的调用。
 
 use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use rand::{Rng, RngCore};
+use rand::RngCore;
 use scrypt::{scrypt, Params};
 
 use crate::models::EncryptedPassword;
@@ -112,35 +112,10 @@ pub fn decrypt_password(
 }
 
 // ---------------------------------------------------------------------------
-// WebUI 登录口令哈希
+// 比较与随机
 // ---------------------------------------------------------------------------
 
-/// 口令哈希版本：v2 = scrypt + 16 字节盐。
-pub const PWD_HASH_V2: u8 = 2;
-/// 口令哈希版本：v1 = 单轮 sha256 + 8 字节盐（旧格式，仅兼容校验）。
-pub const PWD_HASH_V1: u8 = 1;
-
-/// 计算 v2 口令哈希：`hex(scrypt(password, salt, N=16384, r=8, p=1, dkLen=32))`。
-///
-/// 与 v1 的 `sha256(salt:password)` 相比，单次校验成本提升约 5-6 个数量级，
-/// 使离线字典攻击在实用时间尺度上不可行。
-pub fn hash_password_v2(password: &str, salt: &str) -> String {
-    let params = scrypt_params();
-    let mut out = [0u8; 32];
-    scrypt(password.as_bytes(), salt.as_bytes(), &params, &mut out).expect("scrypt 派生失败");
-    out.iter().map(|b| format!("{:02x}", b)).collect()
-}
-
-/// 计算 v1 口令哈希（仅用于兼容校验与迁移）。
-pub fn hash_password(password: &str, salt: &str) -> String {
-    let mut buf = Vec::with_capacity(salt.len() + 1 + password.len());
-    buf.extend_from_slice(salt.as_bytes());
-    buf.push(b':');
-    buf.extend_from_slice(password.as_bytes());
-    sha256(&buf).iter().map(|b| format!("{:02x}", b)).collect()
-}
-
-/// 恒定时间字节比较，避免口令校验的时序侧信道。
+/// 恒定时间字节比较，避免校验路径的时序侧信道。
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -157,13 +132,6 @@ fn sha256(data: &[u8]) -> Vec<u8> {
     Sha256::digest(data).to_vec()
 }
 
-/// 生成 n 字节随机十六进制字符串。
-pub fn random_hex(n: usize) -> String {
-    let mut bytes = vec![0u8; n];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
-}
-
 /// 生成 len 字节密码学随机数据。
 ///
 /// 预留：凭证密钥、盐值等场景使用；当前由 `generate_credential_key`
@@ -175,38 +143,9 @@ pub fn random_bytes(len: usize) -> Vec<u8> {
     buf
 }
 
-/// 生成可读性优先的随机口令（用于取代默认 admin 口令）。
-///
-/// 字母表刻意排除易混淆字符（0/O、1/l/I），长度 16，熵约 91 bit。
-pub fn generate_passphrase(len: usize) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-    let mut rng = rand::thread_rng();
-    // 公平取模：丢弃超出 256/len 整数倍范围的字节，避免模偏置
-    let fair_range = (256 / ALPHABET.len()) * ALPHABET.len();
-    let mut out = String::with_capacity(len);
-    while out.len() < len {
-        let b: u8 = rng.gen();
-        if (b as usize) >= fair_range {
-            continue;
-        }
-        out.push(ALPHABET[b as usize % ALPHABET.len()] as char);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pwd_hash_v2_is_deterministic_and_salt_sensitive() {
-        let h1 = hash_password_v2("s3cret", "saltA");
-        let h2 = hash_password_v2("s3cret", "saltA");
-        let h3 = hash_password_v2("s3cret", "saltB");
-        assert_eq!(h1, h2);
-        assert_ne!(h1, h3);
-        assert_eq!(h1.len(), 64);
-    }
 
     #[test]
     fn constant_time_eq_works() {
@@ -214,14 +153,6 @@ mod tests {
         assert!(!constant_time_eq(b"abc", b"abd"));
         assert!(!constant_time_eq(b"abc", b"ab"));
         assert!(constant_time_eq(b"", b""));
-    }
-
-    #[test]
-    fn passphrase_has_expected_shape() {
-        let p = generate_passphrase(16);
-        assert_eq!(p.len(), 16);
-        assert!(p.chars().all(|c| c.is_ascii_alphanumeric()));
-        assert_ne!(p, generate_passphrase(16));
     }
 
     #[test]

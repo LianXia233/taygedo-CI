@@ -218,11 +218,6 @@ impl Store {
         Ok(true)
     }
 
-    /// 强制写入密钥环（显式轮换身份密钥时使用）。
-    pub fn save_keyring(&self, kr: &KeyRing) -> Result<(), String> {
-        self.write_managed(FileIdentity::KeyRing, kr, true)
-    }
-
     /// 校验密钥环文件权限，返回诊断信息（供启动时自检）。
     ///
     /// 即使内容已加密，元数据（大小、改名时间）仍可能泄漏信息，

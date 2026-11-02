@@ -9,7 +9,8 @@ services:
     environment:
       TAYGEDO_LISTEN: 0.0.0.0:8787
       TAYGEDO_DATA_DIR: /data
-      # 首次启动的 WebUI 登录密码（可选；不设置则自动生成随机密码打印到日志）
-      TAYGEDO_WEB_PASSWORD: ${TAYGEDO_WEB_PASSWORD:-}
+      # 访问控制：只接受回环或 lan_cidrs 白名单来源（无内置 WebUI、无自有登录）。
+      # 容器内 127.0.0.1 不是宿主机，外部调用需要放通内网网段，
+      # 例如把白名单收窄到实际调用方：TAYGEDO_LAN_CIDRS: "192.168.1.0/24"
     volumes:
       - ./data:/data

@@ -38,11 +38,11 @@ g.s-div>line{stroke:#444441}
   </marker>
 </defs>
 <g class="s-t1"><text x="40" y="30" font-size="16" font-weight="500" fill="#2C2C2A">taygedo 应用层端到端加密原理</text></g>
-<g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">加密位于浏览器前端与后端服务之间：两端各自持有明文，链路中间只有密文。</text></g>
+<g class="s-t3"><text x="40" y="52" font-size="12" fill="#888780">独立部署下加密位于外部 API 客户端与后端之间；OpenWrt 由 rpcd/ucode 经回环调用，不使用该层。</text></g>
 <g class="s-blue">
 <rect x="40" y="74" width="200" height="96" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
-<text x="140" y="96" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">浏览器前端</text>
-<text x="140" y="111" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">WebUI / LuCI 页面</text>
+<text x="140" y="96" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">外部 API 客户端</text>
+<text x="140" y="111" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">taygedo-crypto.js 调用方</text>
 <text x="140" y="129" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">持有会话密钥</text>
 <text x="140" y="146" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">此框内为明文</text>
 </g>

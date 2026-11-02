@@ -84,5 +84,5 @@ g.s-div>line{stroke:#444441}
 <text x="222" y="192" font-size="14" font-weight="500" fill="#173404" text-anchor="middle" dominant-baseline="central">完成</text>
 <text x="222" y="208" font-size="12" fill="#3B6D11" text-anchor="middle" dominant-baseline="central">本日不再触发</text>
 </g>
-<g class="s-t3"><text x="40" y="256" font-size="12" fill="#888780">任一环节失败都会写入日志，可在 WebUI 或 LuCI 页面查看并手动重试。</text></g>
+<g class="s-t3"><text x="40" y="256" font-size="12" fill="#888780">任一环节失败都会写入日志，可在 LuCI 页面查看并手动重试。</text></g>
 </svg>

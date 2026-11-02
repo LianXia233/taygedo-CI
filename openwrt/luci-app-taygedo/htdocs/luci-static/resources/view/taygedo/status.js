@@ -485,17 +485,12 @@ function settingsModalHtml() {
 		'      <div class="tgd-field"><label>分享平台</label><input class="tgd-input" id="tgd-cfg-share" placeholder="qq / wechat / weibo"></div>',
 		'      <button class="tgd-btn tgd-primary" id="tgd-cfg-save" style="width:100%;min-height:44px;margin-top:4px">保存设置</button>',
 		'      <hr class="tgd-divider">',
-		'      <div class="tgd-section-title">传输加密</div>',
-		'      <div class="tgd-field"><label>加密策略</label>',
-		'        <select class="tgd-input" id="tgd-cfg-crypto-policy">',
-		'          <option value="auto">auto - 内网明文、外网强制加密</option>',
-		'          <option value="always">always - 始终强制加密</option>',
-		'          <option value="never">never - 始终明文（仅限可信内网）</option>',
-		'        </select></div>',
-		'      <div class="tgd-field"><label>本机内网网段（逗号分隔 CIDR）</label><input class="tgd-input" id="tgd-cfg-lan-cidrs" placeholder="192.168.0.0/16,10.0.0.0/8"></div>',
-		'      <button class="tgd-btn tgd-primary" id="tgd-crypto-save" style="width:100%;min-height:44px;margin-top:4px">保存加密设置</button>',
+		'      <div class="tgd-section-title">来源准入</div>',
+		'      <div class="tgd-field"><label>受信来源网段（逗号分隔 CIDR）</label><input class="tgd-input" id="tgd-cfg-lan-cidrs" placeholder="192.168.0.0/16,10.0.0.0/8"></div>',
+		'      <button class="tgd-btn tgd-primary" id="tgd-crypto-save" style="width:100%;min-height:44px;margin-top:4px">保存网段</button>',
 		'      <hr class="tgd-divider">',
-		'      <div class="tgd-hint">登录与账号密码由 OpenWrt（LuCI）负责，本应用不再提供独立登录口令。</div>',
+		'      <div class="tgd-hint">登录与账号密码由 OpenWrt（LuCI）负责，本应用不提供独立登录口令。</div>',
+		'      <div class="tgd-hint">该形态的数据通道是 rpcd 回环内部通道，不存在浏览器侧加密协商，因此没有加密策略可配。</div>',
 		'    </div>',
 		'  </div>',
 		'</div>'
@@ -736,8 +731,6 @@ function openSettings() {
 		document.getElementById('tgd-cfg-coin').checked = !!cfg.coin_tasks;
 		document.getElementById('tgd-cfg-cloud').checked = !!cfg.cloud_duration;
 		document.getElementById('tgd-cfg-share').value = cfg.share_platform || 'qq';
-		var policySel = document.getElementById('tgd-cfg-crypto-policy');
-		if (policySel) policySel.value = cfg.crypto_policy || 'auto';
 		var cidrs = document.getElementById('tgd-cfg-lan-cidrs');
 		if (cidrs) cidrs.value = cfg.lan_cidrs || '';
 		document.getElementById('tgd-settings-modal').classList.add('tgd-show');
@@ -759,10 +752,9 @@ function saveConfig() {
 
 function saveCrypto() {
 	TGD.api('/api/config', 'POST', {
-		crypto_policy: document.getElementById('tgd-cfg-crypto-policy').value,
 		lan_cidrs: document.getElementById('tgd-cfg-lan-cidrs').value.trim()
 	}).then(function () {
-		TGD.toast('加密设置已保存', 'tgd-ok');
+		TGD.toast('来源网段已保存', 'tgd-ok');
 	}).catch(function (e) { TGD.toast(e.message, 'tgd-err'); });
 }
 

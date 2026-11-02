@@ -8,14 +8,13 @@ PROG=/usr/bin/taygedo-rs
 
 start_service() {
     local enabled port data_dir
-    local crypto_policy lan_cidrs luci_session_check
+    local lan_cidrs luci_session_check
     config_load 'taygedo'
     config_get_bool enabled 'main' 'enabled' 0
     [ "$enabled" -eq 0 ] && return 0
 
     config_get port 'main' 'port' '8787'
     config_get data_dir 'main' 'data_dir' '/etc/taygedo'
-    config_get crypto_policy 'main' 'crypto_policy' 'auto'
     config_get lan_cidrs 'main' 'lan_cidrs' ''
     config_get_bool luci_session_check 'main' 'luci_session_check' 1
 
@@ -55,8 +54,7 @@ start_service() {
     procd_set_param env \
         TAYGEDO_LISTEN="127.0.0.1:${port}" \
         TAYGEDO_DATA_DIR="$data_dir" \
-        TAYGEDO_LUCI_SESSION_CHECK="$luci_session_check" \
-        TAYGEDO_CRYPTO_POLICY="$crypto_policy"
+        TAYGEDO_LUCI_SESSION_CHECK="$luci_session_check"
     # 空值不传，交由后端回落到内置默认网段（避免传空串把白名单清空）
     [ -n "$lan_cidrs" ] && procd_append_param env TAYGEDO_LAN_CIDRS="$lan_cidrs"
     procd_set_param respawn 3600 5 5

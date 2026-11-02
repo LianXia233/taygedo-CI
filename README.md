@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🌸 塔吉多每日自动签到 (Rust 重写版)
+# 🌸 塔吉多每日自动签到
 
 <p align="center">
   <strong>高性能、单文件绿色运行的塔吉多（幻塔 / 异环等）全自动化签到与资产托管系统</strong>

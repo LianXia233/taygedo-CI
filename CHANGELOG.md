@@ -25,6 +25,27 @@
 - **修复 ubus 会话解析与冷会话自调用死锁**：`parse_session_get` 兼容 `{"values":{"username":...}}`；
   后端在 OpenWrt + 回环路径不再嵌套 `ubus call session get`。
 
+### CI · GitHub Actions 升级到 Node 24 运行时
+
+GitHub Actions 已弃用 Node.js 20，`checkout@v4` / `setup-node@v4` / `upload-artifact@v4`
+等步骤被强制在 Node 24 上运行并持续输出弃用告警。本次只做版本升级，不改动任何步骤语义
+（inputs、缓存键、产物路径、artifact 名称、条件表达式、权限声明均保持原样）：
+
+| action | 旧版本 | 新版本 | 说明 |
+|---|---|---|---|
+| `actions/checkout` | v4 | v7 | v5 起为 node24；v6 改了凭据存放位置（对 `git` 命令透明）；v7 仅限制 fork PR 在 `pull_request_target` / `workflow_run` 下默认签出，本仓库不用这两种触发 |
+| `actions/setup-node` | v4 | v7 | v5 起为 node24；v6 的自动缓存只在 `package.json` 声明 npm 包管理时生效，v7 移除了 `registry-url` 上的空 token 回退（本步骤只设 `node-version`，无影响） |
+| `actions/upload-artifact` | v4 | v7 | v6 起默认 node24，v7 新增可选 `archive: false` 直传，默认行为不变 |
+| `actions/download-artifact` | v4 | v8 | v7 起默认 node24，v8 新增按摘要校验失败即报错（`digest-mismatch: error`），本仓库按名称下载，路径语义未变 |
+| `softprops/action-gh-release` | v2 | v3 | v2.6.2 是最后一个 v2 版本且不再维护（node20），v3 迁移到 node24，inputs 未变 |
+
+未升级项：`rustsec/audit-check@v2` 的 `v2` 分支仍是 `node20`，上游没有迁移到 node24 的
+新 major（只有未发版的 `main`）。保持原样：`continue-on-error: true` 的非阻塞策略不变，
+GitHub 会继续强制它在 Node 24 上运行、并在 `dependency-audit` 作业日志里保留该提示。
+
+无需升级：`Swatinem/rust-cache@v2` 的 `v2` 分支已是 `node24`；`dtolnay/rust-toolchain@stable`
+与 `taiki-e/install-action@v2` 是 composite action，不使用 Node 运行时。
+
 ### 破坏性变更 · 内置 WebUI 彻底移除，OpenWrt 改走内部 ucode/rpcd 通道
 
 - **内置 WebUI 已删除**（不是"保留但不启用"）：`src/ui.html`、`/` 首页路由、

@@ -47,11 +47,19 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
-      - name: Clippy (deny warnings)
+      # 两种构建形态都要过 lint：feature 切换最容易漏掉的就是
+      # "只在另一种形态下才编译"的分支（未使用变量、dead_code）。
+      - name: Clippy (deny warnings, webui)
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: Unit tests
+      - name: Clippy (deny warnings, openwrt)
+        run: cargo clippy --all-targets --no-default-features --features openwrt -- -D warnings
+
+      - name: Unit tests (webui)
         run: cargo test --all-targets --locked
+
+      - name: Unit tests (openwrt)
+        run: cargo test --all-targets --locked --no-default-features --features openwrt
 
       # 端到端协议测试：用**真实二进制** + **仓库里真实的前端客户端文件**
       # 走完整链路（清单验签 → 握手验签 → 登录 → 业务 → 重放/搬移/降级拒绝）。
@@ -91,4 +99,66 @@ jobs:
         with:
           name: e2e-server-log
           path: server.log
+          if-no-files-found: ignore
+
+      # -----------------------------------------------------------------------
+      # OpenWrt 形态冒烟：证明"WebUI 入口根本不存在"，而不是"存在但返回 410"。
+      #
+      # 这一步会覆盖 target/debug 下的二进制（feature 不同），因此必须排在
+      # E2E 之后。检查项与代码里的承诺一一对应：
+      #   1. 元信息标明 edition=openwrt / webui_enabled=false
+      #   2. 首页、登录、登出、改密、静态清单、握手端点全部 404（不是 410）
+      #   3. 业务接口无 LuCI 会话 → 401；回环 + 形态合法会话 → 200
+      # -----------------------------------------------------------------------
+      - name: Build openwrt binary
+        run: cargo build --locked --no-default-features --features openwrt
+
+      - name: OpenWrt form smoke test
+        run: |
+          set -euo pipefail
+          DATA_DIR="$(mktemp -d)"
+          TAYGEDO_DATA_DIR="$DATA_DIR" \
+          TAYGEDO_LISTEN=127.0.0.1:18788 \
+            ./target/debug/taygedo-rs > openwrt.log 2>&1 &
+          SRV_PID=$!
+          trap 'kill $SRV_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:18788/api/meta >/dev/null 2>&1; then break; fi
+            sleep 0.5
+          done
+
+          meta="$(curl -fsS http://127.0.0.1:18788/api/meta)"
+          echo "meta: $meta"
+          echo "$meta" | grep -q '"edition":"openwrt"'
+          echo "$meta" | grep -q '"webui_enabled":false'
+
+          for p in / /api/login /api/logout /api/password /static/manifest.json /api/crypto/handshake; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:18788$p")"
+            echo "$p -> $code"
+            if [ "$code" != "404" ]; then
+              echo "错误：$p 期望 404（路由不存在），实际 $code" >&2
+              exit 1
+            fi
+          done
+
+          code="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18788/api/accounts)"
+          echo "无 LuCI 会话 /api/accounts -> $code"
+          [ "$code" = "401" ]
+
+          code="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'X-TGD-Luci-Session: 0123456789abcdef0123456789abcdef' \
+            http://127.0.0.1:18788/api/accounts)"
+          echo "内部通道 /api/accounts -> $code"
+          [ "$code" = "200" ]
+
+          kill $SRV_PID 2>/dev/null || true
+          wait $SRV_PID 2>/dev/null || true
+          trap - EXIT
+
+      - name: Upload openwrt server log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: openwrt-smoke-log
+          path: openwrt.log
           if-no-files-found: ignore

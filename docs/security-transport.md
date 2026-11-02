@@ -331,10 +331,10 @@ file:/static/vendor/...=<sha256>:<size>
 ...                                  # 按 path 升序
 ```
 
-覆盖的资源：`/static/taygedo-crypto.js`、`/static/web_guard.js`、
-`/static/vendor/noble-loader.js` 与 7 个 noble 模块，共 10 个；独立部署另加
-首页 `/`（共 11 个）。OpenWrt 形态不提供首页，清单会剔除 `/`，否则前端的
-逐资源哈希校验会因 404 整体失败。
+覆盖的资源（仅 `webui` 产物）：`/static/taygedo-crypto.js`、`/static/web_guard.js`、
+`/static/vendor/noble-loader.js` 与 7 个 noble 模块，再加首页 `/`，共 11 个。
+`openwrt` 产物的 `ASSETS` 为空——那些资源文件不参与 `include_str!`，
+二进制里根本没有对应字节，清单自然是空清单（仍会签名，避免"空"与"未签名"混淆）。
 
 首页下发的字节直接取自清单里的同一份编译期常量（`manifest::asset("/")`），
 不读外部覆盖文件——否则清单哈希与页面字节会脱钩，完整性门禁反而变成登录障碍。
@@ -356,8 +356,9 @@ file:/static/vendor/...=<sha256>:<size>
 也就是说：**资源校验不通过时，业务 JS 不会被执行，界面不可用。**
 不是"警告一下继续用"。
 
-> 清单固定为 10 个静态资源，与运行目标无关：首页已移除，不再有"按目标裁剪"的分支。
-> OpenWrt 侧不加载这些脚本，因此清单只对独立部署的外部客户端有意义。
+> 清单内容由**编译期**的 `ASSETS` 决定，没有"按运行期模式过滤"的分支：
+> `webui` 产物是 11 项，`openwrt` 产物是 0 项。后者也没有 `/static/*` 路由，
+> 因此清单只对 `webui` 形态的浏览器与外部客户端有意义。
 
 ### 7.3 这套机制能挡什么、不能挡什么
 
@@ -391,13 +392,13 @@ file:/static/vendor/...=<sha256>:<size>
 
 ## 8. 鉴权与访问控制
 
-访问控制随形态不同，**独立部署有两层**（来源 + 自有口令登录），
-**OpenWrt 也是两层**（来源 + LuCI 会话），但凭据来源完全不同：
+形态在**编译期**由 Cargo feature 固定（`webui` / `openwrt`），不存在运行期探测，
+也不接受环境变量改写。两种形态的访问控制都是两层，但凭据来源完全不同：
 
 | 形态 | 来源限制 | 身份凭据 | 由谁签发/校验 |
 | :--- | :--- | :--- | :--- |
-| 独立部署 | 回环或 `lan_cidrs` | `Authorization: Bearer <token>` | 本服务（登录接口，7 天有效） |
-| OpenWrt | 回环或 `lan_cidrs` | `X-TGD-Luci-Session` | OpenWrt（LuCI/ubus 会话） |
+| `webui`（Windows / Debian / Docker） | 回环或 `lan_cidrs` | `Authorization: Bearer <token>` | 本服务（登录接口，7 天有效） |
+| `openwrt`（LuCI 集成） | 回环或 `lan_cidrs` | `X-TGD-Luci-Session` | OpenWrt（LuCI/ubus 会话） |
 
 ### 8.1 通用：来源限制
 
@@ -408,7 +409,7 @@ file:/static/vendor/...=<sha256>:<size>
   也从根上规避了 CSRF（没有 ambient credential 可用）。Token 只走显式请求头，
   不会随跨站请求自动携带。
 
-### 8.1.1 独立部署：自有口令登录
+### 8.1.1 `webui` 形态：自有口令登录
 
 - `POST /api/login`（**受加密中间件保护**，口令不会以明文上线）→ 返回 64 位 hex token。
 - 口令以 `scrypt(N=16384,r=8,p=1)` + 16 字节盐存储；v1（单轮 sha256）仅用于
@@ -422,9 +423,11 @@ file:/static/vendor/...=<sha256>:<size>
 
 ### 8.2 OpenWrt：鉴权交给 OpenWrt（LuCI/ubus 会话）
 
-- 入口只有 LuCI 菜单「服务 → 塔吉多签到」。`GET /` 返回 `404 webui_retired`；
-  `/api/login`、`/api/logout`、`/api/password` 返回 `410 deprecated_endpoint`
-  （路由保留只为让语义显式，不提供任何自有凭据）。
+- 入口只有 LuCI 菜单「服务 → 塔吉多签到」。该产物**没有** `/`、`/api/login`、
+  `/api/logout`、`/api/password`、`/static/*`、`/api/crypto/handshake` 路由——
+  请求它们得到的是 axum 默认 `404`，不是"存在但拒绝"的 `404 webui_retired` /
+  `410 deprecated_endpoint`。这些 handler 与 `ui.html`、noble 前端资产都不参与编译，
+  因此也不存在"被误开启"的可能。
 - 数据通道：LuCI 视图 → ubus 对象 `luci.taygedo` → rpcd ucode 插件
   （`/usr/share/rpcd/ucode/luci.taygedo`）→ `curl http://127.0.0.1:<port>`。
   浏览器不直连应用端口，也不加载 `taygedo-crypto.js`、不构造 `X-TGD-Envelope` 信封。
@@ -458,8 +461,10 @@ file:/static/vendor/...=<sha256>:<size>
   刻意不授予 `/etc/taygedo/**` 文件读写，避免私钥经 Web 侧导出。
 - 排障降级：`TAYGEDO_LUCI_SESSION_CHECK=0`（UCI `option luci_session_check '0'`）
   退回"仅回环放行"。这是显式开关，不是失败回退路径，默认关闭。
-- `/api/meta` 公开返回 `edition`（openwrt / standalone）、`auth_mode`
+- `/api/meta` 公开返回 `edition`（`openwrt` / `webui`）、`auth_mode`
   （`luci_session` / `token` / `none`）与加密策略字段，供排障核对，不含任何凭据。
+  `openwrt` 形态**不返回** `crypto_proto` / `crypto_alg` / 身份指纹：该形态没有握手
+  端点，返回一组无消费者的协议参数只会让人误以为存在浏览器侧加密通道。
 - 已知限制与代价：内部通道路径下，**本机任意 root 进程都可以直连回环端口**，
   这条路径不再由服务端做对话校验——但 root 本来就能读 `/etc/taygedo` 与
   `/etc/config/taygedo`，与既有权限等价，不是新增攻击面。受限的 LuCI 用户

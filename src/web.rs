@@ -1,29 +1,31 @@
-//! Web 服务：REST API + 内置 WebUI + 应用层加密。
+//! Web 服务：业务 REST API（按构建形态挂载不同的入口与鉴权）。
 //!
-//! ## 定位
+//! ## 两种形态在编译期分离
 //!
-//! 同一份二进制有两种部署形态，区别在于**是否有内置 WebUI**：
+//! 同一个 crate 通过 Cargo feature 产出两个**互斥**的二进制，运行期不再做
+//! 任何形态探测：
 //!
-//! - **独立部署**（Windows / Debian / Linux 服务器 / Docker）：自带 WebUI
-//!   （`GET /`）与自有登录/改密接口，业务 API 需 `Authorization: Bearer <token>`；
-//!   访问范围另受 `lan_cidrs` 约束（非受信来源直接 403）。
-//! - **OpenWrt 集成模式**：仅监听回环，入口是 LuCI 的 rpcd/ucode 插件；
-//!   不提供 WebUI（`GET /` 返回 404），也没有自有口令登录，鉴权由
-//!   OpenWrt 的 LuCI/ubus 会话负责（`X-TGD-Luci-Session`）。
+//! - **`webui`**（Windows / Debian / Docker / 独立服务器）：自带首页、
+//!   登录/登出/改密接口与静态资源，业务 API 需 `Authorization: Bearer <token>`；
+//!   另有应用层加密信封（X25519 + Ed25519 + XChaCha20-Poly1305）。
+//! - **`openwrt`**：**只有业务 API 与元信息**。没有首页、没有登录/改密、
+//!   没有静态资源、没有握手端点——这些路由不是"存在但返回 404/410"，而是
+//!   根本不在路由表里。唯一入口是 LuCI，数据由 rpcd/ucode 在服务端经回环
+//!   调用，鉴权交给 LuCI/ubus 会话（`X-TGD-Luci-Session`）。
 //!
 //! ## 分层结构
 //!
 //! ```text
-//! 请求
-//!  ├─ cors_middleware        来源白名单（仅对已配置来源回显 Origin）
-//!  ├─ crypto_middleware      应用层加密：解密请求体 / 加密响应体
-//!  │   ├─ /api/crypto/handshake  握手（带速率限制）
-//!  │   └─ 其余 /api/*            按策略要求加密（含 /api/login）
-//!  └─ auth_middleware        鉴权：Bearer token（独立部署）
-//!                            或 受信来源 + LuCI 会话（OpenWrt）
+//! webui                              openwrt
+//!  请求                               请求
+//!   ├─ cors_middleware                 ├─ cors_middleware
+//!   ├─ crypto_middleware               └─ auth_middleware
+//!   │   ├─ /api/crypto/handshake           ├─ 来源白名单
+//!   │   └─ 其余 /api/* 按策略加解密         └─ LuCI/ubus 会话
+//!   └─ auth_middleware（Bearer token）
 //! ```
 //!
-//! ## 加密策略（`crypto_policy`）
+//! ## 加密策略（`crypto_policy`，仅 `webui`）
 //!
 //! - `auto`：受信来源（回环/内网白名单）可明文直通；其余来源**强制**加密。
 //! - `always`：任何来源都要求加密，未加密请求返回 428。
@@ -38,34 +40,37 @@ use std::sync::Arc;
 use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
-use axum::response::{Html, IntoResponse, Response};
+#[cfg(feature = "webui")]
+use axum::response::Html;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 
+#[cfg(feature = "openwrt")]
 use crate::luci_session;
 use crate::service::{self, AppState};
+#[cfg(feature = "webui")]
 use crate::web_security::middleware::crypto_middleware;
+#[cfg(feature = "webui")]
 use crate::web_security::{self, CryptoError};
 
-/// 握手路径。
+/// 握手路径（仅 `webui` 形态注册）。
+#[cfg(feature = "webui")]
 const HANDHAKE_PATH: &str = "/api/crypto/handshake";
 
-/// LuCI 会话头（OpenWrt 集成模式）。
+/// LuCI 会话头（仅 `openwrt` 形态）。
 ///
 /// 与加密协议自身的 `X-TGD-Session`（加密会话号）**必须区分**：后者是本服务
 /// 与应用层加密握手的会话标识，前者是 OpenWrt 的 LuCI/ubus 会话标识。
+#[cfg(feature = "openwrt")]
 const LUCI_SESSION_HEADER: &str = "X-TGD-Luci-Session";
 
+/// `webui` 形态路由表：首页 + 登录 + 加密握手 + 元信息 + 静态资源。
+#[cfg(feature = "webui")]
 pub fn router(state: Arc<AppState>) -> Router {
-    // 公开路由：首页 + 登录 + 加密握手 + 服务元信息 + 身份公钥 + 静态资源。
-    //
-    // 说明：静态资源（含签名清单）必须公开可读——客户端要先拿到它们才能
-    // 建立加密会话。它们的完整性由 Ed25519 签名清单保证，而不是靠鉴权。
-    //
-    // 首页与 `/api/login` 在 OpenWrt 上一律返回 404/410（内置 WebUI 不在该
-    // 形态提供），见 handler 内的版本判定——路由保留是为了让语义显式，
-    // 而不是让请求落到一个含糊的 axum 404。
+    // 公开路由。静态资源（含签名清单）必须公开可读——客户端要先拿到它们
+    // 才能建立加密会话；完整性由 Ed25519 签名清单保证，而不是靠鉴权。
     let public = Router::new()
         .route("/", get(index))
         .route("/api/login", post(login_api))
@@ -102,6 +107,44 @@ pub fn router(state: Arc<AppState>) -> Router {
             state.clone(),
             crypto_middleware,
         ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            cors_middleware,
+        ))
+        .with_state(state)
+}
+
+/// `openwrt` 形态路由表：**只有**业务 API 与元信息。
+///
+/// 首页、登录、登出、改密、静态资源、加密握手全部不在表里——请求它们得到的是
+/// axum 的默认 404，而不是一条"本服务承认但不提供"的语义化响应。这是刻意
+/// 设计的：OpenWrt 上没有任何浏览器侧消费者，保留占位路由只会扩大可探测面，
+/// 也会让人误以为存在一个"被关掉的 WebUI"。
+///
+/// 唯一入口是 LuCI：浏览器 → LuCI 视图 → ubus `luci.taygedo` → rpcd/ucode
+/// → `http://127.0.0.1:<port>`（回环内部通道）。
+#[cfg(feature = "openwrt")]
+pub fn router(state: Arc<AppState>) -> Router {
+    // LuCI 的 ucode 插件会先取 `/api/meta` 探活，因此它必须免鉴权。
+    let public = Router::new().route("/api/meta", get(meta_api));
+
+    let protected = Router::new()
+        .route("/api/accounts", get(list_accounts).post(login))
+        .route("/api/accounts/{id}", delete(delete_account))
+        .route("/api/accounts/{id}/signin", post(signin))
+        .route("/api/accounts/{id}/schedule", post(set_schedule))
+        .route("/api/send-code", post(send_code))
+        .route("/api/config", get(get_config).post(update_config))
+        .route("/api/logs", get(get_logs))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
+    // 不挂 crypto_middleware：内部通道是回环明文，且没有握手端点，
+    // 挂了只会让每个请求多走一次策略判定，没有任何消费者。
+    public
+        .merge(protected)
         .layer(middleware::from_fn_with_state(
             state.clone(),
             cors_middleware,
@@ -252,6 +295,7 @@ fn extract_host(s: &str) -> Option<String> {
 // 握手
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "webui")]
 #[derive(Deserialize)]
 struct HandshakeReq {
     /// 协议版本，必须为 `taygedo/v2`。
@@ -262,6 +306,7 @@ struct HandshakeReq {
     client_nonce: String,
 }
 
+#[cfg(feature = "webui")]
 /// 握手：建立加密会话。免鉴权（会话必须在鉴权之前建立）。
 ///
 /// 响应中包含服务端 Ed25519 对完整 Transcript 的签名；客户端**必须**先
@@ -324,6 +369,7 @@ async fn handshake_api(
     ))
 }
 
+#[cfg(feature = "webui")]
 /// 服务端身份公钥与指纹。
 ///
 /// 仅返回**公钥**与指纹，不含任何私钥材料。客户端首次访问（TOFU）用它
@@ -344,11 +390,12 @@ async fn identity_api(State(state): State<Arc<AppState>>) -> Response {
     resp
 }
 
+#[cfg(feature = "webui")]
 /// 签名清单缓存。清单内容在编译期嵌入，运行期不会变化，
 /// 只有身份密钥（随进程）会变，因此缓存在进程内即可。
 static MANIFEST_CACHE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
 
-/// 内置 WebUI 首页。
+/// 内置 WebUI 首页（仅 `webui` 形态存在此路由）。
 ///
 /// **下发的字节必须与签名清单中的 `/` 条目同源**，因此这里直接取
 /// `manifest::asset("/")`（编译期嵌入的那份），而不是读外部文件：
@@ -357,12 +404,8 @@ static MANIFEST_CACHE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new()
 /// 那等于给自己造了一个"改个页面就登不进去"的坑。
 ///
 /// 需要改界面就重编二进制：签名清单即可信字节的唯一来源。
+#[cfg(feature = "webui")]
 async fn index() -> Response {
-    // OpenWrt 集成模式：内置 WebUI 不在该形态提供，入口是 LuCI。
-    // 保留路由并显式返回，避免出现"打开 8787 却拿到一个服务不承认的页面"。
-    if service::is_openwrt() {
-        return webui_retired();
-    }
     let content = web_security::manifest::asset("/").unwrap_or("");
     (
         [(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"))],
@@ -371,30 +414,13 @@ async fn index() -> Response {
         .into_response()
 }
 
-/// 内置 WebUI 在 OpenWrt 上不提供（入口是 LuCI 菜单）。
-fn webui_retired() -> Response {
-    (
-        StatusCode::NOT_FOUND,
-        Json(serde_json::json!({
-            "ok": false,
-            "code": "webui_retired",
-            "error": "OpenWrt 上不提供内置 WebUI：请使用 LuCI 菜单「服务 → 塔吉多签到」，鉴权由 LuCI/ubus 会话负责",
-            "luci_entry": "服务 → 塔吉多签到",
-        })),
-    )
-        .into_response()
-}
-
-/// 静态资源签名清单。
-///
-/// OpenWrt 上清单**不含首页 `/`**：该形态不下发 WebUI，首页返回 404；
-/// 而前端完整性校验会逐个拉取清单条目，若仍列出 `/` 会让校验整体失败。
+/// 静态资源签名清单（仅 `webui` 形态注册）。
+#[cfg(feature = "webui")]
 async fn manifest_api(State(state): State<Arc<AppState>>) -> Response {
     let bytes = MANIFEST_CACHE.get_or_init(|| {
         let m = web_security::manifest::build(
             state.crypto.identity(),
             web_security::now_unix().max(0) as u64,
-            !service::is_openwrt(),
         );
         serde_json::to_vec(&m).unwrap_or_else(|_| b"{}".to_vec())
     });
@@ -408,6 +434,7 @@ async fn manifest_api(State(state): State<Arc<AppState>>) -> Response {
     resp
 }
 
+#[cfg(feature = "webui")]
 /// 静态资源（编译期嵌入，与实际签名的字节完全一致）。
 async fn static_asset(Path(path): Path<String>) -> Response {
     let full = format!("/static/{path}");
@@ -428,18 +455,16 @@ async fn static_asset(Path(path): Path<String>) -> Response {
 // 鉴权中间件
 // ---------------------------------------------------------------------------
 
-/// 鉴权中间件。
+/// 鉴权中间件（`webui` 形态）：受信来源 + Bearer token。
 ///
 /// 两道门，均取自服务端可验证的信息，**不接受请求体声明**：
 ///
 /// 1. **来源**：回环或 `lan_cidrs` 命中的受信地址。非受信来源一律 403，
 ///    因此即使服务被误监听在 `0.0.0.0`，公网来源也进不来业务接口。
-/// 2. **身份**：
-///    - 独立部署：`Authorization: Bearer <token>`（登录接口签发，7 天有效）。
-///    - OpenWrt 集成模式：`X-TGD-Luci-Session`，由 rpcd/ucode 内部通道携带，
-///      详细路径见 [`openwrt_auth`]。
+/// 2. **身份**：`Authorization: Bearer <token>`（登录接口签发，7 天有效）。
 ///
 /// 操作主体一律从 [`AuthIdentity`] 取，绝不相信请求体里自称的用户名。
+#[cfg(feature = "webui")]
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     req: axum::extract::Request,
@@ -460,36 +485,46 @@ async fn auth_middleware(
         );
     }
 
-    // 形态分流：OpenWrt 走 LuCI/ubus 会话；独立部署走自有 Bearer token。
-    if service::is_openwrt() {
-        return openwrt_auth(state, req, next, peer_ip).await;
-    }
-
-    if state.no_auth_allows(peer_ip).await {
-        // 免鉴权放行（仅 OpenWrt 排障路径可置 true，此处属兜底）：
-        // 注入合成身份，供下游区分"匿名"与"已登录"。
-        let mut req = req;
-        req.extensions_mut().insert(AuthIdentity {
-            username: None,
-            via_no_auth: true,
-            token: None,
-        });
-        return next.run(req).await;
-    }
-
     let token = extract_token(&req);
     match state.validate_token(&token) {
         Some(username) => {
             let mut req = req;
             req.extensions_mut().insert(AuthIdentity {
                 username: Some(username),
-                via_no_auth: false,
                 token: Some(token),
             });
             next.run(req).await
         }
         None => api_error(StatusCode::UNAUTHORIZED, "unauthorized", "未授权：请先登录"),
     }
+}
+
+/// 鉴权中间件（`openwrt` 形态）：受信来源 + LuCI/ubus 会话。
+///
+/// 来源判定与 `webui` 形态一致（回环无条件受信，其余必须命中 `lan_cidrs`）；
+/// 身份完全交给 OpenWrt，本服务不签发、不校验任何自有凭据。
+#[cfg(feature = "openwrt")]
+async fn auth_middleware(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let peer_ip = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.ip())
+        .map(normalize_ip);
+
+    let trusted = peer_ip.map(|ip| is_trusted_source(&state, ip));
+    if !trusted.unwrap_or(false) {
+        return api_error(
+            StatusCode::FORBIDDEN,
+            "untrusted_source",
+            "仅接受本机或受信内网来源的请求",
+        );
+    }
+
+    openwrt_auth(req, next, peer_ip).await
 }
 
 /// OpenWrt 集成模式鉴权：受信来源 + 有效 LuCI 会话。
@@ -510,8 +545,8 @@ async fn auth_middleware(
 ///   判无效（死锁根因）。
 /// - **其它来源**（OpenWrt 下的非回环来源）：保留 `ubus call session get` 校验，
 ///   不做任何放宽。
+#[cfg(feature = "openwrt")]
 async fn openwrt_auth(
-    state: Arc<AppState>,
     req: axum::extract::Request,
     next: Next,
     peer_ip: Option<std::net::IpAddr>,
@@ -522,7 +557,6 @@ async fn openwrt_auth(
         let mut req = req;
         req.extensions_mut().insert(AuthIdentity {
             username: None,
-            via_no_auth: true,
             token: None,
         });
         return next.run(req).await;
@@ -536,13 +570,12 @@ async fn openwrt_auth(
         .unwrap_or_default();
 
     let loopback = peer_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
-    match session_gate(state.is_openwrt, loopback, &sid) {
+    match session_gate(loopback, &sid) {
         SessionGate::InternalChannel => {
             let mut req = req;
             req.extensions_mut().insert(AuthIdentity {
                 // 身份主体由 OpenWrt 会话决定；需要审计时以 LuCI 会话号为准。
                 username: None,
-                via_no_auth: false,
                 token: None,
             });
             next.run(req).await
@@ -568,7 +601,6 @@ async fn openwrt_auth(
             let mut req = req;
             req.extensions_mut().insert(AuthIdentity {
                 username: None,
-                via_no_auth: false,
                 token: None,
             });
             next.run(req).await
@@ -577,6 +609,7 @@ async fn openwrt_auth(
 }
 
 /// 会话门的判定结果（纯函数，便于单测；不含任何 I/O）。
+#[cfg(feature = "openwrt")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionGate {
     /// 内部通道放行：OpenWrt + 回环来源 + 会话号形态合法。
@@ -590,17 +623,21 @@ pub enum SessionGate {
     Malformed,
 }
 
-/// 会话门判定：把"来源 + 运行形态 + 会话号"压成一个结果码。
+/// 会话门判定：把"来源 + 会话号"压成一个结果码。
 ///
-/// - OpenWrt + 回环 + 形态合法 → `InternalChannel`（不触发 ubus，避免 rpcd 死锁）
-/// - OpenWrt + 回环 + 形态非法 → `Malformed`（拒绝）
-/// - 非回环来源（OpenWrt 或其它）→ `UbusCheck`，保持原有 ubus 校验强度
+/// 形态已经是编译期常量（本函数只存在于 `openwrt` 构建里），因此不再需要
+/// 一个 `openwrt: bool` 参数——那是运行期分流的残留。
+///
+/// - 回环 + 形态合法 → `InternalChannel`（不触发 ubus，避免 rpcd 死锁）
+/// - 回环 + 形态非法 → `Malformed`（拒绝）
+/// - 非回环来源 → `UbusCheck`，保持原有 ubus 校验强度
 /// - 空会话号 → `Missing`
-pub fn session_gate(openwrt: bool, loopback: bool, sid: &str) -> SessionGate {
+#[cfg(feature = "openwrt")]
+pub fn session_gate(loopback: bool, sid: &str) -> SessionGate {
     if sid.is_empty() {
         return SessionGate::Missing;
     }
-    if openwrt && loopback {
+    if loopback {
         return if luci_session::is_well_formed(sid) {
             SessionGate::InternalChannel
         } else {
@@ -638,11 +675,13 @@ fn api_error(status: StatusCode, code: &str, msg: &str) -> Response {
 /// 已认证身份，由 `auth_middleware` 注入，供 handler 使用。
 ///
 /// 关键点：敏感操作的身份**只能**从这里取，不接受请求体声明。
+///
+/// OpenWrt 形态下身份完全由 LuCI/ubus 持有，本结构只用于让下游代码
+/// 不必区分形态；因此该形态下字段不会被读取。
+#[cfg_attr(feature = "openwrt", allow(dead_code))]
 #[derive(Clone, Debug)]
 pub struct AuthIdentity {
     pub username: Option<String>,
-    /// 是否来自免鉴权放行（此时 `username` 为 None）。
-    pub via_no_auth: bool,
     pub token: Option<String>,
 }
 
@@ -656,6 +695,7 @@ impl AuthIdentity {
     }
 }
 
+#[cfg(feature = "webui")]
 /// 从 `Authorization: Bearer <token>` 提取 token。
 ///
 /// 仅支持单一承载通道：Cookie 会随跨站请求自动携带，一旦启用即引入 CSRF 面；
@@ -669,6 +709,7 @@ fn extract_token(req: &axum::extract::Request) -> String {
         .unwrap_or_default()
 }
 
+#[cfg(feature = "webui")]
 /// 当前请求所属的加密会话号，由 `crypto_middleware` 注入。
 ///
 /// 仅在密文通道上存在；明文通道（内网 auto/never 直通、免鉴权）下不会注入。
@@ -681,6 +722,9 @@ pub struct CryptoSid(pub String);
 /// `None`。handler 因此无需区分"当前是否走加密通道"就能安全地拿到会话号，
 /// 适合"如果有会话就保留它、没有就按明文逻辑处理"这类场景
 /// （典型：`/api/config` 改加密策略时不能把发起请求的会话一并销毁）。
+///
+/// OpenWrt 形态不挂加密中间件，也不存在加密会话，因此恒为 `None`——
+/// 业务 handler 无需为此写形态分支。
 pub struct CryptoCtx(pub Option<String>);
 
 impl<S> axum::extract::FromRequestParts<S> for CryptoCtx
@@ -693,54 +737,45 @@ where
         parts: &mut axum::http::request::Parts,
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
-        Ok(CryptoCtx(
-            parts.extensions.get::<CryptoSid>().map(|c| c.0.clone()),
-        ))
+        #[cfg(feature = "webui")]
+        {
+            Ok(CryptoCtx(
+                parts.extensions.get::<CryptoSid>().map(|c| c.0.clone()),
+            ))
+        }
+        #[cfg(feature = "openwrt")]
+        {
+            let _ = parts;
+            Ok(CryptoCtx(None))
+        }
     }
 }
 
-/// 服务元信息：供调用方判断加密策略与访问控制方式。
+/// 服务元信息（`webui` 形态）。
 ///
-/// 注意：此端点免鉴权（调用方需要先据此决定是否建立加密会话），
-/// 因此**只返回非敏感的模式标志**，不包含任何凭据、路径或密钥信息。
-/// 内置 WebUI 已移除，这里不再有 `webui_enabled` / `must_change_password`
-/// 之类与网页登录相关的字段。
+/// 此端点免鉴权（客户端需要先据此决定是否建立加密会话），因此**只返回
+/// 非敏感的模式标志**，不包含任何凭据、路径或密钥信息。
+#[cfg(feature = "webui")]
 async fn meta_api(
     State(state): State<Arc<AppState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> Json<serde_json::Value> {
     let cfg = state.config.read().await;
     let peer_ip = Some(normalize_ip(addr.ip()));
-    let openwrt = service::is_openwrt();
-    let session_auth = service::luci_session_required();
     let is_lan = peer_ip
         .map(|ip| is_trusted_source(&state, ip))
         .unwrap_or(false);
-    // 与 crypto_middleware 保持一致：OpenWrt 的回环调用是内部通道，始终不收信封。
-    let internal = openwrt && peer_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
+    // 与 crypto_middleware 保持一致：auto 策略下受信来源可明文。
     let require_enc = match cfg.crypto_policy.as_str() {
-        "always" => !internal,
+        "always" => true,
         "never" => false,
         _ => !is_lan,
     };
-    // 访问控制方式：OpenWrt 交给 LuCI/ubus 会话；独立部署走自有 token，
-    // 只有 OpenWrt 排障降级路径才可能出现 none。
-    let no_auth = state.no_auth_allows(peer_ip).await;
-    let auth_mode = if session_auth {
-        "luci_session"
-    } else if no_auth {
-        "none"
-    } else {
-        "token"
-    };
     Json(serde_json::json!({
         "ok": true,
-        // 运行版本：standalone（独立部署）| openwrt（LuCI 内部 rpcd 通道）
-        "edition": if openwrt { "openwrt" } else { "standalone" },
-        // 是否提供内置 WebUI（OpenWrt 上一律 false，LuCI 是唯一入口）
-        "webui_enabled": !openwrt,
-        "auth_mode": auth_mode,
-        "no_auth": no_auth,
+        "edition": service::EDITION,
+        "webui_enabled": true,
+        "auth_mode": "token",
         "crypto_policy": cfg.crypto_policy,
         "crypto_required": require_enc,
         // 协议版本与算法：客户端据此判断"能不能用安全通道"，
@@ -748,13 +783,48 @@ async fn meta_api(
         "crypto_proto": crate::web_security::protocol::PROTO,
         "crypto_alg": crate::web_security::protocol::ALG,
         "crypto_identity_kid": state.crypto.identity_kid(),
-        // OpenWrt 上没有自有口令，因此"必须改口令"不成立
-        "must_change_password": cfg.web_password_must_change && !openwrt,
+        "must_change_password": cfg.web_password_must_change,
+    }))
+}
+
+/// 服务元信息（`openwrt` 形态）。
+///
+/// LuCI 的 ucode 插件用它探活。该形态没有握手端点，因此**不返回**
+/// `crypto_proto` / `crypto_alg` / 身份指纹——返回一组没有消费者的协议
+/// 参数，只会让人误以为存在浏览器侧加密通道。
+#[cfg(feature = "openwrt")]
+async fn meta_api(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Json<serde_json::Value> {
+    let cfg = state.config.read().await;
+    let peer_ip = Some(normalize_ip(addr.ip()));
+    let no_auth = state.no_auth_allows(peer_ip).await;
+    let session_auth = service::luci_session_required();
+    Json(serde_json::json!({
+        "ok": true,
+        "edition": service::EDITION,
+        // LuCI 是唯一入口：不存在"网页登录态"，也没有改密接口。
+        "webui_enabled": false,
+        "entry": "luci",
+        "auth_mode": if session_auth {
+            "luci_session"
+        } else if no_auth {
+            "none"
+        } else {
+            "trusted_source"
+        },
+        "no_auth": no_auth,
+        "crypto_policy": cfg.crypto_policy,
+        // 内部通道是回环明文，本形态不挂信封中间件。
+        "crypto_required": false,
     }))
 }
 
 // ---- DTO ----
 
+/// 自有登录请求（仅 `webui` 形态）。
+#[cfg(feature = "webui")]
 #[derive(Deserialize)]
 struct LoginReq {
     #[serde(default = "default_username")]
@@ -762,6 +832,8 @@ struct LoginReq {
     password: String,
 }
 
+/// 改密请求（仅 `webui` 形态）。
+#[cfg(feature = "webui")]
 #[derive(Deserialize)]
 struct PasswordReq {
     old_password: String,
@@ -778,6 +850,7 @@ struct PasswordReq {
     username: Option<String>,
 }
 
+#[cfg(feature = "webui")]
 fn default_username() -> String {
     "admin".into()
 }
@@ -832,20 +905,15 @@ struct LogsQuery {
 
 // ---- handlers ----
 
-/// WebUI 登录：校验口令并签发 token。
+/// WebUI 登录：校验口令并签发 token（仅 `webui` 形态）。
 ///
 /// 该接口在加密中间件的覆盖范围内（`/api/*`），因此口令不会以明文上线：
 /// 策略要求加密时无信封直接 428，而不是"登录接口就放过"。
-///
-/// OpenWrt 上不提供自有登录（鉴权归 LuCI），一律 410。
+#[cfg(feature = "webui")]
 async fn login_api(
     State(state): State<Arc<AppState>>,
     req: axum::extract::Request,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    if service::is_openwrt() {
-        return Err(deprecated_endpoint("内置 WebUI 登录接口"));
-    }
-
     // 当前请求若走密文通道，取出会话号；登录成功后据此标记该会话已认证。
     let req_sid = req.extensions().get::<CryptoSid>().map(|c| c.0.clone());
 
@@ -904,19 +972,12 @@ async fn login_api(
     })))
 }
 
-/// 登出：吊销当前会话。
+/// 登出：吊销当前会话（仅 `webui` 形态）。
+#[cfg(feature = "webui")]
 async fn logout_api(
     State(state): State<Arc<AppState>>,
     req: axum::extract::Request,
 ) -> Json<serde_json::Value> {
-    if service::is_openwrt() {
-        // OpenWrt 上不存在本服务的登录态：注销请在 LuCI 中进行。
-        return Json(serde_json::json!({
-            "ok": true,
-            "deprecated": true,
-            "message": "登录态由 LuCI 管理，请在路由器管理界面注销",
-        }));
-    }
     if let Some(ident) = req.extensions().get::<AuthIdentity>() {
         if let Some(t) = &ident.token {
             state.revoke_session(t);
@@ -925,26 +986,18 @@ async fn logout_api(
     Json(serde_json::json!({ "ok": true }))
 }
 
-/// 修改 WebUI 登录账号与口令。
+/// 修改 WebUI 登录账号与口令（仅 `webui` 形态）。
 ///
 /// 操作主体从服务端会话取；改密成功会吊销全部登录会话与加密会话，
 /// 要求客户端用新凭据重新登录并重新握手。
+#[cfg(feature = "webui")]
 async fn change_password(
     State(state): State<Arc<AppState>>,
     req: axum::extract::Request,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    if service::is_openwrt() {
-        return Err(deprecated_endpoint("内置口令修改接口"));
-    }
-
     let ident = req.extensions().get::<AuthIdentity>().cloned();
     // 当前加密会话号：改密会销毁其余会话，但要留住这一条把成功响应送回去。
     let crypto_sid = req.extensions().get::<CryptoSid>().map(|c| c.0.clone());
-
-    // 免鉴权模式（OpenWrt 专享）下不提供改密接口，避免公开改密面
-    if state.no_auth && ident.as_ref().map(|i| i.via_no_auth).unwrap_or(false) {
-        return Err(err("免鉴权模式下无需修改密码"));
-    }
 
     let body = axum::body::to_bytes(req.into_body(), 64 * 1024)
         .await
@@ -1004,21 +1057,6 @@ async fn change_password(
         "sessions_revoked": true,
         "username": target_user,
     })))
-}
-
-/// OpenWrt 上已退役的 WebUI 专属接口。
-fn deprecated_endpoint(what: &str) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::GONE,
-        Json(serde_json::json!({
-            "ok": false,
-            "deprecated": true,
-            "code": "deprecated_endpoint",
-            "error": format!(
-                "{what}在 OpenWrt 上不提供：登录鉴权由 LuCI/ubus 会话负责，请通过 LuCI 菜单「服务 → 塔吉多签到」操作"
-            ),
-        })),
-    )
 }
 
 async fn list_accounts(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
@@ -1261,44 +1299,47 @@ fn mask_phone(p: Option<&str>) -> Option<String> {
 mod tests {
     use super::*;
 
-    const SID: &str = "0123456789abcdef0123456789abcdef";
-
-    /// 方案 A：内部通道（OpenWrt + 回环）只做形态校验即放行，不触发 ubus。
-    #[test]
-    fn internal_channel_passes_without_ubus() {
-        assert_eq!(session_gate(true, true, SID), SessionGate::InternalChannel);
-    }
-
-    /// 内部通道上形态非法的会话号必须拒绝（不得因为"来自回环"就跳过校验）。
-    #[test]
-    fn internal_channel_rejects_malformed_sid() {
-        assert_eq!(session_gate(true, true, "short"), SessionGate::Malformed);
-        assert_eq!(
-            session_gate(true, true, "0123456789abcdef\"}"),
-            SessionGate::Malformed
-        );
-        assert_eq!(session_gate(true, true, ""), SessionGate::Missing);
-        let too_long = "a".repeat(129);
-        assert_eq!(session_gate(true, true, &too_long), SessionGate::Malformed);
-    }
-
-    /// 非回环来源不走内部通道，保持 ubus 二次校验（不放宽外部路径强度）。
-    #[test]
-    fn non_loopback_source_keeps_ubus_check() {
-        assert_eq!(session_gate(true, false, SID), SessionGate::UbusCheck);
-        // 独立部署不启用会话门；即便被调用也按需 ubus 校验，不做额外放行
-        assert_eq!(session_gate(false, false, SID), SessionGate::UbusCheck);
-        // 非 OpenWrt 但来源为回环：同样不进内部通道分支
-        assert_eq!(session_gate(false, true, SID), SessionGate::UbusCheck);
-        assert_eq!(session_gate(true, false, ""), SessionGate::Missing);
-    }
-
     /// 回环地址归一：`::ffff:127.0.0.1` 必须被识别为回环。
+    ///
+    /// 两种形态都依赖这个归一（来源判定要用），因此不放进 openwrt 专属用例。
     #[test]
     fn ipv4_mapped_loopback_is_normalized() {
         let v6: std::net::IpAddr = "::ffff:127.0.0.1".parse().unwrap();
         assert!(normalize_ip(v6).is_loopback());
         let real_v6: std::net::IpAddr = "::1".parse().unwrap();
         assert!(normalize_ip(real_v6).is_loopback());
+    }
+}
+
+#[cfg(all(test, feature = "openwrt"))]
+mod openwrt_tests {
+    use super::*;
+
+    const SID: &str = "0123456789abcdef0123456789abcdef";
+
+    /// 内部通道（回环）只做形态校验即放行，不触发 ubus。
+    #[test]
+    fn internal_channel_passes_without_ubus() {
+        assert_eq!(session_gate(true, SID), SessionGate::InternalChannel);
+    }
+
+    /// 内部通道上形态非法的会话号必须拒绝（不得因为"来自回环"就跳过校验）。
+    #[test]
+    fn internal_channel_rejects_malformed_sid() {
+        assert_eq!(session_gate(true, "short"), SessionGate::Malformed);
+        assert_eq!(
+            session_gate(true, "0123456789abcdef\"}"),
+            SessionGate::Malformed
+        );
+        assert_eq!(session_gate(true, ""), SessionGate::Missing);
+        let too_long = "a".repeat(129);
+        assert_eq!(session_gate(true, &too_long), SessionGate::Malformed);
+    }
+
+    /// 非回环来源不走内部通道，保持 ubus 二次校验（不放宽外部路径强度）。
+    #[test]
+    fn non_loopback_source_keeps_ubus_check() {
+        assert_eq!(session_gate(false, SID), SessionGate::UbusCheck);
+        assert_eq!(session_gate(false, ""), SessionGate::Missing);
     }
 }

@@ -11,7 +11,42 @@
 
 ## [Unreleased]
 
+### 解耦 · OpenWrt 与 Windows/Debian 改为编译期双形态
+
+上一版的"平台分流"仍是**同一个二进制**在运行期按 `TAYGEDO_EDITION` /
+`/etc/openwrt_release` 判断，OpenWrt 上还留着 `404 webui_retired` /
+`410 deprecated_endpoint` 的占位路由。那不是解耦，只是"注册了再拒绝"：
+WebUI 的路由、口令体系与全部前端资产仍然编进 OpenWrt 二进制。
+
+现在改为 Cargo feature 互斥构建，形态在编译期固定：
+
+| 形态 | 构建命令 | 首页 / 登录 / 改密 / 静态资源 | 业务鉴权 |
+| :--- | :--- | :--- | :--- |
+| `webui`（默认） | `cargo build --release` | 全部存在 | `Bearer token`（7 天） |
+| `openwrt` | `--no-default-features --features openwrt` | **路由不存在（404）** | 受信来源 + LuCI 会话 |
+
+- 删除 `is_openwrt()` 运行期探测（含 `TAYGEDO_EDITION` 与 `/etc/openwrt_release`
+  判定），改为编译期常量 `IS_OPENWRT` / `EDITION`。形态不再能被环境变量改写。
+- 删除 `webui_retired` 与 `deprecated_endpoint`：OpenWrt 路由表里根本没有 `/`、
+  `/api/login`、`/api/logout`、`/api/password`、`/static/*`、
+  `/api/crypto/handshake`、`/favicon.ico`。请求它们得到的是 axum 默认 404。
+- `src/ui.html` 与 noble 系列前端资产在 `openwrt` 下不参与 `include_str!`，
+  不进入二进制；`manifest::ASSETS` 该形态为空。
+- OpenWrt 产物不挂加密信封中间件，`/api/meta` 不再返回无消费者的
+  `crypto_proto` / `crypto_alg` / 身份指纹，改为返回 `entry: "luci"`。
+- `AppState` 的 token 表、登录失败计数、初始口令字段只在 `webui` 编译；口令哈希
+  （scrypt/v1 兼容）、token 签发、改密与锁定、`no_auth` 开关同样按形态归属。
+- 打包与 CI：Release 增加 `taygedo-rs-<triple>-openwrt.tar.gz`，OpenWrt Makefile
+  只下载该产物（避免把带 WebUI 的通用 musl 包装进路由器）；CI 对两种形态分别
+  跑 fmt / clippy / test，并新增 OpenWrt 冒烟：验证六个 WebUI 入口均为 404、
+  无 LuCI 会话 401、内部通道 200。
+- `init.d` 移除 `TAYGEDO_EDITION=openwrt`，注释同步为"形态由二进制自身决定"。
+- Docker 构建显式 `--features webui`，防止将来改动默认值时容器静默变成无界面。
+
 ### 恢复 · 独立部署的内置 WebUI（OpenWrt 维持 rpcd/ucode 现状）
+
+> 本节描述的是上一版实现（运行期分流 + 404/410 占位），已被上一节的
+> 编译期双形态取代，保留作为变更记录。
 
 v0.7.1 把内置 WebUI 与自有口令体系整体删除。这个决定对 OpenWrt 成立（LuCI 是
 入口，自有登录只会多一个可爆破面），但对 **Windows / Debian / Docker 属于误伤**：

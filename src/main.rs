@@ -1,8 +1,23 @@
+// 构建形态在编译期确定，运行期不再做任何探测。
+//
+// 两者互斥：一个二进制不可能同时"自带 WebUI"和"由 LuCI 独占入口"。
+// 同时开启会让路由与鉴权出现二义性；一个都不开则没有任何访问控制路径。
+// 因此这里用编译错误把配置错误挡在构建阶段，而不是留到运行期才暴露。
+#[cfg(all(feature = "webui", feature = "openwrt"))]
+compile_error!(
+    "`webui` 与 `openwrt` 是互斥形态：一次构建只能产出一种。\
+     请用 --no-default-features --features openwrt 构建 OpenWrt 版本"
+);
+
+#[cfg(not(any(feature = "webui", feature = "openwrt")))]
+compile_error!("必须显式选择构建形态：`webui`（Windows/Debian/Docker）或 `openwrt`（LuCI 集成）");
+
 mod api;
 mod constants;
 mod crypto;
 mod crypto_storage;
 mod login;
+#[cfg(feature = "openwrt")]
 mod luci_session;
 mod models;
 mod protocol;
@@ -59,66 +74,87 @@ async fn main() {
         .await
         .expect("绑定端口失败");
 
-    // 计算可点击的访问地址：若绑定 0.0.0.0 则展示 localhost/127.0.0.1。
+    // ---- 启动横幅 ----
     //
-    // OpenWrt 集成模式下没有内置 WebUI，入口是 LuCI 菜单，因此不展示
-    // "浏览器打开 :8787" 这类会误导的访问地址。
-    let openwrt = service::is_openwrt();
-    let display_url = if openwrt {
-        "LuCI 菜单：服务 → 塔吉多签到".to_string()
-    } else if bind_addr.ip().is_unspecified() {
+    // 形态在**编译期**已确定，这里只按 feature 选择文案，不含任何运行期探测。
+    // OpenWrt 产物里没有 WebUI 代码，因此连"浏览器打开 :8787"这句话都不会出现。
+    #[cfg(feature = "webui")]
+    let display_url = if bind_addr.ip().is_unspecified() {
         format!("http://127.0.0.1:{}", bind_addr.port())
     } else {
         format!("http://{}", bind_addr)
     };
+    #[cfg(feature = "openwrt")]
+    let display_url = "LuCI 菜单：服务 → 塔吉多签到".to_string();
+
     let listen_note = if bind_addr.ip().is_unspecified() {
         format!("监听所有接口 0.0.0.0:{}", bind_addr.port())
     } else {
         format!("监听 {}", bind_addr)
     };
 
+    #[cfg(feature = "webui")]
+    let auth_note = "账号密码登录 (Bearer token)";
+    #[cfg(feature = "openwrt")]
     let auth_note = if state.no_auth {
-        "免鉴权模式 (内网放行)".to_string()
+        "免鉴权模式 (内网放行)"
     } else if service::luci_session_required() {
-        "LuCI 会话 (OpenWrt 鉴权)".to_string()
-    } else if openwrt {
+        "LuCI 会话 (OpenWrt 鉴权)"
+    } else {
         // 排障降级（TAYGEDO_LUCI_SESSION_CHECK=0）：OpenWrt 上没有自有口令，
         // 不能显示"账号密码登录"，否则会把排障者引到不存在的入口。
-        "仅受信来源 (LuCI 校验已关闭)".to_string()
-    } else {
-        "账号密码登录".to_string()
+        "仅受信来源 (LuCI 校验已关闭)"
     };
 
-    // 读取加密策略用于横幅展示（不暴露任何密钥材料）
-    let crypto_policy = state.config.read().await.crypto_policy.clone();
-    let crypto_note = match crypto_policy.as_str() {
+    #[cfg(feature = "webui")]
+    let crypto_note = match state.config.read().await.crypto_policy.as_str() {
         "always" => "应用层加密: 强制 (v2)",
         "never" => "应用层加密: 已关闭 (明文传输)",
         _ => "应用层加密: 内网明文/外网强制",
     };
+    // OpenWrt 形态不存在浏览器侧消费者：不挂加密信封中间件，也没有握手端点。
+    #[cfg(feature = "openwrt")]
+    let crypto_note = "应用层加密: 不适用 (内部通道)";
 
-    println!("╔════════════════════════════════════════════╗");
-    println!("║  塔吉多自动签到 (Rust) 已启动               ║");
-    println!("║                                              ║");
-    println!("║  访问地址: {:<34} ║", display_url);
-    println!("║  {}{:.<39}║", listen_note, "");
-    println!("║  鉴权: {:<38} ║", auth_note);
-    println!("║  {}{:.<39}║", crypto_note, "");
-    println!("║  数据目录: {:<35} ║", data_dir);
-    println!(
-        "║  配置加密: XChaCha20-Poly1305 / {:<12} ║",
-        state.store.key_protection().as_str()
+    // 横幅按**终端显示宽度**对齐：全角字符占 2 列，`{:<40}` 这类按 char
+    // 计数的格式会把中文行整体挤歪（历史上这个框一直是斜的）。
+    const BOX_INNER: usize = 50;
+    println!("╔{}╗", "═".repeat(BOX_INNER));
+    print_box_row("塔吉多自动签到 (Rust) 已启动", BOX_INNER);
+    print_box_row("", BOX_INNER);
+    print_box_row(&format!("访问地址: {display_url}"), BOX_INNER);
+    print_box_row(&listen_note, BOX_INNER);
+    print_box_row(&format!("鉴权: {auth_note}"), BOX_INNER);
+    print_box_row(crypto_note, BOX_INNER);
+    print_box_row(&format!("数据目录: {data_dir}"), BOX_INNER);
+    print_box_row(
+        &format!(
+            "配置加密: XChaCha20-Poly1305 / {}",
+            state.store.key_protection().as_str()
+        ),
+        BOX_INNER,
     );
-    println!("║  Key ID  : {:<35} ║", state.store.key_id_hex());
+    print_box_row(
+        &format!("Key ID  : {}", state.store.key_id_hex()),
+        BOX_INNER,
+    );
     // 传输层身份指纹：供**带外核对**（TOFU 首次信任窗口的唯一缓解手段）。
     // 打印它是安全的：指纹是公钥的哈希，不是密钥材料。
-    println!("║  身份指纹: {:<35} ║", state.crypto.identity_fingerprint());
-    println!("╚════════════════════════════════════════════╝");
+    //
+    // 仅 webui 形态存在握手端点；OpenWrt 走 LuCI 内部通道，没有 TOFU 场景，
+    // 打印一个无消费者的指纹只会让人误以为需要核对。
+    #[cfg(feature = "webui")]
+    print_box_row(
+        &format!("身份指纹: {}", state.crypto.identity_fingerprint()),
+        BOX_INNER,
+    );
+    println!("╚{}╝", "═".repeat(BOX_INNER));
 
-    // OpenWrt 集成模式：说明入口与鉴权归属，避免使用者继续找 WebUI 端口。
-    if openwrt {
+    // OpenWrt 形态：说明入口与鉴权归属，避免使用者继续找 WebUI 端口。
+    #[cfg(feature = "openwrt")]
+    {
         println!();
-        println!("[OpenWrt 集成模式] 不提供内置 WebUI、无浏览器侧加密前端。");
+        println!("[OpenWrt 集成形态] 本二进制不含 WebUI、不含浏览器侧加密前端。");
         println!("  唯一入口：LuCI 菜单「服务 → 塔吉多签到」");
         println!("  数据通道：rpcd/ucode 在服务端调用本机回环接口，浏览器不直连本端口");
         if service::luci_session_required() {
@@ -129,6 +165,7 @@ async fn main() {
     }
 
     // 初始随机口令：仅在 stdout 出现一次，**不写入日志缓冲区**（日志可经 API 读取）。
+    #[cfg(feature = "webui")]
     if let Some(pwd) = state.initial_password.as_deref() {
         println!();
         println!("┌────────────────────────────────────────────────────────────┐");
@@ -144,10 +181,9 @@ async fn main() {
     }
 
     // Windows 桌面端：启动后自动用默认浏览器打开 WebUI。
-    // 服务器 / Docker 无桌面环境，仅在 Windows 下执行，避免无意义弹窗；
-    // OpenWrt 集成模式没有 WebUI 入口，同样跳过。
-    #[cfg(target_os = "windows")]
-    if !openwrt {
+    // 服务器 / Docker 无桌面环境，仅在 Windows 下执行，避免无意义弹窗。
+    #[cfg(all(feature = "webui", target_os = "windows"))]
+    {
         let open_url = display_url.clone();
         tokio::spawn(async move {
             // 稍等，确保 axum 已开始监听，避免浏览器首请求连不上
@@ -215,4 +251,47 @@ fn rotate_storage_key_cli(data_dir: &str) -> i32 {
             1
         }
     }
+}
+
+/// 单个字符的终端显示宽度（CJK 全角字符占 2 列）。
+///
+/// `format!` 的 `{:<40}` 按 `char` 计数，中文会因此整体偏左。启动横幅是
+/// 操作者第一眼看到的东西，歪掉的框会让人怀疑输出本身有问题。
+fn char_width(c: char) -> usize {
+    let cp = c as u32;
+    let wide = matches!(
+        cp,
+        0x1100..=0x115F
+            | 0x2E80..=0x303E
+            | 0x3041..=0x33FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xA000..=0xA4CF
+            | 0xAC00..=0xD7A3
+            | 0xF900..=0xFAFF
+            | 0xFE30..=0xFE4F
+            | 0xFF00..=0xFF60
+            | 0xFFE0..=0xFFE6
+    );
+    if wide {
+        2
+    } else {
+        1
+    }
+}
+
+/// 按显示宽度截断并补齐，输出一行带边框的横幅内容。
+fn print_box_row(text: &str, inner: usize) {
+    let body = inner.saturating_sub(2);
+    let mut out = String::new();
+    let mut w = 0usize;
+    for c in text.chars() {
+        let cw = char_width(c);
+        if w + cw > body {
+            break;
+        }
+        out.push(c);
+        w += cw;
+    }
+    println!("║ {}{} ║", out, " ".repeat(body - w));
 }

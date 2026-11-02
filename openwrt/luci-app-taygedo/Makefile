@@ -2,7 +2,8 @@
 #
 # 现代 LuCI JS 前端：htdocs/luci-static/resources/view/taygedo/status.js
 # 这是 OpenWrt 上的唯一入口，只做展示与交互：
-#   - 无内置 WebUI、无浏览器侧加密前端（不加载 taygedo-crypto.js、不构造信封）；
+#   - 二进制以 `openwrt` feature 单独编译：**不含** WebUI、登录/改密接口、
+#     静态资源与浏览器侧加密前端（不是"注册了路由再 404"，是编译期不存在）；
 #   - 数据经 rpcd 内部通道取得：页面调用 ubus 对象 luci.taygedo，由
 #     /usr/share/rpcd/ucode/luci.taygedo 在服务端以 curl 调本机回环
 #     http://127.0.0.1:<port>；后端只监听 127.0.0.1，不对 LAN 暴露；
@@ -10,8 +11,9 @@
 #     路径只校验会话号形态，不再嵌套 ubus session get）。
 #
 # 两种构建方式（二选一）：
-#   A. 预编译二进制下载（默认）：从 GitHub Release 下载对应架构的 musl 二进制。
-#      由仓库根目录 .github/workflows/build.yml 预编译产出。
+#   A. 预编译二进制下载（默认）：从 GitHub Release 下载对应架构的
+#      `taygedo-rs-<triple>-openwrt.tar.gz`。
+#      由仓库根目录 .github/workflows/build.yml 预编译产出（与 webui 产物分开）。
 #   B. 源码编译：需要 openwrt/packages 的 lang/rust feed，见文件末尾注释。
 #
 # 安装位置：/usr/bin/taygedo-rs + LuCI JS 界面（服务 -> 塔吉多签到）
@@ -57,7 +59,10 @@ ifeq ($(ARCH),aarch64)
   TAYGEDO_TRIPLE:=aarch64-unknown-linux-musl
 endif
 
-TAYGEDO_ARCHIVE:=taygedo-rs-$(TAYGEDO_TRIPLE).tar.gz
+# 预编译产物名带 `-openwrt` 后缀：同一 target 的默认产物是 webui 形态
+# （Windows/Debian/静态部署用），两者不是同一个二进制。下载错文件会把
+# 一个带 WebUI 的通用版本装进路由器，所以这里显式区分而不是靠约定。
+TAYGEDO_ARCHIVE:=taygedo-rs-$(TAYGEDO_TRIPLE)-openwrt.tar.gz
 TAYGEDO_DL_URL:=$(TAYGEDO_REPO)/releases/download/$(TAYGEDO_VER)/$(TAYGEDO_ARCHIVE)
 
 define Package/luci-app-taygedo
@@ -85,9 +90,11 @@ endef
 define Package/luci-app-taygedo/description
   LuCI interface (JS) for the Taygedo (Hotta 幻塔 / Neverness to Everness 异环)
   daily attendance tool. Multi-account, SMS/password login, daily scheduling.
-  LuCI is the only entry on OpenWrt; there is no built-in WebUI and no
-  browser-side crypto frontend. Data is fetched through an internal rpcd/ucode
-  channel over loopback; authentication is delegated to the OpenWrt session.
+  LuCI is the only entry on OpenWrt. The bundled binary is built with the
+  `openwrt` feature: it contains no WebUI, no login/password endpoints, no
+  static assets and no browser-side crypto frontend at all. Data is fetched
+  through an internal rpcd/ucode channel over loopback; authentication is
+  delegated to the OpenWrt session.
 endef
 
 define Build/Prepare
@@ -162,7 +169,8 @@ $(eval $(call BuildPackage,luci-app-taygedo))
 #   define Build/Compile
 #       cd $(PKG_BUILD_DIR)/taygedo-rs && \
 #           CARGO_HOME=$(CARGO_HOME) \
-#           cargo build --release --target $(RUST_TARGET) && \
+#           cargo build --release --target $(RUST_TARGET) \
+#               --no-default-features --features openwrt && \
 #           $(TARGET_STRIP) target/$(RUST_TARGET)/release/taygedo-rs
 #   endef
 #

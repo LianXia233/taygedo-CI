@@ -43,6 +43,11 @@ pub const MANIFEST_VERSION: u8 = 1;
 ///
 /// 内容在编译期嵌入，因此"服务端发出的字节"与"签名的哈希"必然一致，
 /// 不存在运行期被替换文件的可能。
+///
+/// **仅 `webui` 形态存在**：OpenWrt 产物不注册静态资源路由，首页与前端
+/// 加密资产（含 noble 系列）也不参与编译——`include_str!` 根本不会展开，
+/// 因此这些字节不会出现在 OpenWrt 二进制里。
+#[cfg(feature = "webui")]
 pub const ASSETS: &[(&str, &str)] = &[
     (
         "/static/taygedo-crypto.js",
@@ -84,9 +89,16 @@ pub const ASSETS: &[(&str, &str)] = &[
         "/static/web_guard.js",
         include_str!("../../static/web_guard.js"),
     ),
-    // 首页：仅独立部署对外提供（OpenWrt 上由清单过滤器剔除）。
+    // 首页。
     ("/", include_str!("../ui.html")),
 ];
+
+/// `openwrt` 形态没有浏览器侧资源：清单为空。
+///
+/// 该形态不注册 `/static/*` 与 `/static/manifest.json`，清单只作为
+/// "确实没有任何前端资产"的显式声明存在，而不是一个可供下载的端点。
+#[cfg(feature = "openwrt")]
+pub const ASSETS: &[(&str, &str)] = &[];
 
 /// 单个资源的清单项。
 #[derive(Debug, Clone, Serialize)]
@@ -153,13 +165,12 @@ pub fn canonical_bytes(m: &Manifest) -> Vec<u8> {
 
 /// 生成并签名清单。
 ///
-/// `include_webui` 为 false 时（OpenWrt 集成模式）不把首页 `/` 列入清单：
-/// 该模式下不提供内置 WebUI 界面，首页路由返回 404，若仍列出会让前端的
-/// 逐资源哈希校验整体失败（连带把 LuCI 侧也挡在完整性门禁之外）。
-pub fn build(identity: &ServerIdentity, generated_at: u64, include_webui: bool) -> Manifest {
+/// 清单内容完全由 `ASSETS` 决定，而 `ASSETS` 又由构建形态在编译期决定：
+/// `webui` 产物包含首页与前端脚本，`openwrt` 产物的 `ASSETS` 为空。
+/// 因此这里没有"按运行期模式过滤条目"的分支——形态在编译期就已经分开了。
+pub fn build(identity: &ServerIdentity, generated_at: u64) -> Manifest {
     let mut files: Vec<FileEntry> = ASSETS
         .iter()
-        .filter(|(path, _)| include_webui || *path != "/")
         .map(|(path, content)| FileEntry {
             path: (*path).to_string(),
             sha256: sha256_hex(content.as_bytes()),
@@ -210,9 +221,10 @@ mod tests {
         ServerIdentity::from_seed(&[0x5Au8; 32])
     }
 
+    #[cfg(feature = "webui")]
     #[test]
     fn manifest_covers_every_asset() {
-        let m = build(&id(), 1, true);
+        let m = build(&id(), 1);
         assert_eq!(m.files.len(), ASSETS.len());
         assert!(m
             .files
@@ -226,23 +238,21 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "openwrt")]
     #[test]
-    fn openwrt_manifest_excludes_webui_index() {
-        // OpenWrt 集成模式：首页不提供，清单必须同步剔除 `/`，
-        // 否则前端逐资源校验会因 404 整体失败。
-        let m = build(&id(), 1, false);
-        assert_eq!(m.files.len(), ASSETS.len() - 1);
-        assert!(!m.files.iter().any(|f| f.path == "/"));
-        assert!(m
-            .files
-            .iter()
-            .any(|f| f.path == "/static/taygedo-crypto.js"));
+    fn openwrt_build_has_no_frontend_assets() {
+        // OpenWrt 形态不存在任何浏览器侧资源：清单为空，且签名仍然有效
+        // （空清单也要签名，避免"空"与"未签名"混淆）。
+        assert!(ASSETS.is_empty());
+        let m = build(&id(), 1);
+        assert!(m.files.is_empty());
+        assert!(m.sig.is_some());
     }
 
     #[test]
     fn manifest_signature_verifies() {
         let id = id();
-        let m = build(&id, 12345, true);
+        let m = build(&id, 12345);
         let sig = super::super::decode_fixed::<64>(m.sig.as_ref().unwrap()).unwrap();
         assert!(super::super::identity::verify(
             &id.public_key(),
@@ -251,10 +261,11 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "webui")]
     #[test]
     fn tampering_with_any_field_breaks_signature() {
         let id = id();
-        let m = build(&id, 12345, true);
+        let m = build(&id, 12345);
         let sig = super::super::decode_fixed::<64>(m.sig.as_ref().unwrap()).unwrap();
 
         // 改哈希
@@ -288,12 +299,13 @@ mod tests {
     #[test]
     fn canonical_is_stable_regardless_of_input_order() {
         let id = id();
-        let mut m = build(&id, 1, true);
+        let mut m = build(&id, 1);
         let a = canonical_bytes(&m);
         m.files.reverse();
         assert_eq!(a, canonical_bytes(&m));
     }
 
+    #[cfg(feature = "webui")]
     #[test]
     fn assets_are_non_empty_and_unique() {
         let mut seen = std::collections::HashSet::new();

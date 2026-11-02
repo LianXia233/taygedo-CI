@@ -1,3 +1,4 @@
+#![cfg_attr(feature = "openwrt", allow(dead_code))]
 //! 应用层安全通信层（协议 v2）。
 //!
 //! ## 结构
@@ -46,6 +47,7 @@ pub mod cipher;
 pub mod error;
 pub mod identity;
 pub mod manifest;
+#[cfg(feature = "webui")]
 pub mod middleware;
 pub mod protocol;
 pub mod replay;
@@ -58,7 +60,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use zeroize::Zeroizing;
 
-pub use error::{handshake_error_body, CryptoError};
+#[cfg(feature = "webui")]
+pub use error::handshake_error_body;
+pub use error::CryptoError;
 pub use session::{MAX_SESSIONS, SESSION_MAX_REQUESTS, SESSION_TTL_SECS};
 
 use identity::ServerIdentity;

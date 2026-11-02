@@ -20,10 +20,13 @@
 
 use std::path::Path;
 
-/// 判定当前是否 OpenWrt（存在 `/etc/openwrt_release`）。
+/// 判定当前**运行平台**是否 OpenWrt（存在 `/etc/openwrt_release`）。
 ///
-/// 与 `service::is_openwrt` 语义一致，但此处独立实现，避免存储层反向依赖
-/// 业务层（也让本模块可以单独测试）。
+/// 注意与 `service::IS_OPENWRT` 的区别：那是**构建形态**（这个二进制是不是
+/// 为 LuCI 集成编译的），这里是**宿主平台**（这台机器有没有 systemd/TPM）。
+/// 密钥保护方式取决于后者：同一份 `webui` 二进制跑在 OpenWrt 上也该用
+/// 0600 文件而不是 systemd 凭据。因此这里保留运行期探测，且独立实现，
+/// 避免存储层反向依赖业务层（也便于单独测试）。
 pub fn is_openwrt() -> bool {
     Path::new("/etc/openwrt_release").exists()
 }

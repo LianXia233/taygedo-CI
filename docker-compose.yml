@@ -9,7 +9,8 @@ services:
     environment:
       TAYGEDO_LISTEN: 0.0.0.0:8787
       TAYGEDO_DATA_DIR: /data
-      # 内置 WebUI 随服务一起启动：浏览器访问 http://<宿主机IP>:8787 即可。
+      # 本镜像以 webui 形态构建（Dockerfile 显式 --features webui）：
+      # 内置 WebUI 随服务一起启动，浏览器访问 http://<宿主机IP>:8787 即可。
       # 首次启动的随机口令用 `docker compose logs taygedo` 查看（只打印一次），
       # 或用 TAYGEDO_WEB_PASSWORD 直接指定初始口令。
       # 访问控制：只接受回环或 lan_cidrs 白名单来源——容器内 127.0.0.1 不是

@@ -29,14 +29,15 @@ start_service() {
         chmod 600 "$data_dir/keys"/* 2>/dev/null
     fi
 
-    # 运行版本与访问通道（OpenWrt 集成模式）：
-    # - 无内置 WebUI、无浏览器侧加密前端。唯一入口是 LuCI 菜单。
+    # 运行形态与访问通道（openwrt 构建产物）：
+    # - 该二进制**不含** WebUI、登录接口、静态资源与浏览器侧加密前端，
+    #   唯一入口是 LuCI 菜单；这是编译期 feature 决定的，不是运行期开关。
     # - 数据由 rpcd/ucode 插件（/usr/share/rpcd/ucode/luci.taygedo）在服务端
     #   以已认证的 LuCI 会话身份调用本机回环接口取得，浏览器不直连本端口。
     #   因此这里**只监听 127.0.0.1**，不对 LAN 暴露。
-    # - 鉴权交给 OpenWrt：ucode 把 ubus_rpc_session 作为 X-TGD-Luci-Session
-    #   透传给后端，后端调用本机 ubus `session get` 判定有效性；本服务不签发
-    #   任何自有凭据。
+    # - 鉴权边界是 rpcd ACL：ucode 把 ubus_rpc_session 作为 X-TGD-Luci-Session
+    #   透传给后端；回环路径下后端只校验会话号形态（真实鉴权已在 rpcd 侧完成，
+    #   再嵌套 ubus 会因 uloop 死锁）。非回环来源才触发 ubus 二次校验。
     # - luci_session_check=0 仅用于排障：退回"仅受信来源（回环/内网白名单）"，
     #   请勿长期开启。
     #
@@ -48,8 +49,10 @@ start_service() {
 
     procd_open_instance
     procd_set_param command "$PROG"
+    # 形态由二进制自身决定（编译期 openwrt feature），不再传 TAYGEDO_EDITION：
+    # 那会让"这个二进制是不是 OpenWrt 形态"变成可被环境变量改写的运行期开关，
+    # 与"编译期不含 WebUI"的保证自相矛盾。
     procd_set_param env \
-        TAYGEDO_EDITION="openwrt" \
         TAYGEDO_LISTEN="127.0.0.1:${port}" \
         TAYGEDO_DATA_DIR="$data_dir" \
         TAYGEDO_LUCI_SESSION_CHECK="$luci_session_check" \

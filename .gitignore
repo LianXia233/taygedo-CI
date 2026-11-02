@@ -1,4 +1,6 @@
 /target
+# 双形态并行构建用的独立 target 目录（cargo --target-dir 产物）
+/target-openwrt
 /data
 
 # 本地 IDE/工具分享产物，不应入库

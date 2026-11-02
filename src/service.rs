@@ -22,21 +22,29 @@ pub struct AppState {
     /// 验证码设备身份：phone -> (identity, 发送时间 unix 秒)。带 TTL，防内存泄漏。
     pub pending_devices: std::sync::Mutex<HashMap<String, (DeviceIdentity, i64)>>,
     pub run_lock: Mutex<()>,
-    /// 登录会话：token -> (过期 unix 秒, 所属用户名)。仅独立部署使用。
+    /// 登录会话：token -> (过期 unix 秒, 所属用户名)。
+    ///
+    /// 仅 `webui` 形态存在——OpenWrt 形态由 LuCI/ubus 会话负责身份，
+    /// 本服务不签发任何自有凭据，因此连这张表都不该被编译进来。
+    #[cfg(feature = "webui")]
     pub sessions: std::sync::Mutex<HashMap<String, (i64, String)>>,
     /// WebUI 登录失败计数：username -> (失败次数, 锁定截止 unix 秒)。防暴力破解。
+    #[cfg(feature = "webui")]
     pub login_fails: std::sync::Mutex<HashMap<String, (u32, i64)>>,
     /// 免鉴权模式：为 true 时所有 API 无需登录即可访问。
     ///
-    /// **仅 OpenWrt 平台（LuCI 配套使用）生效**，且只在 LuCI 会话校验被显式
-    /// 关闭（排障降级）时作为兼容路径生效；非 OpenWrt 环境即使设置环境变量
-    /// 也会被强制关闭——独立部署有内置 WebUI 登录，不存在免鉴权语义。
+    /// **仅 `openwrt` 形态存在**，且只在 LuCI 会话校验被显式关闭（排障降级）
+    /// 时作为兼容路径生效；`webui` 形态恒为 false——独立部署有登录，
+    /// 免鉴权等于把业务接口完全敞开，不提供该开关。
+    #[cfg(feature = "openwrt")]
     pub no_auth: bool,
-    /// 当前运行平台是否 OpenWrt（决定 WebUI 与自有口令体系是否启用）。
-    pub is_openwrt: bool,
-    /// 应用层加密会话管理器（独立部署用的 HTTP 信封通道）。
+    /// 应用层加密会话管理器（`webui` 形态的 HTTP 信封通道）。
+    ///
+    /// OpenWrt 形态不挂加密中间件，但身份密钥仍随 `keyring.json` 加载
+    /// （存储加密与身份指纹依赖它），因此字段保留。
     pub crypto: CryptoManager,
     /// 启动时生成的初始随机口令（**仅保存在内存**，用于单次提示，不落盘、不进日志）。
+    #[cfg(feature = "webui")]
     pub initial_password: Option<String>,
     /// 受信来源判定器。运行期可经 `/api/config` 热更新，故用 Arc 包裹。
     pub lan: std::sync::RwLock<Arc<LanMatcher>>,
@@ -94,7 +102,8 @@ impl AppState {
             config.credential_key = crate::crypto::generate_credential_key();
         }
 
-        // 用户名初始化（默认 admin）。仅独立部署会真正用到。
+        // 用户名初始化（默认 admin）。仅 `webui` 形态存在自有账号体系。
+        #[cfg(feature = "webui")]
         if config
             .web_username
             .as_deref()
@@ -131,19 +140,21 @@ impl AppState {
         };
         let crypto = CryptoManager::new(&identity_secret);
 
-        // 运行版本判定：OpenWrt 集成模式（LuCI 为唯一 Web 入口）或独立模式
-        // （Windows / Debian / Docker：自带内置 WebUI 与口令登录）。
-        let openwrt = is_openwrt();
-
-        // WebUI 口令初始化（仅独立部署）：
+        // ---- 形态专属初始化 ----
+        //
+        // `webui` 形态：建立自有口令体系。
         // - 设置了 TAYGEDO_WEB_PASSWORD 时**以它为准**（幂等覆盖）：这是忘记
         //   口令时唯一可用的恢复路径，也让自动化部署能固定凭据；
-        // - 未设置且首次启动：生成随机口令，杜绝默认 admin；
-        // - OpenWrt 上不生成：入口是 LuCI，鉴权交给 ubus 会话，
-        //   一个无处可用的口令只会扩大可爆破面。
+        // - 未设置且首次启动：生成随机口令，杜绝默认 admin。
+        //
+        // `openwrt` 形态：**不生成、不迁移任何自有口令**——入口是 LuCI，
+        // 鉴权交给 ubus 会话；一个无处可用的口令只会扩大可爆破面。
+        #[cfg(feature = "webui")]
         let mut initial_password: Option<String> = None;
+        #[cfg(feature = "webui")]
         let mut env_password_applied = false;
-        if !openwrt {
+        #[cfg(feature = "webui")]
+        {
             let env_pwd = std::env::var("TAYGEDO_WEB_PASSWORD")
                 .ok()
                 .filter(|s| !s.trim().is_empty());
@@ -193,20 +204,24 @@ impl AppState {
             }
         }
         // 兼容历史配置：v1（单轮 sha256 + 8 字节盐）在口令校验通过后就地升级为 v2
+        #[cfg(feature = "webui")]
         if config.web_password_version.is_none() {
             config.web_password_version = Some(crate::crypto::PWD_HASH_V1);
         }
         store.save_config(&config)?;
 
         // 免鉴权模式：环境变量 TAYGEDO_NO_AUTH=1/true/yes/on 时开启。
-        // **仅 OpenWrt 平台生效**：独立部署有 WebUI 登录，免鉴权等于把业务
-        // 接口完全敞开；OpenWrt 上也只有 LuCI 会话校验被显式关闭（排障降级）
-        // 时才作为兼容路径生效。
-        let session_auth = openwrt && luci_session_required();
-        let no_auth_env = std::env::var("TAYGEDO_NO_AUTH")
+        //
+        // **仅 `openwrt` 形态存在该开关**，而且只有 LuCI 会话校验被显式关闭
+        // （排障降级）时才作为兼容路径生效。`webui` 形态有登录页，免鉴权等于
+        // 把业务接口完全敞开，因此不提供——连分支都不编译。
+        #[cfg(feature = "openwrt")]
+        let session_auth = luci_session_required();
+        #[cfg(feature = "openwrt")]
+        let no_auth = std::env::var("TAYGEDO_NO_AUTH")
             .map(|v| parse_bool_env(&v))
-            .unwrap_or(false);
-        let no_auth = no_auth_env && openwrt && !session_auth;
+            .unwrap_or(false)
+            && !session_auth;
 
         let lan = LanMatcher::new(&config.lan_cidrs);
 
@@ -220,11 +235,14 @@ impl AppState {
             logs: std::sync::Mutex::new(Vec::new()),
             pending_devices: std::sync::Mutex::new(HashMap::new()),
             run_lock: Mutex::new(()),
+            #[cfg(feature = "webui")]
             sessions: std::sync::Mutex::new(HashMap::new()),
+            #[cfg(feature = "webui")]
             login_fails: std::sync::Mutex::new(HashMap::new()),
+            #[cfg(feature = "openwrt")]
             no_auth,
-            is_openwrt: openwrt,
             crypto,
+            #[cfg(feature = "webui")]
             initial_password: initial_password.clone(),
             lan: std::sync::RwLock::new(Arc::new(lan)),
         });
@@ -255,7 +273,8 @@ impl AppState {
                 ),
             );
         }
-        // 访问控制方式与初始凭据提示。
+        // 访问控制方式与初始凭据提示（按形态分别编译，互不引用对方的变量）。
+        #[cfg(feature = "webui")]
         if initial_password.is_some() {
             // 明文口令**不写入日志缓冲区**（日志可经 /api/logs 读取），
             // 只在启动横幅中出现一次，供操作者记录。
@@ -266,6 +285,7 @@ impl AppState {
                     .into(),
             );
         }
+        #[cfg(feature = "webui")]
         if env_password_applied {
             app.push_log(
                 "warn",
@@ -274,34 +294,29 @@ impl AppState {
                     .into(),
             );
         }
+        #[cfg(feature = "webui")]
+        app.push_log(
+            "info",
+            "形态 webui：内置 WebUI 已启用，业务接口需 Bearer token".into(),
+        );
+
+        #[cfg(feature = "openwrt")]
         if session_auth {
             app.push_log(
                 "info",
-                "OpenWrt 集成模式：LuCI 为唯一入口，鉴权由 OpenWrt（LuCI/ubus）会话负责；\
+                "形态 openwrt：LuCI 为唯一入口，鉴权由 OpenWrt（LuCI/ubus）会话负责；\
                  仅接受受信内网来源"
-                    .into(),
-            );
-        } else if no_auth_env && !openwrt {
-            app.push_log(
-                "warn",
-                "检测到 TAYGEDO_NO_AUTH=1，但当前非 OpenWrt 平台：\
-                 免鉴权模式已强制关闭，请使用 WebUI 账号密码登录"
                     .into(),
             );
         } else if no_auth {
             app.push_log(
                 "warn",
-                "免鉴权模式已开启（OpenWrt 专享）：API 无需登录即可访问，仅限内网使用".into(),
+                "免鉴权模式已开启（OpenWrt 排障专享）：API 无需登录即可访问，仅限内网使用".into(),
             );
-        } else if openwrt {
+        } else {
             app.push_log(
                 "warn",
                 "LuCI 会话校验已关闭（排障降级）：业务接口仅按来源放行，请尽快恢复".into(),
-            );
-        } else if !openwrt {
-            app.push_log(
-                "info",
-                "WebUI 已启用：独立部署自带登录页，业务接口需 Bearer token".into(),
             );
         }
         Ok(app)
@@ -309,8 +324,11 @@ impl AppState {
 
     /// 判定来源是否可享受免鉴权放行。
     ///
-    /// 即使 `no_auth` 已开启，非内网来源也不放行——避免"免鉴权开关被打开
-    /// 后服务被直接暴露到公网"这一配置失误演变为完全开放。
+    /// 仅 `openwrt` 形态存在：`webui` 形态有登录页，不存在"免鉴权"语义。
+    ///
+    /// 即使 `no_auth` 已开启，非内网来源也不放行——避免"免鉴权开关被打开后
+    /// 服务被直接暴露到公网"这一配置失误演变为完全开放。
+    #[cfg(feature = "openwrt")]
     pub async fn no_auth_allows(&self, peer_ip: Option<std::net::IpAddr>) -> bool {
         if !self.no_auth {
             return false;
@@ -360,9 +378,15 @@ impl AppState {
         let start = logs.len().saturating_sub(limit);
         logs[start..].to_vec()
     }
+}
 
-    // ---- WebUI 登录（仅独立部署；OpenWrt 上调用方会先返回 404/410） ----
-
+/// 自有登录体系（仅 `webui` 形态编译）。
+///
+/// OpenWrt 形态的身份由 LuCI/ubus 会话承担：本服务不签发 token、不校验口令、
+/// 不做失败锁定，因此这整块能力（以及与它配套的状态字段）不进入 OpenWrt 产物。
+/// 这不是"运行时关闭"，而是编译期不存在。
+#[cfg(feature = "webui")]
+impl AppState {
     /// 校验登录账号密码。
     ///
     /// 按 `web_password_version` 选择哈希算法：v2（scrypt）为当前格式，
@@ -542,11 +566,14 @@ impl AppState {
     }
 }
 
-/// WebUI 登录连续失败阈值。
+/// WebUI 登录连续失败阈值（仅 `webui` 形态）。
+#[cfg(feature = "webui")]
 pub const MAX_LOGIN_FAILS: u32 = 5;
-/// 达到阈值后的锁定时长（秒）。
+/// 达到阈值后的锁定时长（秒，仅 `webui` 形态）。
+#[cfg(feature = "webui")]
 pub const LOGIN_LOCK_SECS: i64 = 300;
-/// 登录会话有效期（秒，7 天）。
+/// 登录会话有效期（秒，7 天，仅 `webui` 形态）。
+#[cfg(feature = "webui")]
 pub const SESSION_TTL_SECS: i64 = 7 * 24 * 3600;
 
 /// 受信来源匹配器。
@@ -621,44 +648,29 @@ pub fn normalize_crypto_policy(v: &str) -> Option<String> {
     }
 }
 
-/// 当前是否运行在 OpenWrt 集成模式。
+/// 当前构建形态是否为 OpenWrt 集成。
 ///
-/// 判定优先级：
-/// 1. 环境变量 `TAYGEDO_EDITION`：`openwrt` 或 `standalone`（显式指定，供
-///    init.d 与测试使用；跨平台脚本不依赖绝对路径，仅作为版本标识）；
-/// 2. 回落到平台标记文件 `/etc/openwrt_release`（OpenWrt 固件固定存在）。
-///
-/// 结果在进程内缓存：环境变量与固件标识在运行期不会变化。
-///
-/// OpenWrt 集成模式的含义：无内置 WebUI、无浏览器侧加密前端，LuCI 是唯一
-/// 入口；数据由 rpcd/ucode 内部通道调用本服务取得，鉴权交给 OpenWrt
-/// （LuCI/ubus 会话）。
-pub fn is_openwrt() -> bool {
-    static CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *CACHE.get_or_init(|| match edition_from_env() {
-        Some(v) => v,
-        None => std::path::Path::new("/etc/openwrt_release").exists(),
-    })
-}
+/// 这是**编译期常量**，不是运行期探测。形态由 Cargo feature 决定，二进制
+/// 一旦产出就不会改变。原先的 `TAYGEDO_EDITION` 环境变量探测与
+/// `/etc/openwrt_release` 文件判定已经删除——那会让同一个二进制在两种形态
+/// 之间摇摆：既无法裁剪代码与前端资产，也让"OpenWrt 上没有 WebUI"变成一句
+/// 依赖部署者正确设置环境变量的约定。
+#[cfg_attr(feature = "openwrt", allow(dead_code))]
+pub const IS_OPENWRT: bool = cfg!(feature = "openwrt");
 
-/// 解析 `TAYGEDO_EDITION`。无法识别的取值视为未设置（回落到平台标记探测）。
-fn edition_from_env() -> Option<bool> {
-    let v = std::env::var("TAYGEDO_EDITION").ok()?;
-    match v.trim().to_lowercase().as_str() {
-        "openwrt" => Some(true),
-        "standalone" | "generic" | "linux" | "windows" => Some(false),
-        _ => None,
-    }
-}
+/// 当前构建形态标识（`openwrt` / `webui`），供 `/api/meta` 与日志使用。
+pub const EDITION: &str = if cfg!(feature = "openwrt") {
+    "openwrt"
+} else {
+    "webui"
+};
 
-/// OpenWrt 集成模式下是否要求 LuCI 会话校验（默认开启）。
+/// 是否要求 LuCI 会话校验（仅 `openwrt` 形态）。
 ///
 /// 关闭（`TAYGEDO_LUCI_SESSION_CHECK=0`）仅作为排障降级路径：此时回落到
 /// "仅受信来源（回环/内网白名单）放行"，不再校验 ubus 会话。
+#[cfg(feature = "openwrt")]
 pub fn luci_session_required() -> bool {
-    if !is_openwrt() {
-        return false;
-    }
     std::env::var("TAYGEDO_LUCI_SESSION_CHECK")
         .map(|v| parse_bool_env(&v))
         .unwrap_or(true)

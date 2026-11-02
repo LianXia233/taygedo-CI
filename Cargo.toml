@@ -2,12 +2,34 @@
 name = "taygedo-rs"
 version = "0.7.1"
 edition = "2021"
-description = "塔吉多自动签到 - Rust 重写版（单文件，API 服务 + OpenWrt/LuCI 集成）"
+description = "塔吉多自动签到 - Rust 重写版（webui / openwrt 双构建形态：独立部署自带 WebUI，OpenWrt 只走 LuCI）"
 license = "GPL-3.0-only"
 
 [[bin]]
 name = "taygedo-rs"
 path = "src/main.rs"
+
+# ---------------------------------------------------------------------------
+# 构建形态（互斥，必须二选一）
+# ---------------------------------------------------------------------------
+# 两种部署形态在**编译期**彻底分离，不再靠运行期探测决定行为：
+#
+#   webui   —— Windows / Debian / Docker / 独立服务器
+#              内置 WebUI（首页 + 自有登录 + 改密 + 应用层加密信封）
+#   openwrt —— OpenWrt 集成
+#              只有业务 API，入口是 LuCI；鉴权交给 LuCI/ubus 会话
+#
+# OpenWrt 产物里不存在首页、登录/改密接口、静态资源与前端加密资产——
+# 不是"注册了路由再返回 404/410"，而是这些代码根本没有被编译进去。
+#
+# 构建：
+#   cargo build --release --locked                                  # webui
+#   cargo build --release --locked --no-default-features \
+#                --features openwrt                                # openwrt
+[features]
+default = ["webui"]
+webui = []
+openwrt = []
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

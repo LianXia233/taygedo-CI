@@ -2,7 +2,9 @@
 FROM rust:1-bookworm AS builder
 WORKDIR /app
 COPY . .
-RUN cargo build --release
+# 显式指定形态：容器是独立部署，必须有 WebUI。默认 feature 就是 webui，
+# 但写出来可以防止将来改默认值后容器静默变成"无界面纯 API"。
+RUN cargo build --release --locked --no-default-features --features webui
 
 FROM debian:bookworm-slim
 WORKDIR /app

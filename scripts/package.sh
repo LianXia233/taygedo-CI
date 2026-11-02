@@ -187,6 +187,9 @@ Section: luci
 Architecture: $ARCH
 Maintainer: LianXia233
 Description: Taygedo auto attendance (塔吉多自动签到)
+ LuCI-only build: the bundled binary is compiled with the `openwrt` feature,
+ so it has no WebUI, no login/password endpoints and no browser-side crypto
+ frontend. Use the LuCI menu (Services -> Taygedo) to manage it.
 EOF
 
         # opkg 支持 control 中的 postinst（需可执行位）：安装后注册开机自启
@@ -253,7 +256,7 @@ POSTINST
             --info "name:$LUCI_NAME" \
             --info "version:${VER}-r${REL}" \
             --info "arch:$ARCH" \
-            --info "description:Taygedo auto attendance (塔吉多自动签到)" \
+            --info "description:Taygedo auto attendance (LuCI only, no WebUI)" \
             --info "license:GPL-3.0-only" \
             --info "maintainer:LianXia233" \
             --info "url:https://github.com/LianXia233/taygedo-CI" \

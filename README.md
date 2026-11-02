@@ -38,14 +38,28 @@
 <a id="architecture-notice"></a>
 
 > [!IMPORTANT]
-> ### 📢 v0.7.1 之后（Unreleased）的分平台口径说明（必读）
+> ### 📢 v0.7.1 之后（Unreleased）的构建形态说明（必读）
 >
-> 同一份二进制，两种形态，**区别只在于"有没有内置 WebUI"**：
+> **同一份源码，两个互斥的编译产物**——形态由 Cargo feature 在编译期决定，
+> 运行期不再做任何探测（`TAYGEDO_EDITION` 已移除）：
 >
-> 1. **🌐 OpenWrt 环境**：**LuCI 界面是唯一的图形交互入口**（「服务 ➔ 塔吉多签到」）。不提供内置 WebUI（`GET /` 返回 404），也没有自有口令登录。浏览器不直连服务端口、不持有加密材料；数据由服务端的 rpcd ucode 内部通道（`luci.taygedo`）以已认证 LuCI 会话身份回环请求 `http://127.0.0.1:<port>`。后端只监听回环，端口不对局域网开放。
-> 2. **🪟 Windows / 🐧 Debian / 🐳 Docker 独立部署**：**自带内置 WebUI**（`http://127.0.0.1:8787`），账号密码登录，业务接口需 Bearer token。首次启动生成随机口令，仅在启动横幅 / 日志中打印一次。浏览器与后端之间走应用层加密 v2（X25519 + Ed25519 + XChaCha20-Poly1305），并配合 Ed25519 签名的静态资源清单做前端完整性校验——**没有静默明文降级**。
+> | 形态 | 构建命令 | 产物 | 入口 |
+> | :--- | :--- | :--- | :--- |
+> | `webui`（默认） | `cargo build --release` | Windows / Debian / Docker / 静态 Linux | 内置 WebUI |
+> | `openwrt` | `cargo build --release --no-default-features --features openwrt` | `*.tar.gz`（`-openwrt` 后缀） | 仅 LuCI |
 >
-> 两条形态共用同一套业务 API 与加密实现，OpenWrt 侧的行为与 v0.7.1 完全一致。
+> 1. **🌐 OpenWrt 形态**：**LuCI 界面是唯一的图形交互入口**（「服务 ➔ 塔吉多签到」）。
+>    该产物里**不存在**首页、登录/登出/改密接口、静态资源与握手端点——不是
+>    "注册了路由再返回 404/410"，而是这些代码根本没有被编译进去。浏览器不直连
+>    服务端口、不持有加密材料；数据由服务端的 rpcd ucode 内部通道（`luci.taygedo`）
+>    以已认证 LuCI 会话身份回环请求 `http://127.0.0.1:<port>`，后端只监听回环。
+> 2. **🪟 Windows / 🐧 Debian / 🐳 Docker 形态**：**自带内置 WebUI**
+>    （`http://127.0.0.1:8787`），账号密码登录，业务接口需 Bearer token。首次启动
+>    生成随机口令，仅在启动横幅打印一次。浏览器与后端之间走应用层加密 v2
+>    （X25519 + Ed25519 + XChaCha20-Poly1305），并配合 Ed25519 签名的静态资源
+>    清单做前端完整性校验——**没有静默明文降级**。
+>
+> 两者共用同一套业务 API 与存储层；差异只在"有没有前端与自有凭据"。
 
 ---
 
@@ -61,7 +75,7 @@
 | :---: | :--- | :--- | :--- |
 | **① 获取制品** | 下载对应架构的 `.ipk` 或 `.apk` | 下载解压 `taygedo-rs-windows-x86_64.zip` | 下载对应架构的 `taygedo-rs_*.deb` |
 | **② 部署运行** | `opkg install` 或 `apk add`<br>*(自动注册守护进程并开机拉起)* | **双击 `taygedo-rs.exe`**<br>*(静默启动 HTTP API 服务，默认 8787)* | `sudo dpkg -i taygedo-rs_*.deb`<br>`sudo systemctl enable --now taygedo-rs` |
-| **③ 交互管理** | 进入 LuCI 菜单：**服务 ➔ 塔吉多签到**<br>*(唯一管理入口；鉴权完全由 OpenWrt 负责)* | 通过 REST API 管理或由后台定时任务自驱<br>*(无内置网页，`GET /` 报 404)* | 通过 REST API 管理或由 systemd 守护自驱<br>*(无内置网页，`GET /` 报 404)* |
+| **③ 交互管理** | 进入 LuCI 菜单：**服务 ➔ 塔吉多签到**<br>*(唯一管理入口；鉴权完全由 OpenWrt 负责)* | 启动后自动打开内置 WebUI<br>*(账号密码登录，首次随机口令)* | 浏览器访问 `http://<服务器IP>:8787`<br>*(内置 WebUI，账号密码登录)* |
 
 ---
 
@@ -198,7 +212,7 @@ logread | grep taygedo
    ```powershell
    curl http://127.0.0.1:8787/api/meta
    ```
-   输出包含 `"edition":"standalone"`、`"webui_enabled":true` 与 `"auth_mode":"token"` 即表示服务正常运行。
+   输出包含 `"edition":"webui"`、`"webui_enabled":true` 与 `"auth_mode":"token"` 即表示服务正常运行。
 
 ---
 
@@ -293,13 +307,17 @@ docker compose up -d --build
 | `TAYGEDO_LISTEN` | `0.0.0.0:8787` (独立) / `127.0.0.1:8787` (OpenWrt) | HTTP 服务监听地址与绑定端口 |
 | `TAYGEDO_DATA_DIR` | `data` (独立) / `/etc/taygedo` (OpenWrt) | 数据持久化存放目录路径 |
 | `TAYGEDO_LAN_CIDRS` | RFC1918 网段全集 | 受信来源 IP 网段白名单（CIDR），未命中来源一律拦截 403 |
-| `TAYGEDO_CRYPTO_POLICY` | `auto` | 传输加密准入策略：`auto`（局域网明文/外网强制加密）、`always`、`never` |
-| `TAYGEDO_WEB_PASSWORD` | 随机生成 | （仅独立部署）首次启动的 WebUI 初始口令，账号固定 `admin`；不设置则随机生成并只在启动横幅打印一次 |
-| `TAYGEDO_NO_AUTH` | 关闭 | （仅 OpenWrt 排障路径）免鉴权放行；独立部署设置该变量会被**强制忽略** |
+| `TAYGEDO_CRYPTO_POLICY` | `auto` | 传输加密准入策略：`auto`（局域网明文/外网强制加密）、`always`、`never`；**仅 `webui` 产物生效**（OpenWrt 不挂信封中间件） |
+| `TAYGEDO_WEB_PASSWORD` | 随机生成 | （仅 `webui` 产物）首次启动的 WebUI 初始口令，账号固定 `admin`；不设置则随机生成并只在启动横幅打印一次 |
+| `TAYGEDO_NO_AUTH` | 关闭 | （仅 `openwrt` 产物的排障路径）免鉴权放行；`webui` 产物里该变量**连代码都不存在** |
 | `TAYGEDO_DEFAULT_SCHEDULE`| 无 | 覆盖全局默认签到执行时间（格式：`HH:MM`） |
 | `TAYGEDO_COIN_TASKS` | 无 | 覆盖金币打卡任务全局开关（`true` / `false`） |
 | `TAYGEDO_CLOUD_DURATION` | 无 | 覆盖云异环免费时长全局开关（`true` / `false`） |
-| `TAYGEDO_LUCI_SESSION_CHECK` | `true` | （仅 OpenWrt 生效）是否强校验 LuCI 会话，设为 `false` 退回仅回环放行 |
+| `TAYGEDO_LUCI_SESSION_CHECK` | `true` | （仅 `openwrt` 产物）是否强校验 LuCI 会话，设为 `false` 退回仅回环放行 |
+
+> 形态相关变量不会互相"串味"：`TAYGEDO_WEB_PASSWORD` 在 OpenWrt 产物里没有
+> 读取点，`TAYGEDO_NO_AUTH` / `TAYGEDO_LUCI_SESSION_CHECK` 在 `webui` 产物里
+> 也没有。设置错产物对应的变量不会有任何效果，也不会报错。
 
 ---
 
@@ -309,8 +327,10 @@ docker compose up -d --build
 <details>
 <summary><strong>Q: 在浏览器打开 <code>http://127.0.0.1:8787</code> 返回 404 Not Found？</strong></summary>
 
-> 这是 **OpenWrt 形态**的正常现象：该形态不提供内置 WebUI，入口是 LuCI 菜单「**服务 ➔ 塔吉多签到**」。
-> 在 **Windows / Debian / Docker** 独立部署下，同一地址应直接打开登录界面；若也返回 404，检查是否误设了 `TAYGEDO_EDITION=openwrt`（`/api/meta` 的 `edition` 字段可直接确认）。
+> 这是 **OpenWrt 形态**的正常现象：该产物里没有 WebUI 路由，入口是 LuCI 菜单「**服务 ➔ 塔吉多签到**」。
+> 在 **Windows / Debian / Docker** 下，同一地址应直接打开登录界面；若也返回 404，
+> 说明装错了产物——请确认二进制是用默认 feature（`webui`）编译的，
+> `curl http://127.0.0.1:8787/api/meta` 的 `edition` 字段会直接告诉你答案。
 </details>
 
 <details>

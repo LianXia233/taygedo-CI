@@ -50,6 +50,12 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 1) 编译各平台二进制
+  #
+  # 形态在编译期确定（Cargo feature），因此同一 target 要出两份产物：
+  #   - 默认（webui）：Windows / Debian / Docker / 静态 Linux 部署
+  #   - openwrt：只含业务 API，入口是 LuCI，不含任何前端资产
+  # OpenWrt 包必须用后者：它下载的是 `*-openwrt.tar.gz`，而不是通配的
+  # Linux 产物——否则装到路由器上的仍是一个带 WebUI 的通用二进制。
   # ---------------------------------------------------------------------------
   build:
     name: build-${{ matrix.name }}
@@ -58,19 +64,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows
+          # Windows（内置 WebUI）
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
+            cargo_features: ""
+            suffix: ""
             cross: false
-          # Linux musl（用于 OpenWrt / 静态部署）
+          # Linux musl（独立部署：静态二进制，带 WebUI）
           - name: linux-x86_64-musl
             os: ubuntu-latest
             target: x86_64-unknown-linux-musl
+            cargo_features: ""
+            suffix: ""
             cross: true
           - name: linux-aarch64-musl
             os: ubuntu-latest
             target: aarch64-unknown-linux-musl
+            cargo_features: ""
+            suffix: ""
+            cross: true
+          # OpenWrt（LuCI 集成：无 WebUI、无前端资产）
+          - name: openwrt-x86_64-musl
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cargo_features: "--no-default-features --features openwrt"
+            suffix: "-openwrt"
+            cross: true
+          - name: openwrt-aarch64-musl
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            cargo_features: "--no-default-features --features openwrt"
+            suffix: "-openwrt"
             cross: true
     steps:
       - uses: actions/checkout@v7
@@ -101,11 +126,11 @@ jobs:
 
       - name: Build (native)
         if: matrix.cross == false
-        run: cargo build --release --locked
+        run: cargo build --release --locked ${{ matrix.cargo_features }}
 
       - name: Build (cross)
         if: matrix.cross == true
-        run: cross build --release --locked --target ${{ matrix.target }}
+        run: cross build --release --locked --target ${{ matrix.target }} ${{ matrix.cargo_features }}
 
       - name: Locate binary
         id: bin
@@ -131,8 +156,10 @@ jobs:
         run: |
           mkdir -p dist
           cp "${{ steps.bin.outputs.path }}" dist/taygedo-rs
-          tar czf taygedo-rs-${{ matrix.target }}.tar.gz -C dist taygedo-rs
-          cp taygedo-rs-${{ matrix.target }}.tar.gz dist/
+          NAME="taygedo-rs-${{ matrix.target }}${{ matrix.suffix }}.tar.gz"
+          tar czf "$NAME" -C dist taygedo-rs
+          cp "$NAME" dist/
+          echo "packaged: $NAME"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -198,9 +225,9 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            artifact: linux-x86_64-musl
+            artifact: openwrt-x86_64-musl
           - arch: aarch64_cortex-a53
-            artifact: linux-aarch64-musl
+            artifact: openwrt-aarch64-musl
     steps:
       - uses: actions/checkout@v7
       - name: Download binary

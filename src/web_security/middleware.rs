@@ -111,8 +111,12 @@ pub async fn crypto_middleware(
             // OpenWrt 上后端只监听回环，回环调用就是 rpcd/ucode 内部通道：
             // 该通道由 LuCI 会话鉴权，浏览器触达不到，因此不强制信封。
             // 独立部署保持 always 的严格语义（含回环来源）。
+            //
+            // 形态是编译期常量（`openwrt` feature），不是运行期探测；该中间件
+            // 本身也只在 `webui` 形态挂载，因此这个分支在 OpenWrt 产物里不会
+            // 被走到，保留只是为了两种形态共用同一份请求处理代码。
             let internal =
-                crate::service::is_openwrt() && matches!(peer_ip, Some(ip) if ip.is_loopback());
+                crate::service::IS_OPENWRT && matches!(peer_ip, Some(ip) if ip.is_loopback());
             !internal
         }
         // auto：回环与内网白名单来源可明文；其余来源必须加密。

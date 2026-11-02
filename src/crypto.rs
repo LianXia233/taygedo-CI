@@ -13,7 +13,7 @@
 use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use rand::{Rng, RngCore};
+use rand::RngCore;
 use scrypt::{scrypt, Params};
 
 use crate::models::EncryptedPassword;
@@ -114,18 +114,24 @@ pub fn decrypt_password(
 }
 
 // ---------------------------------------------------------------------------
-// WebUI 登录口令哈希
+// WebUI 登录口令哈希（仅 `webui` 形态）
 // ---------------------------------------------------------------------------
+//
+// OpenWrt 形态没有自有口令：入口是 LuCI，鉴权交给 ubus 会话。因此这些
+// 函数与版本常量不进入 OpenWrt 产物——不是"定义了但没人调"。
 
 /// 口令哈希版本：v2 = scrypt + 16 字节盐。
+#[cfg(feature = "webui")]
 pub const PWD_HASH_V2: u8 = 2;
 /// 口令哈希版本：v1 = 单轮 sha256 + 8 字节盐（旧格式，仅兼容校验）。
+#[cfg(feature = "webui")]
 pub const PWD_HASH_V1: u8 = 1;
 
 /// 计算 v2 口令哈希：`hex(scrypt(password, salt, N=16384, r=8, p=1, dkLen=32))`。
 ///
 /// 与 v1 的 `sha256(salt:password)` 相比，单次校验成本提升约 5-6 个数量级，
 /// 使离线字典攻击在实用时间尺度上不可行。
+#[cfg(feature = "webui")]
 pub fn hash_password_v2(password: &str, salt: &str) -> String {
     let params = scrypt_params();
     let mut out = [0u8; 32];
@@ -134,6 +140,7 @@ pub fn hash_password_v2(password: &str, salt: &str) -> String {
 }
 
 /// 计算 v1 口令哈希（仅用于兼容校验与迁移）。
+#[cfg(feature = "webui")]
 pub fn hash_password(password: &str, salt: &str) -> String {
     let mut buf = Vec::with_capacity(salt.len() + 1 + password.len());
     buf.extend_from_slice(salt.as_bytes());
@@ -143,6 +150,9 @@ pub fn hash_password(password: &str, salt: &str) -> String {
 }
 
 /// 恒定时间字节比较，避免口令校验的时序侧信道。
+///
+/// 仅 `webui` 形态的登录校验使用；OpenWrt 形态由 ubus 会话判定身份。
+#[cfg_attr(feature = "openwrt", allow(dead_code))]
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -160,13 +170,15 @@ fn sha256(data: &[u8]) -> Vec<u8> {
 }
 
 /// 生成 len 字节密码学随机数据（盐值、初始口令熵源等场景）。
+#[cfg(feature = "webui")]
 pub fn random_bytes(len: usize) -> Vec<u8> {
     let mut buf = vec![0u8; len];
     rand::thread_rng().fill_bytes(&mut buf);
     buf
 }
 
-/// 生成 n 字节随机十六进制字符串。
+/// 生成 n 字节随机十六进制字符串（登录 token / 口令盐）。
+#[cfg(feature = "webui")]
 pub fn random_hex(n: usize) -> String {
     random_bytes(n)
         .iter()
@@ -177,7 +189,10 @@ pub fn random_hex(n: usize) -> String {
 /// 生成可读性优先的随机口令（用于取代默认 admin 口令）。
 ///
 /// 字母表刻意排除易混淆字符（0/O、1/l/I），长度 16，熵约 91 bit。
+#[cfg(feature = "webui")]
 pub fn generate_passphrase(len: usize) -> String {
+    use rand::Rng;
+
     const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
     let mut rng = rand::thread_rng();
     // 公平取模：丢弃超出 256/len 整数倍范围的字节，避免模偏置
@@ -193,8 +208,8 @@ pub fn generate_passphrase(len: usize) -> String {
     out
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, feature = "webui"))]
+mod webui_tests {
     use super::*;
 
     #[test]
@@ -231,6 +246,11 @@ mod tests {
         assert_eq!(h.len(), 32);
         assert!(h.bytes().all(|b| b.is_ascii_hexdigit()));
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     #[test]
     fn constant_time_eq_works() {

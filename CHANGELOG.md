@@ -2,12 +2,101 @@
 
 本文件记录塔吉多自动签到（Rust 版）的所有版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.5.2`。
+> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.6.0`。
 
 > **关于初始口令的重要提示**：`admin / admin` 这类固定初始口令**仅存在于 0.5.0 之前的历史版本**，
 > 下方旧版本条目（如 0.2.0）中的相关描述是当时的事实记录，**不代表当前行为**。
 > 0.5.0 起首次启动一律由 CSPRNG 随机生成初始口令，仅在启动横幅打印一次。
 > 以 [README](README.md) 的说明为准。
+
+## [0.6.0] - 2026-11-20
+
+> **破坏性安全升级**：配置不再以明文落盘，WebUI 通信协议升级到 `taygedo/v2`。
+> 升级前请先阅读 [docs/encrypted-storage.md](docs/encrypted-storage.md) 的「备份与恢复」一节，
+> 并确认 `keys/master.key` 可与密文分开备份。
+> 旧版（0.5.x）数据目录**可直接使用**，首次启动会自动迁移并保留加密备份。
+
+### 新增 · 配置文件静态加密
+
+- **全部受管文件密文化**：`accounts.json` / `config.json` / `state.json` / `keyring.json`
+  一律以 **XChaCha20-Poly1305 + HKDF-SHA256** 密文落盘，OS CSPRNG 生成 salt/nonce。
+- **统一信封格式**：Magic `TGDENV01` + 格式版本 + 算法号 + KeyID(16B) + Salt(32B) +
+  Nonce(24B) + 密文长度 + 密文 + Tag(16B)；解析严格校验边界，截断/追加/零长度一律拒绝。
+- **AAD 绑定文件逻辑身份**：`taygedo/storage/aad/v1` + 版本 + 算法 + KeyID + 身份，
+  跨文件搬移、跨目录搬移、跨主密钥解密全部在解密前失败。
+- **三平台主密钥保护**：Debian 优先 systemd `LoadCredentialEncrypted`（TPM2）、
+  回落 root `0600` 文件；Windows 用 DPAPI（默认用户作用域，可用
+  `TAYGEDO_DPAPI_MACHINE=1` 切机器作用域）；OpenWrt 用 root `0600` 文件，
+  不依赖 systemd/TPM，不影响 procd 与 LuCI。
+- **旧版明文自动迁移**：识别格式 → 按身份校验 JSON 结构 → 加密 → 临时文件 →
+  回读校验 → 原子替换 → 保留**加密**备份（`.enc-bak-<ts>`，最多 3 份）→ 记录 journal。
+  支持中断续做、幂等、失败不覆盖原文件、不删除明文。
+- **密钥轮换**：`taygedo-rs --rotate-storage-key`，新密钥先落 `master.key.pending`，
+  逐文件重加密后原子提升；中断后**一次重启即可续做完成**。
+- **绝不静默丢数据**：密钥缺失/损坏、密文认证失败、权限过宽 → 启动期 `[fatal]` 退出并
+  保留原文件；运行期返回 `Err`。不再有「损坏就改名 `.corrupt-*` 后返回默认配置」的行为。
+- **文件系统防护**：`O_NOFOLLOW`、`fstat` 校验 `nlink==1` 与属主、权限严格 `0600`、
+  `O_EXCL` 随机临时名、`fsync` 文件与目录、`fs4` 排他锁防并发实例。
+
+### 新增 · 应用层加密协议 v2
+
+- **协议重写为 `taygedo/v2`**：Ed25519 长期身份 + X25519 临时密钥交换 +
+  HKDF-SHA256 + **XChaCha20-Poly1305**（替换 v1 的 AES-256-GCM 与计数器 nonce）。
+- **握手签完整 Transcript**：版本 + 双方临时公钥 + 双方随机数 + 身份公钥 + sid + ts，
+  并由服务端 Ed25519 签名；客户端验签 + 指纹比对（TOFU）后才派生 c2s/s2c。
+- **请求/响应 AAD 绑定** `kid ‖ sid ‖ seq ‖ method ‖ path?query ‖ nonce`，
+  响应额外绑定 `req_seq`；客户端校验 `rseq`，防响应替换与乱序错配。
+- **防重放改为滑动窗口**（4096）：解决并发乱序请求与「严格递增」冲突；
+  仅在 AEAD 成功后消费序号，伪造报文不能挤掉合法序号。
+- **前端资源完整性**：`/static/manifest.json` 由 Ed25519 签名，覆盖 11 个资源
+  （含首页 HTML）；`web_guard.js` 验签 + 指纹比对 + 逐文件 SHA-256，
+  不通过则**业务 JS 不执行、登录按钮禁用**。
+- **纯 JS 密码学**：内置 `@noble/ciphers`、`@noble/curves`、`@noble/hashes`
+  （MIT，Cure53 审计），因为普通 HTTP 属于非安全上下文，`crypto.subtle` 不可用。
+- **GET/HEAD 信封走 `X-TGD-Envelope` 头**：`fetch` 与 undici 不允许 GET 带 body；
+  头与 body 走同一校验路径，两者并存直接 `400 malformed`。
+- **服务端结构拆分**：`web_security/` 下新增 `error.rs`、`session.rs`、`middleware.rs`，
+  加解密中间件从 `web.rs` 移出，业务 handler 只看到明文 JSON。
+- **新增接口**：`GET /api/secure/identity`（身份公钥与指纹）、`GET /static/manifest.json`。
+
+### 变更
+
+- `Store` 对外 API 改为返回 `Result`：`load_accounts()` / `load_config()` / `load_state()` /
+  `load_keyring()`。调用方必须处理错误，不再有"读失败返回默认值"的路径。
+- `AppState::new` 返回 `Result`，存储层失败 → `[fatal]` 退出（不再带病启动）。
+- 启动横幅新增「配置加密」与「Key ID」两行；`/api/meta` 新增 `crypto_proto` /
+  `crypto_alg` / `crypto_identity_kid`。
+- 删除 `src/session.rs`（v1 会话状态机），由 `web_security/` 取代。
+- 传输层不再使用 AES-256-GCM（v1 的计数器 nonce 方案整体退役），因此 README 里
+  关于 aarch64 `aes_armv8` 编译参数的性能/侧信道提示**不再适用于传输加密**。
+  注意：`aes` / `aes-gcm` 依赖仍然保留——它们分别用于游戏接口的签名计算
+  （`protocol.rs`）与账号凭据的二次加密（`crypto.rs`），与本次改造无关。
+- `.github/workflows/build.yml` 新增 `quality` 作业（fmt / clippy `-D warnings` /
+  `cargo test` / 真实二进制端到端协议测试）与 `audit` 作业（RustSec，非阻塞）；
+  `release` 改为依赖 `quality`，安全回归不再可能流到 Release。
+- `scripts/package.sh`：deb 的 systemd unit 补充 systemd 凭据用法说明，postinst
+  收紧 `/var/lib/taygedo` 与 `keys/` 权限；OpenWrt `init.d` 兜底 `chmod 700/600`。
+- README 的加密章节重写，明确区分「传输加密」与「存储加密」，并如实列出
+  本次已验证与**尚未在真机验证**的项目。
+
+### 修复
+
+- **续做轮换后仍用旧密钥**：`resume_rotation` 会把 `master.key.pending` 提升为正式密钥，
+  但进程内 `StorageCrypto` 仍持旧密钥，导致本次启动读新密文必然 `KeyIdMismatch`
+  ——等于要求用户重启两次。现在续做成功后立即重新装载主密钥。
+  （新增测试 `interrupted_rotation_is_resumed_in_one_start`，去掉修复即失败。）
+
+### 测试
+
+- 单元/集成测试 **97 passed / 0 failed**（`cargo test`）。
+- 端到端协议测试 `scripts/e2e_web.mjs`：真实二进制 + 仓库内真实前端文件，
+  **21/21 通过**。覆盖：
+  - 清单验签 + 11 个资源哈希；
+  - 加载真实的 `web_guard.js` 对真实清单执行完整性校验：TOFU 首次、指纹已固定、
+    指纹变更被拒、资源被替换（哈希不符）被拒、资源恢复后自愈；
+  - 握手验签、登录、账号/配置/日志往返；
+  - 重放拒绝、跨接口搬移拒绝、GET 走头与 POST 走 body、正文与头并存拒绝、明文 428。
+- `cargo fmt --all -- --check` 与 `cargo clippy --all-targets -- -D warnings` 均无输出。
 
 ## [0.5.2] - 2026-11-01
 

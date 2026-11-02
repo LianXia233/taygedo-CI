@@ -11,7 +11,18 @@
 
 ## [Unreleased]
 
-（暂无）
+### CI · 补齐审计作业的 `checks: write` 权限
+
+`dependency-audit` 作业在 `v0.7.1` 发布构建中失败，日志为
+`Resource not accessible by integration - checks/runs`：`rustsec/audit-check@v2`
+需要创建 check run 来承载审计结论，而作业只拿到了默认的只读令牌。
+**这是权限缺失，不是漏洞问题**——同一次运行的审计结论是 `vulnerabilities found: false`
+（count 0），仅剩一条 `chacha20` yanked 提示（经 `quinn` 的 `http3` 特性进入锁文件，
+本项目未启用该特性，该包不参与编译）。
+
+修法是给该作业加作业级最小权限 `contents: read` + `checks: write`，不改工作流顶层
+`permissions`、不放开其他作业、不动 `continue-on-error` 与失败阈值、不加 ignore 列表。
+作业级 `permissions` 是整体覆盖而非追加，因此该作业的 `contents` 由顶层的 `write` 收窄为 `read`。
 
 ## [0.7.1] - 2026-11-03
 

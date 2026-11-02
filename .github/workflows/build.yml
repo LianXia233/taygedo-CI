@@ -35,6 +35,13 @@ jobs:
     name: dependency-audit
     runs-on: ubuntu-latest
     continue-on-error: true
+    # 审计作业本身不写仓库，但 rustsec/audit-check 需要创建 check run 来承载结论；
+    # 缺 checks: write 时它会在日志里报 "Resource not accessible by integration - checks/runs"
+    # 并以失败退出（曾被误读成漏洞问题，实际审计结论是 0 漏洞）。这里给作业级最小权限，
+    # 同时不继承工作流顶层的 contents: write —— 作业级 permissions 是整体覆盖，不是追加。
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v7
       - uses: rustsec/audit-check@v2

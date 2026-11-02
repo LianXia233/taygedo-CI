@@ -28,7 +28,7 @@ jobs:
     name: quality
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # GitHub runner 直连 crates.io；仓库里的 .cargo/config.mirror.toml 是给
       # 受限网络环境准备的 include，这里清空避免指向不可达镜像。
@@ -60,7 +60,7 @@ jobs:
       - name: Build binary for E2E
         run: cargo build --locked
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
 
@@ -87,7 +87,7 @@ jobs:
       # 归档服务端日志，失败时方便定位（E2E 失败时二进制日志是第一现场）
       - name: Upload server log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-server-log
           path: server.log

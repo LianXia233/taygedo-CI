@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -66,7 +66,7 @@ jobs:
             target: aarch64-unknown-linux-musl
             cross: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 仅清空镜像 include 文件（而非删除整个 config.toml）：GitHub runners
       # 直连 crates.io，无需 rsproxy；但 config.toml 里的 aarch64 aes_armv8
@@ -128,7 +128,7 @@ jobs:
           cp taygedo-rs-${{ matrix.target }}.tar.gz dist/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           path: dist/
@@ -140,7 +140,7 @@ jobs:
     name: debian-amd64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Use default crates.io on GitHub runners
         shell: bash
         run: printf '' > .cargo/config.mirror.toml
@@ -174,7 +174,7 @@ jobs:
         run: |
           bash scripts/package.sh deb x86_64 target/release/taygedo-rs \
             "${{ steps.ver.outputs.version }}" dist-deb "${{ steps.ver.outputs.release }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: debian-amd64
           path: dist-deb/*.deb
@@ -195,9 +195,9 @@ jobs:
           - arch: aarch64_cortex-a53
             artifact: linux-aarch64-musl
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.artifact }}
           path: bin
@@ -261,7 +261,7 @@ jobs:
             "${{ steps.ver.outputs.version }}" dist-openwrt "${{ steps.ver.outputs.release }}"
           bash scripts/package.sh apk "${{ matrix.arch }}" "$BIN" \
             "${{ steps.ver.outputs.version }}" dist-openwrt "${{ steps.ver.outputs.release }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: openwrt-${{ matrix.arch }}
           path: dist-openwrt/
@@ -274,10 +274,10 @@ jobs:
     needs: [quality, build, debian, openwrt]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -362,7 +362,7 @@ jobs:
           cat notes.md
 
       - name: Publish to GitHub Releases
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.rel.outputs.tag }}
           target_commitish: ${{ github.sha }}

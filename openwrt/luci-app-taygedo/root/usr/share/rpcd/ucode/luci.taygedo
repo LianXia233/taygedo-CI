@@ -5,9 +5,14 @@
 // 设计约束（与仓库其余部分一致，刻意保持最小实现，不引入新框架）：
 //   - 浏览器不直连后端端口：本插件在 rpcd 服务端（root 身份）用 curl 调
 //     本机回环 http://127.0.0.1:<uci port>。
-//   - 身份由 OpenWrt 提供：前端把 L.env.sessionid（ubus_rpc_session）作为
-//     sid 参数传入，本插件原样透传为 X-TGD-Luci-Session 头；后端再调用
-//     `ubus call session get` 校验。本插件不签发、不缓存任何凭据。
+//   - 身份由 OpenWrt 提供，且**只认 rpcd 注入的服务端真值**：
+//     本固件的 rpcd-mod-ucode 不提供 request.session，而是把已认证会话号放进
+//     request.args.ubus_rpc_session（客户端伪造该键会被 ubus 以 Invalid
+//     parameters 拒绝）。较新 rpcd 若有 request.session 则优先使用。
+//     前端传入的 args.sid 仅用于让 ubus 签名保持兼容，**不作为信任依据**。
+//     真实鉴权发生在 rpcd 的 ACL 检查（acl.d/luci-app-taygedo.json，按方法粒度）；
+//     本插件把会话号透传为 X-TGD-Luci-Session，后端在"OpenWrt + 回环"路径下
+//     只做形态校验，不再嵌套调用 ubus（嵌套会与 rpcd 自身 uloop 死锁）。
 //   - 方法白名单：每个 ubus 方法对应唯一固定的 HTTP 方法与路径，参数只允许
 //     出现在 body 或严格校验过的 id/limit 上，避免把请求参数拼进 shell。
 //   - ACL 粒度为单个方法（见 acl.d/luci-app-taygedo.json），不使用"一个通吃
@@ -44,6 +49,18 @@ function valid_id(id) {
 	return type(id) == 'string' && match(id, /^[A-Za-z0-9_-]{1,64}$/) ? true : false;
 }
 
+// 调用方会话号：只取服务端真值，忽略前端传入的 args.sid。
+function caller_session(request) {
+	if (type(request.session) == 'string') {
+		let s = trim(request.session);
+		if (length(s) > 0)
+			return s;
+	}
+	if (request.args != null && type(request.args.ubus_rpc_session) == 'string')
+		return trim(request.args.ubus_rpc_session);
+	return '';
+}
+
 function fail(http, msg) {
 	return { ok: false, http: http, error: msg };
 }
@@ -58,7 +75,7 @@ function rmdir_tmp(dir) {
 // 命令行里只出现「已验证的 sid/id」与「本插件自己生成的临时路径」。
 function call(request, opt) {
 	let args = request.args != null ? request.args : {};
-	let sid = args.sid;
+	let sid = caller_session(request);
 	let path = opt.path(args);
 
 	if (path == null)

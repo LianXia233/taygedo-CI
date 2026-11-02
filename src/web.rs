@@ -386,11 +386,21 @@ async fn static_asset(Path(path): Path<String>) -> Response {
 /// 1. **来源**：回环或 `lan_cidrs` 命中的受信地址。非受信来源一律 403，
 ///    因此即使服务被误监听在 `0.0.0.0`，公网来源也进不来业务接口。
 /// 2. **OpenWrt 会话**（仅 OpenWrt 集成模式）：要求 `X-TGD-Luci-Session`，
-///    由 rpcd/ucode 内部通道携带，交给本机 ubus `session get` 判定。
-///    本服务不签发、不校验自有凭据，登录态完全由 OpenWrt 维护。
+///    由 rpcd/ucode 内部通道携带。
 ///
-/// 独立部署（非 OpenWrt）无自有登录体系，第 2 道门不生效，等价于"受信内网
-/// 直通"；这是移除 WebUI 后的既定取舍，README 的"安全边界"一节如实说明。
+/// 会话这一道分两种路径，信任前提不同（详见 `session_gate`）：
+///
+/// - **内部通道**（OpenWrt + 回环来源）：会话号只做形态校验。真实鉴权发生在
+///   rpcd 一侧 —— LuCI 的每次调用都要先通过 rpcd 的 ACL（`acl.d/luci-app-taygedo.json`
+///   按方法粒度声明 read/write），未登录会话根本调不到 `luci.taygedo` 的方法，
+///   而 rpcd 插件传给本服务的是它自己的 `request.session`（服务端真值）。
+///   此处**不能**再嵌套 `ubus call session get`：rpcd 的 ucode 方法在自身 uloop
+///   内同步执行，后端此时发起的 ubus 请求等不到同一进程应答，会卡满超时后被
+///   判无效（死锁根因）。
+/// - **其它来源**（OpenWrt 下的非回环来源）：保留 `ubus call session get` 校验，
+///   不做任何放宽。独立部署（非 OpenWrt）没有 OpenWrt 会话，第 2 道门不生效，
+///   等价于"受信内网直通"；这是移除 WebUI 后的既定取舍，README 的"安全边界"
+///   一节如实说明。
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     req: axum::extract::Request,
@@ -399,7 +409,8 @@ async fn auth_middleware(
     let peer_ip = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
-        .map(|ci| ci.0.ip());
+        .map(|ci| ci.0.ip())
+        .map(normalize_ip);
 
     let trusted = peer_ip.map(|ip| is_trusted_source(&state, ip));
     if !trusted.unwrap_or(false) {
@@ -423,34 +434,79 @@ async fn auth_middleware(
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
 
-    if sid.is_empty() {
-        return api_error(
+    let loopback = peer_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
+    match session_gate(service::is_openwrt(), loopback, &sid) {
+        SessionGate::InternalChannel => next.run(req).await,
+        SessionGate::Missing => api_error(
             StatusCode::UNAUTHORIZED,
             "luci_session_missing",
             "缺少 LuCI 会话：请从 LuCI 菜单「服务 → 塔吉多签到」进入",
-        );
-    }
-    if !luci_session::validate(&sid).await {
-        return api_error(
+        ),
+        SessionGate::Malformed => api_error(
             StatusCode::UNAUTHORIZED,
             "luci_session_invalid",
             "LuCI 会话无效或已过期：请重新登录路由器管理界面后再打开本页",
-        );
+        ),
+        SessionGate::UbusCheck => {
+            if !luci_session::validate(&sid).await {
+                return api_error(
+                    StatusCode::UNAUTHORIZED,
+                    "luci_session_invalid",
+                    "LuCI 会话无效或已过期：请重新登录路由器管理界面后再打开本页",
+                );
+            }
+            next.run(req).await
+        }
     }
-
-    next.run(req).await
 }
 
-/// 来源是否受信：回环无条件受信，其它地址按 `lan_cidrs` 白名单判定。
-fn is_trusted_source(state: &AppState, ip: std::net::IpAddr) -> bool {
-    // IPv4-mapped IPv6（::ffff:127.0.0.1）先归一，避免回环判定失效
-    let ip = match ip {
+/// 会话门的判定结果（纯函数，便于单测；不含任何 I/O）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionGate {
+    /// 内部通道放行：OpenWrt + 回环来源 + 会话号形态合法。
+    /// 真实鉴权由 rpcd ACL 完成，这里只确认"调用确实经由内部通道"。
+    InternalChannel,
+    /// 需要交给 ubus 二次校验（OpenWrt 下的非回环来源）。
+    UbusCheck,
+    /// 缺少会话号。
+    Missing,
+    /// 会话号形态非法（越界长度或含可注入字符）。
+    Malformed,
+}
+
+/// 会话门判定：把"来源 + 运行形态 + 会话号"压成一个结果码。
+///
+/// - OpenWrt + 回环 + 形态合法 → `InternalChannel`（不触发 ubus，避免 rpcd 死锁）
+/// - OpenWrt + 回环 + 形态非法 → `Malformed`（拒绝）
+/// - 非回环来源（OpenWrt 或其它）→ `UbusCheck`，保持原有 ubus 校验强度
+/// - 空会话号 → `Missing`
+pub fn session_gate(openwrt: bool, loopback: bool, sid: &str) -> SessionGate {
+    if sid.is_empty() {
+        return SessionGate::Missing;
+    }
+    if openwrt && loopback {
+        return if luci_session::is_well_formed(sid) {
+            SessionGate::InternalChannel
+        } else {
+            SessionGate::Malformed
+        };
+    }
+    SessionGate::UbusCheck
+}
+
+/// IPv4-mapped IPv6（`::ffff:127.0.0.1`）归一为 IPv4，避免回环判定失效。
+fn normalize_ip(ip: std::net::IpAddr) -> std::net::IpAddr {
+    match ip {
         std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
             Some(v4) => std::net::IpAddr::V4(v4),
             None => ip,
         },
         other => other,
-    };
+    }
+}
+
+/// 来源是否受信：回环无条件受信，其它地址按 `lan_cidrs` 白名单判定。
+fn is_trusted_source(state: &AppState, ip: std::net::IpAddr) -> bool {
     ip.is_loopback() || state.lan_matches(ip)
 }
 
@@ -504,7 +560,7 @@ async fn meta_api(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> Json<serde_json::Value> {
     let cfg = state.config.read().await;
-    let peer_ip = Some(addr.ip());
+    let peer_ip = Some(normalize_ip(addr.ip()));
     let openwrt = service::is_openwrt();
     let session_auth = service::luci_session_required();
     let is_lan = peer_ip
@@ -818,4 +874,50 @@ fn mask_phone(p: Option<&str>) -> Option<String> {
             p.to_string()
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SID: &str = "0123456789abcdef0123456789abcdef";
+
+    /// 方案 A：内部通道（OpenWrt + 回环）只做形态校验即放行，不触发 ubus。
+    #[test]
+    fn internal_channel_passes_without_ubus() {
+        assert_eq!(session_gate(true, true, SID), SessionGate::InternalChannel);
+    }
+
+    /// 内部通道上形态非法的会话号必须拒绝（不得因为"来自回环"就跳过校验）。
+    #[test]
+    fn internal_channel_rejects_malformed_sid() {
+        assert_eq!(session_gate(true, true, "short"), SessionGate::Malformed);
+        assert_eq!(
+            session_gate(true, true, "0123456789abcdef\"}"),
+            SessionGate::Malformed
+        );
+        assert_eq!(session_gate(true, true, ""), SessionGate::Missing);
+        let too_long = "a".repeat(129);
+        assert_eq!(session_gate(true, true, &too_long), SessionGate::Malformed);
+    }
+
+    /// 非回环来源不走内部通道，保持 ubus 二次校验（不放宽外部路径强度）。
+    #[test]
+    fn non_loopback_source_keeps_ubus_check() {
+        assert_eq!(session_gate(true, false, SID), SessionGate::UbusCheck);
+        // 独立部署不启用会话门；即便被调用也按需 ubus 校验，不做额外放行
+        assert_eq!(session_gate(false, false, SID), SessionGate::UbusCheck);
+        // 非 OpenWrt 但来源为回环：同样不进内部通道分支
+        assert_eq!(session_gate(false, true, SID), SessionGate::UbusCheck);
+        assert_eq!(session_gate(true, false, ""), SessionGate::Missing);
+    }
+
+    /// 回环地址归一：`::ffff:127.0.0.1` 必须被识别为回环。
+    #[test]
+    fn ipv4_mapped_loopback_is_normalized() {
+        let v6: std::net::IpAddr = "::ffff:127.0.0.1".parse().unwrap();
+        assert!(normalize_ip(v6).is_loopback());
+        let real_v6: std::net::IpAddr = "::1".parse().unwrap();
+        assert!(normalize_ip(real_v6).is_loopback());
+    }
 }

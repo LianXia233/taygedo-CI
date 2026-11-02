@@ -45,25 +45,56 @@
 - **启动日志**：不再打印 WebUI 访问地址或初始口令；OpenWrt 提示块改为说明
   "无内置 WebUI、无浏览器侧加密前端，数据经 rpcd/ucode 内部通道"。
 
+### 安全 · 方案 A：鉴权边界收敛到 rpcd ACL
+
+- **会话号只认服务端真值**：`/usr/share/rpcd/ucode/luci.taygedo` 新增 `caller_session(request)`，
+  从 `request.session`（较新 rpcd 提供）或 `request.args.ubus_rpc_session`（本固件
+  `rpcd-mod-ucode` 实际注入的位置）取会话号；前端传入的 `args.sid` 只用于保持 ubus 签名兼容，
+  **不作为信任依据**。客户端若自己在 params 里伪造 `ubus_rpc_session`，ubus 直接以
+  `Invalid parameters`（-32602）拒绝，该键无法被前端抢先写入。
+- **鉴权边界 = rpcd ACL**：`acl.d/luci-app-taygedo.json` 继续按方法粒度声明 read / write
+  （只读方法在 read，改配置 / 加删账号 / 签到 / 验证码在 write），未登录会话或未被授予该 ACL
+  的会话调不到 `luci.taygedo` 的任何方法（实测 `-32002 Access denied`）。
+- **后端回环路径不再嵌套 ubus**：`src/web.rs` 新增纯函数 `session_gate(openwrt, loopback, sid)`，
+  把「运行形态 + 来源 + 会话号」压成四种结果：
+  - `OpenWrt + 回环 + 会话号形态合法` → 放行（`InternalChannel`），**不再调用**
+    `ubus call session get`；只校验形态（1–128 位、`[A-Za-z0-9_.:-]`）。
+  - `OpenWrt + 回环 + 形态非法` → `401 luci_session_invalid`。
+  - 非回环来源（含 OpenWrt 与独立部署）→ `UbusCheck`，保持原有 `ubus call session get`
+    校验强度，不因修 OpenWrt 而放宽外部路径。
+  - 空会话号 → `401 luci_session_missing`。
+  死锁根因是 rpcd 的 ucode 方法在其自身 uloop 内同步执行，插件再同步发起 `ubus call`
+  等不到同一进程应答，实测恰好耗满后端 `UBUS_TIMEOUT`（2 秒）后按 fail-closed 返回 401。
+- **信任模型与代价**：回环路径的信任前提是「本机进程 + rpcd 已认证会话」；本机 root 可以直接
+  `curl http://127.0.0.1:<port>` 并自带形态合法的会话号，这与 root 已有的权限等价，
+  不构成权限提升。真正约束受限用户的是 rpcd ACL——受限 LuCI 用户即便打开页面，
+  也调不到未授权方法。两套路径的差异与信任前提见 `docs/security-transport.md` §8.2。
+
 ### 验证
 
 - **本地静态与测试**（实跑）：`cargo fmt --all -- --check`、`cargo clippy --all-targets -- -D warnings`、
-  `cargo test --all-targets`（87 passed / 0 failed）、`cargo build --release` 全部通过；
-  改动文件 CRLF 计数为 0。
+  `cargo test --all-targets`（91 passed / 0 failed，含方案 A 的 4 个会话门单测）、
+  `cargo build --release` 全部通过；改动文件 CRLF 计数为 0。
 - **本地冒烟**（`TAYGEDO_EDITION=openwrt`，临时实例 `127.0.0.1:18787`）：`GET /` 返回 `404`；
   `/api/meta` 只剩 `ok/edition/auth_mode/crypto_policy/crypto_required/crypto_proto/crypto_alg/crypto_identity_kid`；
-  `/api/config` 无会话 `401 luci_session_missing`、伪造会话 `401 luci_session_invalid`；
-  `/api/login`、`/api/logout`、`/api/password` 均为 `404`。
-- **真机**（ImmortalWrt / aarch64，部署 CI 产物后实测）：`ubus call session login` 取得的会话
-  能被 `ubus call session get` 识别为 `{"values":{"username":"root"}}`，带 `X-TGD-Luci-Session`
-  请求 `/api/config` 返回 `200` 与真实配置（`parse_session_get` 修复已验证）；
-  `ubus call luci.taygedo meta/config_get/config_set/logs` 均返回 `200`，伪造会话 `401`、
-  非法请求体 `400`；后端仅监听 `127.0.0.1:8787`，LAN 侧访问失败。
-- **真机待解决的结构性冲突**：rpcd 的 ucode 方法在自身 uloop 内处理请求，插件再同步调用
-  `ubus call`（后端校验会话）会等不到同一进程的应答，实测恰好卡满后端 2s 超时后按 fail-closed
-  返回 `401`；一旦该会话在非 rpcd 路径上校验过（缓存有效），同一会话经内部通道即可正常返回。
-  该冲突需在两种方案间取舍（rpcd ACL 作为鉴权边界、后端只认回环 / 或后端改为后台异步刷新会话缓存），
-  因此当前部署已按回滚脚本恢复，未随本版本上线。
+  `/api/config` 无会话 `401 luci_session_missing`、形态非法 `401 luci_session_invalid`、
+  回环 + 形态合法会话号 `200`（本机无 ubus，能 200 即证明回环路径确实不再依赖 ubus），
+  冷首调耗时 0.97ms；`/api/login`、`/api/logout`、`/api/password` 均为 `404`。
+- **真机**（ImmortalWrt / aarch64_cortex-a53，部署分支构建产物后实测）：`parse_session_get`
+  已能识别 rpcd 返回的 `{"values":{"username":"root"}}`；带 `X-TGD-Luci-Session` 直连回环
+  请求 `/api/config` 返回 `200`，无会话 / 形态非法一律 `401`。
+- **真机冷会话（方案 A 关键观测）**：`/etc/init.d/taygedo restart` 清空会话缓存后，
+  经 LuCI 真实的 `POST /ubus`（`luci.taygedo`）首次调用 `config_get` 与 `meta`，
+  均返回 `http:200`，实测耗时 **50ms**（进程内 uptime 差值计），
+  不再出现此前"恰好耗满 `UBUS_TIMEOUT` 2 秒后 401"的现象；
+  无会话 / 伪造会话在该路径上被 rpcd ACL 直接拒绝（`-32002 Access denied`）。
+- **真机端口与来源**：`netstat` 仅见 `127.0.0.1:8787`（无 `0.0.0.0`）；
+  从设备自身访问 `http://192.168.88.1:8787/api/meta` 连接失败（rc 非 0）；
+  直连回环的 `/api/config` 无会话 `401`、形态非法会话号 `401`。
+- **真机页面**：无头浏览器（Playwright，SSH 端口转发）登录 LuCI 后打开
+  「服务 → 塔吉多签到」，页面正常渲染账号列表、运行日志与全局设置，
+  控制台无 401、业务接口无 4xx/5xx（唯一的 403 是登录前 `/cgi-bin/luci` 自身的既知行为）；
+  `GET /`、`/api/login`、`/api/logout`、`/api/password` 均 `404`。
 
 ## [0.7.0] - 2026-11-02
 

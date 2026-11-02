@@ -408,16 +408,29 @@ file:/static/vendor/...=<sha256>:<size>
   （`/usr/share/rpcd/ucode/luci.taygedo`）→ `curl http://127.0.0.1:<port>`。
   浏览器不直连应用端口，也不加载 `taygedo-crypto.js`、不构造 `X-TGD-Envelope` 信封。
   后端只监听回环（init 脚本固定 `TAYGEDO_LISTEN=127.0.0.1:<port>`），LAN 无法触达。
-- 会话透传：插件把 `ubus_rpc_session` 作为 `X-TGD-Luci-Session` 头带给后端；后端调用
-  `ubus call session get` 判定，**同时接受顶层 `username` 与 rpcd 真机实际返回的
-  `{"values":{"username":...}}` 两种形态**（顶层为空时回落到 `values.username`）。
-  缺头 `401 luci_session_missing`，判定失败 `401 luci_session_invalid`。
-  校验结果按 `sid` 做短 TTL 缓存（有效 30s / 无效 3s），超时（2s）或 ubus 不可用
-  一律 **fail-closed**（按无效处理）。
-- 资源上界不变：同时最多 4 个 ubus 调用在跑，拿不到许可直接按无效处理（不排队）；
-  单个调用到 2s 仍未退出就 `kill()` 并回收子进程。二者都必需——`spawn_blocking`
-  一旦开始无法取消，`Command::output()` 又会一直等到子进程自行退出，若只丢弃
-  超时句柄，ubus 卡死时阻塞线程与子进程会持续堆积。
+- 会话来源：rpcd 插件只认**服务端注入**的会话号——本固件的 `rpcd-mod-ucode`
+  把已认证会话号放在 `request.args.ubus_rpc_session`（客户端自行传该键会被 ubus
+  以 `Invalid parameters` 拒绝），较新版本若提供 `request.session` 则优先使用。
+  前端传入的 `sid` 仅用于保持 ubus 签名兼容，**不作为信任依据**。
+- 鉴权边界就是 rpcd ACL：LuCI 每次调用都要先过 `acl.d/luci-app-taygedo.json`，
+  未登录会话或未被授予该 ACL 的用户**根本调不到** `luci.taygedo` 的任何方法
+  （ACL 按方法粒度声明读写，未声明方法一律拒绝）。因此后端在
+  **OpenWrt + 回环** 路径下只校验 `X-TGD-Luci-Session` 的**形态**
+  （1–128 位 `[A-Za-z0-9_.:-]`），**不再嵌套调用 `ubus call session get`**。
+  缺头 `401 luci_session_missing`，形态非法 `401 luci_session_invalid`。
+- 为什么不能嵌套：rpcd 的 ucode 方法在其自身 uloop 内同步执行，后端此时发起的
+  ubus 请求等不到同一进程应答，实测会耗满 2s 超时后按 fail-closed 判无效。
+  这正是将鉴权上移到 ACL 的原因（方案 A）。
+- 非回环来源（例如把服务误监听在 `0.0.0.0` 后来自 `lan_cidrs` 的请求）**保留**
+  `ubus call session get` 校验：该路径不经过 rpcd 的 uloop，不存在嵌套问题，
+  因此强度不做任何放宽。两套路径的差异：
+  | 路径 | 信任前提 | 判定方式 |
+  | --- | --- | --- |
+  | OpenWrt + 回环（内部通道） | rpcd 已认证会话 + 该方法已在 ACL 中授权 | 会话号形态校验，不做 ubus 二次校验 |
+  | 非回环来源（含独立部署） | 来源命中 `lan_cidrs`（独立部署无会话门） | 保留 ubus 二次校验（独立部署不启用会话门） |
+- ubus 校验仍保留的资源上界：同时最多 4 个调用（拿不到许可即按无效处理，不排队）；
+  单个调用到 2s 仍未退出就 `kill()` 并回收子进程；结果按 `sid` 做短 TTL 缓存
+  （有效 30s / 无效 3s）。这些只作用于非回环路径。
 - 会话号先经严格白名单（1–128 位 `[A-Za-z0-9_.:-]`）才拼进 shell 命令与 JSON；
   账号 id 同样白名单（`[A-Za-z0-9_-]{1,64}`）后才拼进 URL，避免注入。
 - rpcd ACL 按**方法粒度**显式声明（读 / 写分离），未声明的方法一律拒绝；
@@ -426,9 +439,10 @@ file:/static/vendor/...=<sha256>:<size>
   退回"仅回环放行"。这是显式开关，不是失败回退路径，默认关闭。
 - `/api/meta` 公开返回 `edition`（openwrt / standalone）与 `auth_mode`
   （`luci_session` / `trusted_source`）及加密策略字段，供排障核对，不含任何凭据。
-- 已知限制：`ubus session get` 只证明"这个会话号是 OpenWrt 认可的"，不细分
-  LuCI 用户的 ACL。若路由器上存在受限的 LuCI 用户，本服务无法区分其权限——
-  需要按用户区分时应改为经 rpcd 代理或引入独立授权层，当前实现不做。
+- 已知限制与代价：内部通道路径下，**本机任意 root 进程都可以直连回环端口**，
+  这条路径不再由服务端做对话校验——但 root 本来就能读 `/etc/taygedo` 与
+  `/etc/config/taygedo`，与既有权限等价，不是新增攻击面。受限的 LuCI 用户
+  仍然受 ACL 约束（ACL 决定"能不能调用方法"，本服务不再细分"哪个用户"）。
 
 ---
 

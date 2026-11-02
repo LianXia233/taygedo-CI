@@ -10,11 +10,12 @@
 #   - 鉴权由 OpenWrt 负责（LuCI/ubus 会话，鉴权边界是 rpcd ACL；后端在回环
 #     路径只校验会话号形态，不再嵌套 ubus session get）。
 #
-# 两种构建方式（二选一）：
-#   A. 预编译二进制下载（默认）：从 GitHub Release 下载对应架构的
-#      `taygedo-rs-<triple>-openwrt.tar.gz`。
-#      由仓库根目录 .github/workflows/build.yml 预编译产出（与 webui 产物分开）。
-#   B. 源码编译：需要 openwrt/packages 的 lang/rust feed，见文件末尾注释。
+# 两种构建方式（自动选择，无需改本文件）：
+#   A. 源码交叉编译（优先）：本目录下存在 `local/taygedo-rs` 时直接使用。
+#      该二进制由 `Scripts/Build-Taygedo.sh`（OpenWRT-CI 仓库）用宿主机
+#      cargo + 目标 musl 工具链编译产出，与固件同源、同 triple、同 feature。
+#   B. 预编译二进制下载（回退）：`local/taygedo-rs` 缺失时，从 GitHub Release
+#      下载 `taygedo-rs-<triple>-openwrt.tar.gz`（由 taygedo-CI 的 build.yml 产出）。
 #
 # 安装位置：/usr/bin/taygedo-rs + LuCI JS 界面（服务 -> 塔吉多签到）
 
@@ -64,6 +65,12 @@ endif
 # 一个带 WebUI 的通用版本装进路由器，所以这里显式区分而不是靠约定。
 TAYGEDO_ARCHIVE:=taygedo-rs-$(TAYGEDO_TRIPLE)-openwrt.tar.gz
 TAYGEDO_DL_URL:=$(TAYGEDO_REPO)/releases/download/$(TAYGEDO_VER)/$(TAYGEDO_ARCHIVE)
+TAYGEDO_DL:=$(DL_DIR)/$(TAYGEDO_ARCHIVE)
+
+# 源码交叉编译产物（构建脚本写入；存在即优先使用，完全跳过网络下载）。
+# 放在包目录内而不是 dl/：dl/ 会被全局缓存复用，跨架构/跨版本同名时会串味；
+# 包目录随本次构建树生命周期存在，语义更准确。
+TAYGEDO_LOCAL_BIN:=./local/taygedo-rs
 
 define Package/luci-app-taygedo
   SECTION:=luci
@@ -99,19 +106,24 @@ endef
 
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	# 构建期架构校验（解析期不可做这种封死判断，见上方架构映射注释）：
-	# 若 TAYGEDO_TRIPLE 为空，说明当前 ARCH 没有对应预编译产物，直接 fail-fast
-	# 并给出源码编译指引，避免后续以空 triple 下载「.tar.gz」产生晦涩的 404。
-	@if [ -z "$(TAYGEDO_TRIPLE)" ]; then \
-		echo "ERROR: luci-app-taygedo: 架构 '$(ARCH)' 暂无预编译产物（仅支持 x86_64 / aarch64）。如需使用请改用本 Makefile 末尾「方式 B：源码编译」" >&2; \
-		exit 1; \
+	# 两条路径必须在同一个 shell 里分支：OpenWrt 的 recipe 逐行独立执行，
+	# 一旦把 if/else 拆成多行，条件判断会与下游命令脱节（表现为两条路径都跑，
+	# 或在无 dl/ 文件时仍尝试 tar）。所以整段用反斜杠续行包成一个 recipe。
+	@if [ -f "$(TAYGEDO_LOCAL_BIN)" ]; then \
+		echo "luci-app-taygedo: 使用源码交叉编译产物 $(TAYGEDO_LOCAL_BIN)"; \
+		$(CP) "$(TAYGEDO_LOCAL_BIN)" $(PKG_BUILD_DIR)/taygedo-rs; \
+	else \
+		echo "luci-app-taygedo: 未发现本地产物，回退到预编译 Release 下载"; \
+		if [ -z "$(TAYGEDO_TRIPLE)" ]; then \
+			echo "ERROR: luci-app-taygedo: 架构 '$(ARCH)' 暂无预编译产物（仅支持 x86_64 / aarch64）。请改用 Scripts/Build-Taygedo.sh 源码编译" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$(TAYGEDO_DL)" ]; then \
+			echo "Downloading $(TAYGEDO_DL_URL)"; \
+			curl -fsSL --retry 3 -o "$(TAYGEDO_DL)" "$(TAYGEDO_DL_URL)"; \
+		fi; \
+		$(TAR) -xzf "$(TAYGEDO_DL)" -C $(PKG_BUILD_DIR); \
 	fi
-	$(eval TAYGEDO_DL:=$(DL_DIR)/$(TAYGEDO_ARCHIVE))
-	@if [ ! -f "$(TAYGEDO_DL)" ]; then \
-		echo "Downloading $(TAYGEDO_DL_URL)"; \
-		curl -fsSL --retry 3 -o "$(TAYGEDO_DL)" "$(TAYGEDO_DL_URL)"; \
-	fi
-	$(TAR) -xzf "$(TAYGEDO_DL)" -C $(PKG_BUILD_DIR)
 endef
 
 # 注意：预编译产物为静态 musl 二进制（Release 资产已 stripped），且编译 step
@@ -154,28 +166,24 @@ endef
 $(eval $(call BuildPackage,luci-app-taygedo))
 
 # ---------------------------------------------------------------------------
-# 方式 B：源码编译（可选，替代上面的预编译下载）
+# 附：源码交叉编译路径（Build/Prepare 的分支 A）说明
 #
-# 1. 在 openwrt/packages 里启用 lang/rust feed。
-# 2. 把整个 Rust 项目源码复制到本包目录下的 taygedo-rs/（含 Cargo.toml、
-#    Cargo.lock、.cargo/config.toml、src/）。
-# 3. 把 Makefile 中 Build/Prepare 与 Build/Compile 换成：
+# 由 OpenWRT-CI 仓库的 Scripts/Build-Taygedo.sh 在固件编译前执行：
 #
-#   define Build/Prepare
-#       $(call Build/Prepare/Default)
-#       $(CP) ./taygedo-rs $(PKG_BUILD_DIR)/
-#   endef
+#   1. 把本仓库的 Rust 工程（Cargo.toml / Cargo.lock / src / .cargo / static）
+#      放到本包目录下的 src/；
+#   2. 在宿主机上 `cargo build --release --locked --target <triple>
+#      --no-default-features --features openwrt`，链接器优先取 OpenWrt 自身
+#      staging_dir 里的 `<arch>-openwrt-linux-musl-gcc`，与固件同 libc；
+#   3. 产物落到本目录 local/taygedo-rs。
 #
-#   define Build/Compile
-#       cd $(PKG_BUILD_DIR)/taygedo-rs && \
-#           CARGO_HOME=$(CARGO_HOME) \
-#           cargo build --release --target $(RUST_TARGET) \
-#               --no-default-features --features openwrt && \
-#           $(TARGET_STRIP) target/$(RUST_TARGET)/release/taygedo-rs
-#   endef
+# 本 Makefile 不感知交叉编译细节：只要 local/taygedo-rs 存在就直接用，
+# 因此「源码编译」与「预编译下载」对打包逻辑完全等价，install 段无需改动。
 #
-# 4. Package/install 里改为安装 $(PKG_BUILD_DIR)/taygedo-rs/target/.../taygedo-rs。
+# 不用 OpenWrt 的 lang/rust feed（$(TOPDIR)/feeds/packages/lang/rust）的原因：
+# 那会把 rustc 本体也编译一遍（约 1.5~3 小时），而本包只需要一个静态 musl
+# 可执行文件；宿主机 rustup 交叉编译是分钟级。
 #
-# 注意：mips/mipsel 目标 aws-lc-rs 不支持，需将 Cargo.toml 的 reqwest 改为
-#   features = ["native-tls"]（OpenWrt 用 libopenssl）或 ["rustls-tls"]+ring。
+# 注意：mips/mipsel 目标 ring 后端不支持交叉编译，需改用 native-tls 或
+# 关闭该架构的包依赖。
 # ---------------------------------------------------------------------------

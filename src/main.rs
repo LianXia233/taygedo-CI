@@ -59,21 +59,34 @@ async fn main() {
         .await
         .expect("绑定端口失败");
 
-    // 监听地址与访问方式说明。
+    // 计算可点击的访问地址：若绑定 0.0.0.0 则展示 localhost/127.0.0.1。
     //
-    // 本服务**不提供内置 WebUI**：独立部署时它是纯 API 端口，OpenWrt 上入口
-    // 是 LuCI 菜单（数据由 rpcd/ucode 内部通道取回）。因此不再打印任何
-    // "浏览器打开 :8787" 形式的地址，避免误导。
-    let listen_note = if bind_addr.ip().is_unspecified() {
-        format!("监听 0.0.0.0:{}（仅 API，无网页界面）", bind_addr.port())
+    // OpenWrt 集成模式下没有内置 WebUI，入口是 LuCI 菜单，因此不展示
+    // "浏览器打开 :8787" 这类会误导的访问地址。
+    let openwrt = service::is_openwrt();
+    let display_url = if openwrt {
+        "LuCI 菜单：服务 → 塔吉多签到".to_string()
+    } else if bind_addr.ip().is_unspecified() {
+        format!("http://127.0.0.1:{}", bind_addr.port())
     } else {
-        format!("监听 {}（仅 API，无网页界面）", bind_addr)
+        format!("http://{}", bind_addr)
+    };
+    let listen_note = if bind_addr.ip().is_unspecified() {
+        format!("监听所有接口 0.0.0.0:{}", bind_addr.port())
+    } else {
+        format!("监听 {}", bind_addr)
     };
 
-    let auth_note = if service::luci_session_required() {
-        "LuCI 会话（rpcd/ucode 内部通道）"
+    let auth_note = if state.no_auth {
+        "免鉴权模式 (内网放行)".to_string()
+    } else if service::luci_session_required() {
+        "LuCI 会话 (OpenWrt 鉴权)".to_string()
+    } else if openwrt {
+        // 排障降级（TAYGEDO_LUCI_SESSION_CHECK=0）：OpenWrt 上没有自有口令，
+        // 不能显示"账号密码登录"，否则会把排障者引到不存在的入口。
+        "仅受信来源 (LuCI 校验已关闭)".to_string()
     } else {
-        "受信来源（回环/内网白名单）"
+        "账号密码登录".to_string()
     };
 
     // 读取加密策略用于横幅展示（不暴露任何密钥材料）
@@ -87,6 +100,7 @@ async fn main() {
     println!("╔════════════════════════════════════════════╗");
     println!("║  塔吉多自动签到 (Rust) 已启动               ║");
     println!("║                                              ║");
+    println!("║  访问地址: {:<34} ║", display_url);
     println!("║  {}{:.<39}║", listen_note, "");
     println!("║  鉴权: {:<38} ║", auth_note);
     println!("║  {}{:.<39}║", crypto_note, "");
@@ -102,12 +116,66 @@ async fn main() {
     println!("╚════════════════════════════════════════════╝");
 
     // OpenWrt 集成模式：说明入口与鉴权归属，避免使用者继续找 WebUI 端口。
-    if service::is_openwrt() {
+    if openwrt {
         println!();
-        println!("[OpenWrt 集成模式] 无内置 WebUI、无浏览器侧加密前端。");
+        println!("[OpenWrt 集成模式] 不提供内置 WebUI、无浏览器侧加密前端。");
         println!("  唯一入口：LuCI 菜单「服务 → 塔吉多签到」");
         println!("  数据通道：rpcd/ucode 在服务端调用本机回环接口，浏览器不直连本端口");
-        println!("  鉴权：由 LuCI/ubus 会话负责（本服务只接受回环或受信内网来源）");
+        if service::luci_session_required() {
+            println!("  鉴权：由 LuCI/ubus 会话负责（本服务只接受回环或受信内网来源）");
+        } else {
+            println!("  鉴权：LuCI 会话校验已关闭（排障降级），仅按来源放行");
+        }
+    }
+
+    // 初始随机口令：仅在 stdout 出现一次，**不写入日志缓冲区**（日志可经 API 读取）。
+    if let Some(pwd) = state.initial_password.as_deref() {
+        println!();
+        println!("┌────────────────────────────────────────────────────────────┐");
+        println!("│  首次启动：已生成随机 WebUI 登录口令（请立即记录并妥善保管）  │");
+        println!("│                                                            │");
+        println!("│    账号: admin                                             │");
+        println!("│    口令: {:<48} │", pwd);
+        println!("│                                                            │");
+        println!("│  该口令仅在此处显示一次，不会写入日志或配置文件明文。        │");
+        println!("│  登录后请立即在「设置 → 修改账号密码」中修改。               │");
+        println!("└────────────────────────────────────────────────────────────┘");
+        println!();
+    }
+
+    // Windows 桌面端：启动后自动用默认浏览器打开 WebUI。
+    // 服务器 / Docker 无桌面环境，仅在 Windows 下执行，避免无意义弹窗；
+    // OpenWrt 集成模式没有 WebUI 入口，同样跳过。
+    #[cfg(target_os = "windows")]
+    if !openwrt {
+        let open_url = display_url.clone();
+        tokio::spawn(async move {
+            // 稍等，确保 axum 已开始监听，避免浏览器首请求连不上
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            let status = std::process::Command::new("cmd")
+                .args(["/C", "start", "", open_url.as_str()])
+                .status();
+            match status {
+                Ok(code) if code.success() => {
+                    state.push_log("info", format!("已自动打开 WebUI：{}", open_url));
+                }
+                Ok(code) => {
+                    state.push_log(
+                        "warn",
+                        format!(
+                            "自动打开 WebUI 失败（退出码 {}），请手动访问 {}",
+                            code, open_url
+                        ),
+                    );
+                }
+                Err(e) => {
+                    state.push_log(
+                        "warn",
+                        format!("自动打开 WebUI 失败（{}），请手动访问 {}", e, open_url),
+                    );
+                }
+            }
+        });
     }
 
     // 通过 into_make_service_with_connect_info 注入来源地址，

@@ -332,8 +332,12 @@ file:/static/vendor/...=<sha256>:<size>
 ```
 
 覆盖的资源：`/static/taygedo-crypto.js`、`/static/web_guard.js`、
-`/static/vendor/noble-loader.js` 与 7 个 noble 模块，共 10 个。
-首页 HTML 已随内置 WebUI 一起移除，不再参与清单。
+`/static/vendor/noble-loader.js` 与 7 个 noble 模块，共 10 个；独立部署另加
+首页 `/`（共 11 个）。OpenWrt 形态不提供首页，清单会剔除 `/`，否则前端的
+逐资源哈希校验会因 404 整体失败。
+
+首页下发的字节直接取自清单里的同一份编译期常量（`manifest::asset("/")`），
+不读外部覆盖文件——否则清单哈希与页面字节会脱钩，完整性门禁反而变成登录障碍。
 
 ### 7.2 启动顺序（`static/web_guard.js`）
 
@@ -387,23 +391,40 @@ file:/static/vendor/...=<sha256>:<size>
 
 ## 8. 鉴权与访问控制
 
-内置 WebUI 与自有登录体系已移除，因此**不存在任何应用自有凭据**——没有口令、
-没有 Token、也没有 Cookie。访问控制只有两层：**来源**，以及（仅 OpenWrt）**LuCI 会话**。
+访问控制随形态不同，**独立部署有两层**（来源 + 自有口令登录），
+**OpenWrt 也是两层**（来源 + LuCI 会话），但凭据来源完全不同：
+
+| 形态 | 来源限制 | 身份凭据 | 由谁签发/校验 |
+| :--- | :--- | :--- | :--- |
+| 独立部署 | 回环或 `lan_cidrs` | `Authorization: Bearer <token>` | 本服务（登录接口，7 天有效） |
+| OpenWrt | 回环或 `lan_cidrs` | `X-TGD-Luci-Session` | OpenWrt（LuCI/ubus 会话） |
 
 ### 8.1 通用：来源限制
 
 - 每个业务请求先判定来源：回环（`127.0.0.0/8`、`::1`）**无条件放行**，其余必须命中
   `lan_cidrs`；不通过返回 `403 untrusted_source`。判定使用真实连接 IP
   （`ConnectInfo`），忽略 `X-Forwarded-For`，无法伪造。
-- 独立部署（Windows / Linux / Docker）只有这一层，**不再签发任何 Token**。
-  因此必须按实际调用方收窄 `lan_cidrs`，并优先把监听地址绑到回环或前置 TLS 反代。
 - 服务端**不**下发 Cookie，因此不存在 `Secure`/`SameSite` 的取舍问题，
-  也从根上规避了 CSRF（没有 ambient credential 可用）。
+  也从根上规避了 CSRF（没有 ambient credential 可用）。Token 只走显式请求头，
+  不会随跨站请求自动携带。
+
+### 8.1.1 独立部署：自有口令登录
+
+- `POST /api/login`（**受加密中间件保护**，口令不会以明文上线）→ 返回 64 位 hex token。
+- 口令以 `scrypt(N=16384,r=8,p=1)` + 16 字节盐存储；v1（单轮 sha256）仅用于
+  校验历史配置，校验通过后自动升级为 v2。
+- 连续失败 5 次锁定该用户名 5 分钟；用户名比较与口令比较均为恒定时间，避免
+  通过响应时间或提前返回枚举有效账号。
+- 改密（`POST /api/password`）成功后会吊销**全部**登录会话与加密会话——仅保留
+  发起本次请求的那条加密会话，用于把"改密成功"的响应加密送回。否则客户端会收到
+  `428 no_session`，误判失败而实际口令已生效。
+- 忘记口令的恢复路径：设置 `TAYGEDO_WEB_PASSWORD` 后重启（显式优先，会覆盖存储口令）。
 
 ### 8.2 OpenWrt：鉴权交给 OpenWrt（LuCI/ubus 会话）
 
-- 入口只有 LuCI 菜单「服务 → 塔吉多签到」。`GET /` 由 axum 直接返回 `404`；
-  `/api/login`、`/api/logout`、`/api/password` 路由已删除（不是 `410`，是不存在）。
+- 入口只有 LuCI 菜单「服务 → 塔吉多签到」。`GET /` 返回 `404 webui_retired`；
+  `/api/login`、`/api/logout`、`/api/password` 返回 `410 deprecated_endpoint`
+  （路由保留只为让语义显式，不提供任何自有凭据）。
 - 数据通道：LuCI 视图 → ubus 对象 `luci.taygedo` → rpcd ucode 插件
   （`/usr/share/rpcd/ucode/luci.taygedo`）→ `curl http://127.0.0.1:<port>`。
   浏览器不直连应用端口，也不加载 `taygedo-crypto.js`、不构造 `X-TGD-Envelope` 信封。
@@ -437,8 +458,8 @@ file:/static/vendor/...=<sha256>:<size>
   刻意不授予 `/etc/taygedo/**` 文件读写，避免私钥经 Web 侧导出。
 - 排障降级：`TAYGEDO_LUCI_SESSION_CHECK=0`（UCI `option luci_session_check '0'`）
   退回"仅回环放行"。这是显式开关，不是失败回退路径，默认关闭。
-- `/api/meta` 公开返回 `edition`（openwrt / standalone）与 `auth_mode`
-  （`luci_session` / `trusted_source`）及加密策略字段，供排障核对，不含任何凭据。
+- `/api/meta` 公开返回 `edition`（openwrt / standalone）、`auth_mode`
+  （`luci_session` / `token` / `none`）与加密策略字段，供排障核对，不含任何凭据。
 - 已知限制与代价：内部通道路径下，**本机任意 root 进程都可以直连回环端口**，
   这条路径不再由服务端做对话校验——但 root 本来就能读 `/etc/taygedo` 与
   `/etc/config/taygedo`，与既有权限等价，不是新增攻击面。受限的 LuCI 用户

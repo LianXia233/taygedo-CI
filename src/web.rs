@@ -1,14 +1,15 @@
-//! Web 服务：REST API + 应用层加密。
+//! Web 服务：REST API + 内置 WebUI + 应用层加密。
 //!
 //! ## 定位
 //!
-//! 本服务**不提供内置 WebUI**（没有首页、没有自有登录/改密接口，也没有任何
-//! 页面资源）。两种部署形态的唯一区别是访问控制来源：
+//! 同一份二进制有两种部署形态，区别在于**是否有内置 WebUI**：
 //!
-//! - **OpenWrt 集成模式**：仅监听回环，由 LuCI 的 rpcd/ucode 插件在服务端
-//!   调用；鉴权由 OpenWrt 的 LuCI/ubus 会话负责（`X-TGD-Luci-Session`）。
-//! - **独立部署**（Windows / Linux 服务器 / Docker）：无登录界面，只接受
-//!   回环或 `lan_cidrs` 白名单内的来源（部署方须自行限制可达范围）。
+//! - **独立部署**（Windows / Debian / Linux 服务器 / Docker）：自带 WebUI
+//!   （`GET /`）与自有登录/改密接口，业务 API 需 `Authorization: Bearer <token>`；
+//!   访问范围另受 `lan_cidrs` 约束（非受信来源直接 403）。
+//! - **OpenWrt 集成模式**：仅监听回环，入口是 LuCI 的 rpcd/ucode 插件；
+//!   不提供 WebUI（`GET /` 返回 404），也没有自有口令登录，鉴权由
+//!   OpenWrt 的 LuCI/ubus 会话负责（`X-TGD-Luci-Session`）。
 //!
 //! ## 分层结构
 //!
@@ -17,8 +18,9 @@
 //!  ├─ cors_middleware        来源白名单（仅对已配置来源回显 Origin）
 //!  ├─ crypto_middleware      应用层加密：解密请求体 / 加密响应体
 //!  │   ├─ /api/crypto/handshake  握手（带速率限制）
-//!  │   └─ 其余 /api/*            按策略要求加密
-//!  └─ auth_middleware        访问控制：受信来源 +（OpenWrt）LuCI 会话
+//!  │   └─ 其余 /api/*            按策略要求加密（含 /api/login）
+//!  └─ auth_middleware        鉴权：Bearer token（独立部署）
+//!                            或 受信来源 + LuCI 会话（OpenWrt）
 //! ```
 //!
 //! ## 加密策略（`crypto_policy`）
@@ -27,8 +29,8 @@
 //! - `always`：任何来源都要求加密，未加密请求返回 428。
 //! - `never`：完全关闭（排障、或已有 TLS 前置代理时）。
 //!
-//! 加密中间件对**静态资源**与握手端点一律不干预。OpenWrt 上不存在浏览器侧
-//! 消费者（LuCI 经 rpcd 内部通道走回环），因此实际总是明文直通。
+//! 加密中间件对**静态资源**与握手端点一律不干预。登录请求同样走信封：
+//! 口令绝不能因为"反正是登录接口"而走明文。
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -36,7 +38,7 @@ use std::sync::Arc;
 use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -56,21 +58,27 @@ const HANDHAKE_PATH: &str = "/api/crypto/handshake";
 const LUCI_SESSION_HEADER: &str = "X-TGD-Luci-Session";
 
 pub fn router(state: Arc<AppState>) -> Router {
-    // 公开路由：加密握手 + 服务元信息 + 身份公钥 + 静态资源。
+    // 公开路由：首页 + 登录 + 加密握手 + 服务元信息 + 身份公钥 + 静态资源。
     //
-    // 注意：**没有** `/` 首页路由（内置 WebUI 已移除），也没有 `/api/login`
-    // 等自有认证接口；对 `/` 的请求由 axum 直接返回 404。
+    // 说明：静态资源（含签名清单）必须公开可读——客户端要先拿到它们才能
+    // 建立加密会话。它们的完整性由 Ed25519 签名清单保证，而不是靠鉴权。
     //
-    // 静态资源（含签名清单）必须公开可读——独立部署的外部客户端要先拿到
-    // 它们才能建立加密会话；完整性由 Ed25519 签名清单保证，而不是靠鉴权。
+    // 首页与 `/api/login` 在 OpenWrt 上一律返回 404/410（内置 WebUI 不在该
+    // 形态提供），见 handler 内的版本判定——路由保留是为了让语义显式，
+    // 而不是让请求落到一个含糊的 axum 404。
     let public = Router::new()
+        .route("/", get(index))
+        .route("/api/login", post(login_api))
         .route("/api/meta", get(meta_api))
         .route(HANDHAKE_PATH, post(handshake_api))
         .route("/api/secure/identity", get(identity_api))
         .route("/static/manifest.json", get(manifest_api))
-        .route("/static/{*path}", get(static_asset));
+        .route("/static/{*path}", get(static_asset))
+        // 浏览器会自动请求 /favicon.ico：给出空响应，避免控制台出现
+        // 一条与本服务无关的 404（真正的图标由页面内联的 SVG data URI 提供）。
+        .route("/favicon.ico", get(|| async { StatusCode::NO_CONTENT }));
 
-    // 受保护路由：所有业务 API（不含任何 WebUI 专属接口）
+    // 受保护路由：所有业务 API + WebUI 的改密/登出
     let protected = Router::new()
         .route("/api/accounts", get(list_accounts).post(login))
         .route("/api/accounts/{id}", delete(delete_account))
@@ -78,6 +86,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/accounts/{id}/schedule", post(set_schedule))
         .route("/api/send-code", post(send_code))
         .route("/api/config", get(get_config).post(update_config))
+        .route("/api/password", post(change_password))
+        .route("/api/logout", post(logout_api))
         .route("/api/logs", get(get_logs))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -338,14 +348,53 @@ async fn identity_api(State(state): State<Arc<AppState>>) -> Response {
 /// 只有身份密钥（随进程）会变，因此缓存在进程内即可。
 static MANIFEST_CACHE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
 
+/// 内置 WebUI 首页。
+///
+/// **下发的字节必须与签名清单中的 `/` 条目同源**，因此这里直接取
+/// `manifest::asset("/")`（编译期嵌入的那份），而不是读外部文件：
+/// 一旦允许运行期替换 HTML，清单哈希必然对不上，前端完整性门禁（
+/// `web_guard.js` 会逐个校验 `files`，包含 `/`）就会把整个界面拦死——
+/// 那等于给自己造了一个"改个页面就登不进去"的坑。
+///
+/// 需要改界面就重编二进制：签名清单即可信字节的唯一来源。
+async fn index() -> Response {
+    // OpenWrt 集成模式：内置 WebUI 不在该形态提供，入口是 LuCI。
+    // 保留路由并显式返回，避免出现"打开 8787 却拿到一个服务不承认的页面"。
+    if service::is_openwrt() {
+        return webui_retired();
+    }
+    let content = web_security::manifest::asset("/").unwrap_or("");
+    (
+        [(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"))],
+        Html(content),
+    )
+        .into_response()
+}
+
+/// 内置 WebUI 在 OpenWrt 上不提供（入口是 LuCI 菜单）。
+fn webui_retired() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({
+            "ok": false,
+            "code": "webui_retired",
+            "error": "OpenWrt 上不提供内置 WebUI：请使用 LuCI 菜单「服务 → 塔吉多签到」，鉴权由 LuCI/ubus 会话负责",
+            "luci_entry": "服务 → 塔吉多签到",
+        })),
+    )
+        .into_response()
+}
+
 /// 静态资源签名清单。
 ///
-/// 内置 WebUI 已移除，清单**不含首页 `/`**（该路径由 axum 直接 404）。
+/// OpenWrt 上清单**不含首页 `/`**：该形态不下发 WebUI，首页返回 404；
+/// 而前端完整性校验会逐个拉取清单条目，若仍列出 `/` 会让校验整体失败。
 async fn manifest_api(State(state): State<Arc<AppState>>) -> Response {
     let bytes = MANIFEST_CACHE.get_or_init(|| {
         let m = web_security::manifest::build(
             state.crypto.identity(),
             web_security::now_unix().max(0) as u64,
+            !service::is_openwrt(),
         );
         serde_json::to_vec(&m).unwrap_or_else(|_| b"{}".to_vec())
     });
@@ -379,28 +428,18 @@ async fn static_asset(Path(path): Path<String>) -> Response {
 // 鉴权中间件
 // ---------------------------------------------------------------------------
 
-/// 访问控制中间件。
+/// 鉴权中间件。
 ///
 /// 两道门，均取自服务端可验证的信息，**不接受请求体声明**：
 ///
 /// 1. **来源**：回环或 `lan_cidrs` 命中的受信地址。非受信来源一律 403，
 ///    因此即使服务被误监听在 `0.0.0.0`，公网来源也进不来业务接口。
-/// 2. **OpenWrt 会话**（仅 OpenWrt 集成模式）：要求 `X-TGD-Luci-Session`，
-///    由 rpcd/ucode 内部通道携带。
+/// 2. **身份**：
+///    - 独立部署：`Authorization: Bearer <token>`（登录接口签发，7 天有效）。
+///    - OpenWrt 集成模式：`X-TGD-Luci-Session`，由 rpcd/ucode 内部通道携带，
+///      详细路径见 [`openwrt_auth`]。
 ///
-/// 会话这一道分两种路径，信任前提不同（详见 `session_gate`）：
-///
-/// - **内部通道**（OpenWrt + 回环来源）：会话号只做形态校验。真实鉴权发生在
-///   rpcd 一侧 —— LuCI 的每次调用都要先通过 rpcd 的 ACL（`acl.d/luci-app-taygedo.json`
-///   按方法粒度声明 read/write），未登录会话根本调不到 `luci.taygedo` 的方法，
-///   而 rpcd 插件传给本服务的是它自己的 `request.session`（服务端真值）。
-///   此处**不能**再嵌套 `ubus call session get`：rpcd 的 ucode 方法在自身 uloop
-///   内同步执行，后端此时发起的 ubus 请求等不到同一进程应答，会卡满超时后被
-///   判无效（死锁根因）。
-/// - **其它来源**（OpenWrt 下的非回环来源）：保留 `ubus call session get` 校验，
-///   不做任何放宽。独立部署（非 OpenWrt）没有 OpenWrt 会话，第 2 道门不生效，
-///   等价于"受信内网直通"；这是移除 WebUI 后的既定取舍，README 的"安全边界"
-///   一节如实说明。
+/// 操作主体一律从 [`AuthIdentity`] 取，绝不相信请求体里自称的用户名。
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     req: axum::extract::Request,
@@ -421,9 +460,71 @@ async fn auth_middleware(
         );
     }
 
+    // 形态分流：OpenWrt 走 LuCI/ubus 会话；独立部署走自有 Bearer token。
+    if service::is_openwrt() {
+        return openwrt_auth(state, req, next, peer_ip).await;
+    }
+
+    if state.no_auth_allows(peer_ip).await {
+        // 免鉴权放行（仅 OpenWrt 排障路径可置 true，此处属兜底）：
+        // 注入合成身份，供下游区分"匿名"与"已登录"。
+        let mut req = req;
+        req.extensions_mut().insert(AuthIdentity {
+            username: None,
+            via_no_auth: true,
+            token: None,
+        });
+        return next.run(req).await;
+    }
+
+    let token = extract_token(&req);
+    match state.validate_token(&token) {
+        Some(username) => {
+            let mut req = req;
+            req.extensions_mut().insert(AuthIdentity {
+                username: Some(username),
+                via_no_auth: false,
+                token: Some(token),
+            });
+            next.run(req).await
+        }
+        None => api_error(StatusCode::UNAUTHORIZED, "unauthorized", "未授权：请先登录"),
+    }
+}
+
+/// OpenWrt 集成模式鉴权：受信来源 + 有效 LuCI 会话。
+///
+/// 两道门槛：
+/// 1. **受信通道**：来源必须是回环/内网（`lan_cidrs`），公网来源一律拒绝。
+/// 2. **OpenWrt 会话**：请求须携带 LuCI 会话号，由 rpcd 判定有效性。
+///    本服务不签发、不校验自有凭据，登录态完全由 OpenWrt 维护。
+///
+/// 会话这一道分两种路径，信任前提不同（详见 `session_gate`）：
+///
+/// - **内部通道**（OpenWrt + 回环来源）：会话号只做形态校验。真实鉴权发生在
+///   rpcd 一侧 —— LuCI 的每次调用都要先通过 rpcd 的 ACL（`acl.d/luci-app-taygedo.json`
+///   按方法粒度声明 read/write），未登录会话根本调不到 `luci.taygedo` 的方法，
+///   而 rpcd 插件传给本服务的是它自己的 `request.session`（服务端真值）。
+///   此处**不能**再嵌套 `ubus call session get`：rpcd 的 ucode 方法在自身 uloop
+///   内同步执行，后端此时发起的 ubus 请求等不到同一进程应答，会卡满超时后被
+///   判无效（死锁根因）。
+/// - **其它来源**（OpenWrt 下的非回环来源）：保留 `ubus call session get` 校验，
+///   不做任何放宽。
+async fn openwrt_auth(
+    state: Arc<AppState>,
+    req: axum::extract::Request,
+    next: Next,
+    peer_ip: Option<std::net::IpAddr>,
+) -> Response {
     // 排障降级：显式关闭会话校验时按"仅受信来源放行"处理。
-    // OpenWrt 默认开启，正常部署不会走到这一分支。
+    // 正常部署不会走到这一分支。
     if !service::luci_session_required() {
+        let mut req = req;
+        req.extensions_mut().insert(AuthIdentity {
+            username: None,
+            via_no_auth: true,
+            token: None,
+        });
         return next.run(req).await;
     }
 
@@ -435,8 +536,17 @@ async fn auth_middleware(
         .unwrap_or_default();
 
     let loopback = peer_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
-    match session_gate(service::is_openwrt(), loopback, &sid) {
-        SessionGate::InternalChannel => next.run(req).await,
+    match session_gate(state.is_openwrt, loopback, &sid) {
+        SessionGate::InternalChannel => {
+            let mut req = req;
+            req.extensions_mut().insert(AuthIdentity {
+                // 身份主体由 OpenWrt 会话决定；需要审计时以 LuCI 会话号为准。
+                username: None,
+                via_no_auth: false,
+                token: None,
+            });
+            next.run(req).await
+        }
         SessionGate::Missing => api_error(
             StatusCode::UNAUTHORIZED,
             "luci_session_missing",
@@ -455,6 +565,12 @@ async fn auth_middleware(
                     "LuCI 会话无效或已过期：请重新登录路由器管理界面后再打开本页",
                 );
             }
+            let mut req = req;
+            req.extensions_mut().insert(AuthIdentity {
+                username: None,
+                via_no_auth: false,
+                token: None,
+            });
             next.run(req).await
         }
     }
@@ -519,6 +635,40 @@ fn api_error(status: StatusCode, code: &str, msg: &str) -> Response {
         .into_response()
 }
 
+/// 已认证身份，由 `auth_middleware` 注入，供 handler 使用。
+///
+/// 关键点：敏感操作的身份**只能**从这里取，不接受请求体声明。
+#[derive(Clone, Debug)]
+pub struct AuthIdentity {
+    pub username: Option<String>,
+    /// 是否来自免鉴权放行（此时 `username` 为 None）。
+    pub via_no_auth: bool,
+    pub token: Option<String>,
+}
+
+impl AuthIdentity {
+    /// 操作主体名（免鉴权/OpenWrt 会话下为 "anonymous"）。
+    ///
+    /// 预留：供需要记录"谁执行的"审计日志复用。
+    #[allow(dead_code)]
+    pub fn actor(&self) -> &str {
+        self.username.as_deref().unwrap_or("anonymous")
+    }
+}
+
+/// 从 `Authorization: Bearer <token>` 提取 token。
+///
+/// 仅支持单一承载通道：Cookie 会随跨站请求自动携带，一旦启用即引入 CSRF 面；
+/// 收敛为显式请求头可显著缩小攻击面。
+fn extract_token(req: &axum::extract::Request) -> String {
+    req.headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|auth| auth.strip_prefix("Bearer "))
+        .map(|t| t.trim().to_string())
+        .unwrap_or_default()
+}
+
 /// 当前请求所属的加密会话号，由 `crypto_middleware` 注入。
 ///
 /// 仅在密文通道上存在；明文通道（内网 auto/never 直通、免鉴权）下不会注入。
@@ -573,17 +723,24 @@ async fn meta_api(
         "never" => false,
         _ => !is_lan,
     };
-    // 访问控制方式：OpenWrt 交给 LuCI/ubus 会话；独立部署无登录，仅受信来源。
+    // 访问控制方式：OpenWrt 交给 LuCI/ubus 会话；独立部署走自有 token，
+    // 只有 OpenWrt 排障降级路径才可能出现 none。
+    let no_auth = state.no_auth_allows(peer_ip).await;
     let auth_mode = if session_auth {
         "luci_session"
+    } else if no_auth {
+        "none"
     } else {
-        "trusted_source"
+        "token"
     };
     Json(serde_json::json!({
         "ok": true,
         // 运行版本：standalone（独立部署）| openwrt（LuCI 内部 rpcd 通道）
         "edition": if openwrt { "openwrt" } else { "standalone" },
+        // 是否提供内置 WebUI（OpenWrt 上一律 false，LuCI 是唯一入口）
+        "webui_enabled": !openwrt,
         "auth_mode": auth_mode,
+        "no_auth": no_auth,
         "crypto_policy": cfg.crypto_policy,
         "crypto_required": require_enc,
         // 协议版本与算法：客户端据此判断"能不能用安全通道"，
@@ -591,10 +748,39 @@ async fn meta_api(
         "crypto_proto": crate::web_security::protocol::PROTO,
         "crypto_alg": crate::web_security::protocol::ALG,
         "crypto_identity_kid": state.crypto.identity_kid(),
+        // OpenWrt 上没有自有口令，因此"必须改口令"不成立
+        "must_change_password": cfg.web_password_must_change && !openwrt,
     }))
 }
 
 // ---- DTO ----
+
+#[derive(Deserialize)]
+struct LoginReq {
+    #[serde(default = "default_username")]
+    username: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct PasswordReq {
+    old_password: String,
+    new_password: String,
+    /// 可选的新账号名。留空表示只改口令。
+    ///
+    /// 注意：这是**改成的目标值**，不是身份声明。操作主体一律从服务端
+    /// 会话（`AuthIdentity`）解析，因此回传该字段无法越权操作他人账号。
+    #[serde(default)]
+    new_username: Option<String>,
+    /// 兼容字段：旧客户端会回传当前用户名，服务端**不采用**该值作为操作主体。
+    #[serde(default)]
+    #[allow(dead_code)]
+    username: Option<String>,
+}
+
+fn default_username() -> String {
+    "admin".into()
+}
 
 #[derive(Deserialize)]
 struct AccountLoginReq {
@@ -634,6 +820,8 @@ struct ConfigReq {
     crypto_policy: Option<String>,
     /// 内网网段白名单（逗号分隔 CIDR）。空字符串表示恢复默认 RFC1918 集合。
     lan_cidrs: Option<String>,
+    /// 内网是否免鉴权放行（仅 OpenWrt 排障降级路径生效）。
+    lan_no_auth: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -643,6 +831,195 @@ struct LogsQuery {
 }
 
 // ---- handlers ----
+
+/// WebUI 登录：校验口令并签发 token。
+///
+/// 该接口在加密中间件的覆盖范围内（`/api/*`），因此口令不会以明文上线：
+/// 策略要求加密时无信封直接 428，而不是"登录接口就放过"。
+///
+/// OpenWrt 上不提供自有登录（鉴权归 LuCI），一律 410。
+async fn login_api(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if service::is_openwrt() {
+        return Err(deprecated_endpoint("内置 WebUI 登录接口"));
+    }
+
+    // 当前请求若走密文通道，取出会话号；登录成功后据此标记该会话已认证。
+    let req_sid = req.extensions().get::<CryptoSid>().map(|c| c.0.clone());
+
+    let body = axum::body::to_bytes(req.into_body(), 64 * 1024)
+        .await
+        .map_err(|_| err("请求体读取失败"))?;
+    let parsed: LoginReq = serde_json::from_slice(&body).map_err(|_| err("请求体不是合法 JSON"))?;
+
+    // ① 失败锁定检查
+    if let Some(remaining) = state.login_lock_remaining(&parsed.username) {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "error": format!("登录失败次数过多，请在 {remaining} 秒后重试"),
+                "retry_after": remaining
+            })),
+        ));
+    }
+
+    // ② 恒定成本的口令校验，避免通过响应时间区分"用户不存在"与"密码错误"
+    let ok = state.verify_login(&parsed.username, &parsed.password).await;
+    if !ok {
+        state.record_login_fail(&parsed.username);
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "账号或密码错误" })),
+        ));
+    }
+
+    // ③ 成功：清除失败计数
+    state.reset_login_fails(&parsed.username);
+
+    // ④ 历史 v1 口令哈希就地升级为 scrypt
+    if state
+        .upgrade_password_hash_if_legacy(&parsed.password)
+        .await
+    {
+        state.push_log(
+            "info",
+            "已将该口令哈希从 v1(sha256) 升级为 v2(scrypt)".into(),
+        );
+    }
+
+    let token = state.issue_token(&parsed.username);
+
+    // 标记当前加密会话已通过身份认证：区分"仅完成密钥协商"与
+    // "已证明持有口令"两种状态。
+    if let Some(sid) = req_sid {
+        state.crypto.mark_authenticated(&sid);
+    }
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "token": token,
+        "must_change_password": state.must_change_password().await,
+    })))
+}
+
+/// 登出：吊销当前会话。
+async fn logout_api(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+) -> Json<serde_json::Value> {
+    if service::is_openwrt() {
+        // OpenWrt 上不存在本服务的登录态：注销请在 LuCI 中进行。
+        return Json(serde_json::json!({
+            "ok": true,
+            "deprecated": true,
+            "message": "登录态由 LuCI 管理，请在路由器管理界面注销",
+        }));
+    }
+    if let Some(ident) = req.extensions().get::<AuthIdentity>() {
+        if let Some(t) = &ident.token {
+            state.revoke_session(t);
+        }
+    }
+    Json(serde_json::json!({ "ok": true }))
+}
+
+/// 修改 WebUI 登录账号与口令。
+///
+/// 操作主体从服务端会话取；改密成功会吊销全部登录会话与加密会话，
+/// 要求客户端用新凭据重新登录并重新握手。
+async fn change_password(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if service::is_openwrt() {
+        return Err(deprecated_endpoint("内置口令修改接口"));
+    }
+
+    let ident = req.extensions().get::<AuthIdentity>().cloned();
+    // 当前加密会话号：改密会销毁其余会话，但要留住这一条把成功响应送回去。
+    let crypto_sid = req.extensions().get::<CryptoSid>().map(|c| c.0.clone());
+
+    // 免鉴权模式（OpenWrt 专享）下不提供改密接口，避免公开改密面
+    if state.no_auth && ident.as_ref().map(|i| i.via_no_auth).unwrap_or(false) {
+        return Err(err("免鉴权模式下无需修改密码"));
+    }
+
+    let body = axum::body::to_bytes(req.into_body(), 64 * 1024)
+        .await
+        .map_err(|_| err("请求体读取失败"))?;
+    let parsed: PasswordReq =
+        serde_json::from_slice(&body).map_err(|_| err("请求体不是合法 JSON"))?;
+
+    if parsed.new_password.len() < 8 {
+        return Err(err("新密码至少 8 位"));
+    }
+    if parsed.new_password == parsed.old_password {
+        return Err(err("新密码不能与原密码相同"));
+    }
+
+    // 操作主体：**从服务端会话取**，而非请求体的 username 字段。
+    let actor = ident
+        .as_ref()
+        .and_then(|i| i.username.clone())
+        .unwrap_or_else(|| "admin".to_string());
+
+    if !state.verify_login(&actor, &parsed.old_password).await {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "原账号或密码错误" })),
+        ));
+    }
+
+    // 目标账号名：留空则沿用当前主体。显式取值时才校验格式。
+    let target_user = match parsed.new_username.as_deref().map(str::trim) {
+        Some(u) if !u.is_empty() => {
+            if u.chars().count() < 3 || u.chars().count() > 32 {
+                return Err(err("账号名长度需在 3-32 个字符之间"));
+            }
+            if !u
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+            {
+                return Err(err("账号名只能包含字母、数字、下划线、连字符与点号"));
+            }
+            u.to_string()
+        }
+        _ => actor.clone(),
+    };
+
+    // set_credentials 内部会吊销全部登录会话与加密会话（保留当前这条），
+    // 并清除"必须改口令"标记
+    if let Err(e) = state
+        .set_credentials(&target_user, &parsed.new_password, crypto_sid.as_deref())
+        .await
+    {
+        return Err(err(&e));
+    }
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "message": "口令已修改，请使用新口令重新登录",
+        "sessions_revoked": true,
+        "username": target_user,
+    })))
+}
+
+/// OpenWrt 上已退役的 WebUI 专属接口。
+fn deprecated_endpoint(what: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::GONE,
+        Json(serde_json::json!({
+            "ok": false,
+            "deprecated": true,
+            "code": "deprecated_endpoint",
+            "error": format!(
+                "{what}在 OpenWrt 上不提供：登录鉴权由 LuCI/ubus 会话负责，请通过 LuCI 菜单「服务 → 塔吉多签到」操作"
+            ),
+        })),
+    )
+}
 
 async fn list_accounts(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let accounts = state.accounts.read().await.clone();
@@ -754,6 +1131,7 @@ async fn get_config(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
         "share_platform": config.share_platform,
         "crypto_policy": config.crypto_policy,
         "lan_cidrs": config.lan_cidrs,
+        "lan_no_auth": config.lan_no_auth,
     }))
 }
 
@@ -803,6 +1181,9 @@ async fn update_config(
         }
         if let Some(v) = req.share_platform {
             config.share_platform = v;
+        }
+        if let Some(v) = req.lan_no_auth {
+            config.lan_no_auth = v;
         }
         if let Some(p) = new_policy {
             policy_changed = config.crypto_policy != p;

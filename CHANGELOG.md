@@ -11,6 +11,47 @@
 
 ## [Unreleased]
 
+### 恢复 · 独立部署的内置 WebUI（OpenWrt 维持 rpcd/ucode 现状）
+
+v0.7.1 把内置 WebUI 与自有口令体系整体删除。这个决定对 OpenWrt 成立（LuCI 是
+入口，自有登录只会多一个可爆破面），但对 **Windows / Debian / Docker 属于误伤**：
+这些平台没有别的图形入口，删掉 WebUI 等于把"打开浏览器就能用"变成"自己写客户端"。
+
+本次按平台分流，把独立部署的 WebUI 按删除前的形态加回来，**OpenWrt 一行不改**：
+
+| 形态 | `GET /` | 登录接口 | 业务鉴权 | 浏览器侧加密 |
+| :--- | :--- | :--- | :--- | :--- |
+| 独立部署 | 下发内置 WebUI | `/api/login`、`/api/logout`、`/api/password` | `Bearer token`（7 天） | 强制走 v2 信封 |
+| OpenWrt | `404 webui_retired` | `410 deprecated_endpoint` | 受信来源 + LuCI 会话 | 无浏览器消费者 |
+
+- 恢复 `src/ui.html`（White MD3 单文件界面）、`web_username` / `web_password_hash` /
+  `web_password_salt` / `web_password_version` / `web_password_must_change` /
+  `lan_no_auth` 配置项，以及 scrypt 口令哈希（v2）与 v1 就地升级路径。
+- 登录失败 5 次锁定 5 分钟、恒定成本口令校验、改密后吊销全部会话，均按原实现恢复。
+- 启动横幅恢复"访问地址 + 首启随机口令只打印一次"；Windows 桌面端启动后自动开浏览器。
+- OpenWrt 上这些入口一律显式返回 404 / 410（而不是让请求落到含糊的 axum 404），
+  `manifest.json` 同步剔除首页 `/`，与 v0.7.1 行为一致。
+
+### 加密 · 补三处会让"加密看起来生效、实际不生效"的缺口
+
+1. **改密响应送不出去**：`set_credentials` 会销毁全部加密会话，而响应还要用
+   发起请求的那条会话加密。旧实现因此让客户端收到 `428 no_session`，误判改密
+   失败，实际口令已经写盘。现在保留当前会话（`destroy_all_except`），其余照样作废。
+   这与 `update_config` 改加密策略时的处理保持一致。
+2. **首页字节必须与签名清单同源**：`GET /` 直接下发 `manifest::asset("/")` 的
+   编译期字节，**不再**读取 `/etc/taygedo/ui.html` 之类的外部覆盖文件。允许运行期
+   替换 HTML 时，清单哈希必然对不上，`web_guard.js` 会把整个界面拦死——等于给
+   自己造了个"改个页面就登不进去"的坑。要改界面就重编：签名清单即可信字节的唯一来源。
+3. **首启口令的可恢复性**：`TAYGEDO_WEB_PASSWORD` 现在是"显式优先"——设置即覆盖，
+   不设置才沿用 UI 里改过的口令。这样忘记口令有确定恢复路径，自动化部署也能固定凭据
+   （已与存储的哈希一致时不重写，避免每次启动换盐）。
+
+### 测试 · E2E 覆盖登录全链路
+
+`scripts/e2e_web.mjs` 恢复登录流程，并新增：未登录 401、首页与清单哈希同源、
+错误口令 401（响应已解密）、改密成功响应可解密、旧 token 立即失效、新口令可登录、
+登出后 token 失效。CI 的 E2E 步骤补回 `TAYGEDO_WEB_PASSWORD`。
+
 ### CI · 补齐审计作业的 `checks: write` 权限
 
 `dependency-audit` 作业在 `v0.7.1` 发布构建中失败，日志为

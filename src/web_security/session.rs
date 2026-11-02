@@ -38,6 +38,8 @@ pub struct Session {
     pub recv: ReplayWindow,
     /// 响应方向序号（独立计数，与请求序号无关）。
     pub send_seq: u64,
+    /// 是否已通过口令登录（用于审计与后续策略）。
+    pub authenticated: bool,
     /// 来源标识（IP）。仅供诊断（"这个会话来自哪"），日志默认不输出。
     #[allow(dead_code)]
     pub peer: String,

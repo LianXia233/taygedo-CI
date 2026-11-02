@@ -24,9 +24,12 @@
 //! HTTP"这一前提的固有局限，无法用代码消除。README 中给出了可落地的
 //! 缓解部署（带外分发指纹、内网隔离、`always` 策略 + 网段白名单）。
 //!
-//! 清单只覆盖**静态资源**（加密客户端脚本及其依赖）。内置 WebUI 已移除，
-//! 不再有首页 HTML 参与校验；OpenWrt 集成模式下浏览器侧不存在消费者，
-//! 清单只对独立部署的外部 API 客户端有意义。
+//! 清单覆盖**静态资源**（加密客户端脚本及其依赖）与独立部署的首页 HTML。
+//! OpenWrt 集成模式下浏览器侧不存在消费者（入口是 LuCI），首页也不提供，
+//! 因此该模式下的清单会剔除 `/` 条目——否则前端逐资源校验会因 404 整体失败。
+//! HTML 文档本身无法自证完整性（它由同一个 HTTP 服务提供）；清单里包含
+//! 首页哈希，便于操作者用 CLI 输出交叉核对，但它不构成自动化的启动链保护
+//! ——这一点不掩饰。
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -81,6 +84,8 @@ pub const ASSETS: &[(&str, &str)] = &[
         "/static/web_guard.js",
         include_str!("../../static/web_guard.js"),
     ),
+    // 首页：仅独立部署对外提供（OpenWrt 上由清单过滤器剔除）。
+    ("/", include_str!("../ui.html")),
 ];
 
 /// 单个资源的清单项。
@@ -148,9 +153,13 @@ pub fn canonical_bytes(m: &Manifest) -> Vec<u8> {
 
 /// 生成并签名清单。
 ///
-pub fn build(identity: &ServerIdentity, generated_at: u64) -> Manifest {
+/// `include_webui` 为 false 时（OpenWrt 集成模式）不把首页 `/` 列入清单：
+/// 该模式下不提供内置 WebUI 界面，首页路由返回 404，若仍列出会让前端的
+/// 逐资源哈希校验整体失败（连带把 LuCI 侧也挡在完整性门禁之外）。
+pub fn build(identity: &ServerIdentity, generated_at: u64, include_webui: bool) -> Manifest {
     let mut files: Vec<FileEntry> = ASSETS
         .iter()
+        .filter(|(path, _)| include_webui || *path != "/")
         .map(|(path, content)| FileEntry {
             path: (*path).to_string(),
             sha256: sha256_hex(content.as_bytes()),
@@ -182,7 +191,7 @@ pub fn asset(path: &str) -> Option<&'static str> {
 pub fn content_type(path: &str) -> &'static str {
     if path.ends_with(".js") {
         "application/javascript; charset=utf-8"
-    } else if path.ends_with(".html") {
+    } else if path.ends_with(".html") || path == "/" {
         "text/html; charset=utf-8"
     } else if path.ends_with(".css") {
         "text/css; charset=utf-8"
@@ -203,14 +212,14 @@ mod tests {
 
     #[test]
     fn manifest_covers_every_asset() {
-        let m = build(&id(), 1);
+        let m = build(&id(), 1, true);
         assert_eq!(m.files.len(), ASSETS.len());
         assert!(m
             .files
             .iter()
             .any(|f| f.path == "/static/taygedo-crypto.js"));
-        // 内置 WebUI 已移除：清单不再包含首页 `/`
-        assert!(!m.files.iter().any(|f| f.path == "/"));
+        // 独立部署对外提供首页，清单必须覆盖它（否则前端校验缺一项）
+        assert!(m.files.iter().any(|f| f.path == "/"));
         for f in &m.files {
             assert_eq!(f.sha256.len(), 64);
             assert!(f.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
@@ -218,9 +227,22 @@ mod tests {
     }
 
     #[test]
+    fn openwrt_manifest_excludes_webui_index() {
+        // OpenWrt 集成模式：首页不提供，清单必须同步剔除 `/`，
+        // 否则前端逐资源校验会因 404 整体失败。
+        let m = build(&id(), 1, false);
+        assert_eq!(m.files.len(), ASSETS.len() - 1);
+        assert!(!m.files.iter().any(|f| f.path == "/"));
+        assert!(m
+            .files
+            .iter()
+            .any(|f| f.path == "/static/taygedo-crypto.js"));
+    }
+
+    #[test]
     fn manifest_signature_verifies() {
         let id = id();
-        let m = build(&id, 12345);
+        let m = build(&id, 12345, true);
         let sig = super::super::decode_fixed::<64>(m.sig.as_ref().unwrap()).unwrap();
         assert!(super::super::identity::verify(
             &id.public_key(),
@@ -232,7 +254,7 @@ mod tests {
     #[test]
     fn tampering_with_any_field_breaks_signature() {
         let id = id();
-        let m = build(&id, 12345);
+        let m = build(&id, 12345, true);
         let sig = super::super::decode_fixed::<64>(m.sig.as_ref().unwrap()).unwrap();
 
         // 改哈希
@@ -266,7 +288,7 @@ mod tests {
     #[test]
     fn canonical_is_stable_regardless_of_input_order() {
         let id = id();
-        let mut m = build(&id, 1);
+        let mut m = build(&id, 1, true);
         let a = canonical_bytes(&m);
         m.files.reverse();
         assert_eq!(a, canonical_bytes(&m));
@@ -284,6 +306,6 @@ mod tests {
     #[test]
     fn content_types() {
         assert!(content_type("/static/a.js").starts_with("application/javascript"));
-        assert!(content_type("/static/a.html").starts_with("text/html"));
+        assert!(content_type("/").starts_with("text/html"));
     }
 }

@@ -2,20 +2,18 @@
  * 端到端协议测试（Node ≥ 18）。
  *
  * 它加载**仓库里真实的内置库与前端客户端文件**，对着**真实的 Rust 服务**
- * 走一遍：资源清单验签 → 握手验签 → 业务请求 → 响应解密，
+ * 走一遍：资源清单验签 → 握手验签 → 登录 → 业务请求 → 响应解密，
  * 并额外验证重放与跨接口搬移都会被拒绝。
  *
- * 服务端已无内置 WebUI、也没有自有登录接口：本测试不携带任何 Authorization，
- * 靠"来源是本机回环"通过访问控制（这是独立部署下的受信来源分支）。
- *
  * 用法：
- *   node scripts/e2e_web.mjs http://127.0.0.1:18787
+ *   node scripts/e2e_web.mjs http://127.0.0.1:18787 <web_password>
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const base = process.argv[2] || 'http://127.0.0.1:18787';
+const password = process.argv[3] || 'e2e-password-123';
 // 用于验证 CORS 预检声明：取同主机 Origin，保证命中服务端来源白名单
 const originForTest = new URL(base).origin;
 
@@ -74,6 +72,11 @@ console.log('1) 静态资源签名清单');
     if (h !== f.sha256) mismatched.push(f.path);
   }
   assert(mismatched.length === 0, `清单内全部资源哈希一致（${files.length} 个）`, mismatched.join(', '));
+  assert(
+    files.some((f) => f.path === '/'),
+    '清单覆盖 WebUI 首页（独立部署形态）',
+    files.map((f) => f.path).join(',')
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -152,9 +155,40 @@ console.log('1b) 前端资源完整性（真实 verifier）');
   console.warn = realWarn;
 }
 
+// ---------------------------------------------------------------------------
+// 1c) 内置 WebUI（独立部署形态）
+// ---------------------------------------------------------------------------
+console.log('1c) 内置 WebUI');
+{
+  const page = await fetch(base + '/');
+  const html = await page.text();
+  assert(
+    page.ok && /<title>塔吉多自动签到<\/title>/.test(html),
+    '首页返回可用的 WebUI 页面',
+    `status=${page.status}`
+  );
+  assert(html.includes('/static/taygedo-crypto.js'), '首页加载应用层加密客户端');
+  assert(html.includes('/static/web_guard.js'), '首页加载资源完整性门禁');
+
+  // 首页下发的字节必须与清单签名的那份一致：避免"清单里签的是 A、
+  // 实际发的是 B"这种签名与内容脱钩的实现错误（改 UI 就得重编签名）。
+  const m = await (await fetch(base + '/static/manifest.json')).json();
+  const entry = (m.files || []).find((f) => f.path === '/');
+  const h = Array.from(sha256(new TextEncoder().encode(html)))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  assert(
+    !!entry && entry.sha256 === h,
+    '首页字节与签名清单一致',
+    entry ? `${entry.sha256} != ${h}` : '清单缺少 /'
+  );
+}
+
 console.log('2) 握手 + 验签 + 业务往返');
 // 服务元信息：据此判断本来源是否被强制加密
 const meta = await (await fetch(base + '/api/meta')).json();
+assert(meta.webui_enabled === true, '独立部署形态提供内置 WebUI', JSON.stringify(meta));
+assert(meta.auth_mode === 'token', '访问控制为自有 token', String(meta.auth_mode));
 // 跨源预检必须声明 GET/HEAD 的信封头，否则独立部署的外部 API 客户端读取会被浏览器拦下
 {
   const pre = await fetch(base + '/api/logs', {
@@ -178,14 +212,28 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
   assert(hs.proto === 'taygedo/v2', '协议版本为 v2');
   assert(typeof C.fingerprint() === 'string' && C.fingerprint().length === 32, '取得服务端身份指纹');
 
-  // 无内置登录：业务接口靠"来源受信"放行，不带任何 Authorization
-  const list = await C.request('/api/accounts', 'GET');
+  // 未登录直接打业务接口：必须 401，且错误体是解密后的明文（不是密文）
+  const anon = await C.request('/api/accounts', 'GET');
+  assert(!anon.ok && anon.status === 401, '未登录访问业务接口返回 401', String(anon.status));
+  assert(
+    typeof (anon.data && anon.data.error) === 'string' && !anon.data.ct,
+    '未登录错误响应已解密',
+    JSON.stringify(anon.data)
+  );
+
+  // 登录口令走的是加密信封（中间件覆盖 /api/*），不会以明文上线
+  const login = await C.request('/api/login', 'POST', { username: 'admin', password });
+  assert(login.ok && !!login.data.token, '登录成功并拿到 token', JSON.stringify(login.data));
+  const token = login.data.token;
+  const auth = { Authorization: 'Bearer ' + token };
+
+  const list = await C.request('/api/accounts', 'GET', undefined, auth);
   assert(list.ok && Array.isArray(list.data.accounts), '读取账号列表成功');
 
-  const cfg = await C.request('/api/config', 'GET');
+  const cfg = await C.request('/api/config', 'GET', undefined, auth);
   assert(cfg.ok && typeof cfg.data.default_schedule === 'string', '读取配置成功');
 
-  const logs = await C.request('/api/logs', 'GET');
+  const logs = await C.request('/api/logs', 'GET', undefined, auth);
   assert(logs.ok && Array.isArray(logs.data.logs), '读取日志成功');
 
   console.log('3) 防重放 / 防搬移 / body 路径');
@@ -221,6 +269,7 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
     const headers = {
       'Content-Type': 'application/json',
       'X-TGD-Session': C.sid,
+      Authorization: 'Bearer ' + token,
     };
     if (noBody) {
       headers['X-TGD-Envelope'] = b64u(Buffer.from(envJson, 'utf8'));
@@ -254,6 +303,7 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
   const bothHeaders = {
     'Content-Type': 'application/json',
     'X-TGD-Session': C.sid,
+    Authorization: 'Bearer ' + token,
     'X-TGD-Envelope': b64u(Buffer.from(encFor(9004, '/api/logs', 'GET', ''), 'utf8')),
   };
   const both = await fetch(base + '/api/logs', {
@@ -266,9 +316,12 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
 
   console.log('3b) 错误响应解密 / 会话失效重握手');
 
-  // 业务错误（400）同样被中间件加密：客户端必须解密后拿到 error 文本
-  const wrong = await C.request('/api/config', 'POST', { default_schedule: '25:99' });
-  assert(!wrong.ok && wrong.status === 400, '非法配置返回 400', String(wrong.status));
+  // 业务错误（401）同样被中间件加密：客户端必须解密后拿到 error 文本
+  const wrong = await C.request('/api/login', 'POST', {
+    username: 'admin',
+    password: 'e2e-wrong-password-xyz',
+  });
+  assert(!wrong.ok && wrong.status === 401, '错误登录返回 401', String(wrong.status));
   assert(
     typeof (wrong.data && wrong.data.error) === 'string' && !wrong.data.ct,
     '错误响应已解密（调用方拿到的不是密文）',
@@ -278,11 +331,12 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
   // 服务端不认识的 sid：明文返回 no_session，客户端应自动重握手并重试一次
   const stale = '0'.repeat(32);
   C.sid = stale;
-  const retried = await C.request('/api/accounts', 'GET');
+  const retried = await C.request('/api/accounts', 'GET', undefined, auth);
   assert(retried.ok && Array.isArray(retried.data.accounts), 'no_session 触发重握手后请求成功');
   assert(C.sid !== stale, '重握手后会话 ID 已更新', String(C.sid));
 
   console.log('4) 明文降级被拒绝');
+  // 不带任何信封与 token：策略要求加密时，中间件必须在本用例到达鉴权之前就拒绝
   const plain = await fetch(base + '/api/accounts', { method: 'GET' });
   if (meta.crypto_required === true) {
     // crypto_policy=always（或来源不在白名单）：明文必须被硬拒，不得回退
@@ -293,15 +347,66 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
     console.log('  ! 当前 crypto_policy 未对本来源强制加密，跳过 428 断言');
     console.log('    以 TAYGEDO_CRYPTO_POLICY=always 启动服务可完整验证该分支');
   }
+
+  console.log('5) 改密 / 登出');
+  {
+    const NEW_PWD = 'e2e-new-password-456';
+
+    // 旧口令错误：拒绝，且**不能**顺手把口令改掉
+    const badOld = await C.request(
+      '/api/password',
+      'POST',
+      { old_password: 'wrong-old-pwd', new_password: NEW_PWD },
+      auth
+    );
+    assert(!badOld.ok && badOld.status === 401, '旧口令错误时拒绝改密', String(badOld.status));
+
+    // 太短的新口令：拒绝
+    const tooShort = await C.request(
+      '/api/password',
+      'POST',
+      { old_password: password, new_password: 'short' },
+      auth
+    );
+    assert(!tooShort.ok && tooShort.status === 400, '新口令过短被拒绝', String(tooShort.status));
+
+    // 正常改密：响应必须能解密拿到 ok（服务端会作废其它加密会话，
+    // 但保留发起本次请求的那一条，否则客户端只会看到 428）
+    const changed = await C.request(
+      '/api/password',
+      'POST',
+      { old_password: password, new_password: NEW_PWD },
+      auth
+    );
+    assert(changed.ok && changed.data.ok === true, '改密成功且响应已解密', JSON.stringify(changed.data));
+
+    // 改密后旧 token 立即失效
+    const stale = await C.request('/api/config', 'GET', undefined, auth);
+    assert(!stale.ok && stale.status === 401, '改密后旧 token 立即失效', String(stale.status));
+
+    // 新口令可登录
+    const relogin = await C.request('/api/login', 'POST', {
+      username: 'admin',
+      password: NEW_PWD,
+    });
+    assert(relogin.ok && !!relogin.data.token, '新口令可登录', JSON.stringify(relogin.data));
+    const newAuth = { Authorization: 'Bearer ' + relogin.data.token };
+
+    // 登出后 token 失效
+    const out = await C.request('/api/logout', 'POST', undefined, newAuth);
+    assert(out.ok && out.data.ok === true, '登出成功');
+    const afterOut = await C.request('/api/config', 'GET', undefined, newAuth);
+    assert(!afterOut.ok && afterOut.status === 401, '登出后 token 失效', String(afterOut.status));
+  }
 }
 
-// 自检：服务端已无自有登录，脚本不应再构造授权头。
+// 自检：业务接口必须有登录凭据，脚本不能悄悄退回"无鉴权直连"。
 // 匹配「带引号的头名」与「头名后跟冒号」两种代码形态，不会命中注释里的说明文字。
 {
   const src = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8');
   assert(
-    !/['"]Authori[z]ation|Authori[z]ation:/.test(src),
-    '测试脚本不再使用授权请求头'
+    /['"]Authori[z]ation|Authori[z]ation:/.test(src),
+    '测试脚本必须携带授权请求头'
   );
 }
 

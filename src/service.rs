@@ -22,8 +22,22 @@ pub struct AppState {
     /// 验证码设备身份：phone -> (identity, 发送时间 unix 秒)。带 TTL，防内存泄漏。
     pub pending_devices: std::sync::Mutex<HashMap<String, (DeviceIdentity, i64)>>,
     pub run_lock: Mutex<()>,
+    /// 登录会话：token -> (过期 unix 秒, 所属用户名)。仅独立部署使用。
+    pub sessions: std::sync::Mutex<HashMap<String, (i64, String)>>,
+    /// WebUI 登录失败计数：username -> (失败次数, 锁定截止 unix 秒)。防暴力破解。
+    pub login_fails: std::sync::Mutex<HashMap<String, (u32, i64)>>,
+    /// 免鉴权模式：为 true 时所有 API 无需登录即可访问。
+    ///
+    /// **仅 OpenWrt 平台（LuCI 配套使用）生效**，且只在 LuCI 会话校验被显式
+    /// 关闭（排障降级）时作为兼容路径生效；非 OpenWrt 环境即使设置环境变量
+    /// 也会被强制关闭——独立部署有内置 WebUI 登录，不存在免鉴权语义。
+    pub no_auth: bool,
+    /// 当前运行平台是否 OpenWrt（决定 WebUI 与自有口令体系是否启用）。
+    pub is_openwrt: bool,
     /// 应用层加密会话管理器（独立部署用的 HTTP 信封通道）。
     pub crypto: CryptoManager,
+    /// 启动时生成的初始随机口令（**仅保存在内存**，用于单次提示，不落盘、不进日志）。
+    pub initial_password: Option<String>,
     /// 受信来源判定器。运行期可经 `/api/config` 热更新，故用 Arc 包裹。
     pub lan: std::sync::RwLock<Arc<LanMatcher>>,
 }
@@ -70,10 +84,24 @@ impl AppState {
                 config.lan_cidrs = v.trim().to_string();
             }
         }
+        // 内网免鉴权放行开关覆盖（仅 OpenWrt 排障路径生效）
+        if let Ok(v) = std::env::var("TAYGEDO_LAN_NO_AUTH") {
+            config.lan_no_auth = parse_bool_env(&v);
+        }
 
         // 首次启动若没有凭据密钥，立即落盘
         if config.credential_key.is_empty() {
             config.credential_key = crate::crypto::generate_credential_key();
+        }
+
+        // 用户名初始化（默认 admin）。仅独立部署会真正用到。
+        if config
+            .web_username
+            .as_deref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+        {
+            config.web_username = Some("admin".into());
         }
 
         // 长期身份密钥环：不存在则生成；**损坏或解不开一律报错**。
@@ -103,8 +131,82 @@ impl AppState {
         };
         let crypto = CryptoManager::new(&identity_secret);
 
-        // 内置 WebUI 与自有口令体系已移除：不再生成、也不再迁移任何登录凭据。
+        // 运行版本判定：OpenWrt 集成模式（LuCI 为唯一 Web 入口）或独立模式
+        // （Windows / Debian / Docker：自带内置 WebUI 与口令登录）。
+        let openwrt = is_openwrt();
+
+        // WebUI 口令初始化（仅独立部署）：
+        // - 设置了 TAYGEDO_WEB_PASSWORD 时**以它为准**（幂等覆盖）：这是忘记
+        //   口令时唯一可用的恢复路径，也让自动化部署能固定凭据；
+        // - 未设置且首次启动：生成随机口令，杜绝默认 admin；
+        // - OpenWrt 上不生成：入口是 LuCI，鉴权交给 ubus 会话，
+        //   一个无处可用的口令只会扩大可爆破面。
+        let mut initial_password: Option<String> = None;
+        let mut env_password_applied = false;
+        if !openwrt {
+            let env_pwd = std::env::var("TAYGEDO_WEB_PASSWORD")
+                .ok()
+                .filter(|s| !s.trim().is_empty());
+            // 当前存储的口令是否已与显式环境变量一致（一致就不必重写，避免
+            // 每次启动都换盐、把日志刷满）
+            let stored_matches = match (
+                &config.web_password_hash,
+                &config.web_password_salt,
+                env_pwd.as_deref(),
+            ) {
+                (Some(h), Some(s), Some(p))
+                    if config
+                        .web_password_version
+                        .unwrap_or(crate::crypto::PWD_HASH_V1)
+                        >= crate::crypto::PWD_HASH_V2 =>
+                {
+                    let computed = crate::crypto::hash_password_v2(p, s);
+                    crate::crypto::constant_time_eq(computed.as_bytes(), h.as_bytes())
+                }
+                _ => false,
+            };
+            let had_password = config.web_password_hash.is_some();
+            match env_pwd {
+                Some(p) if !stored_matches => {
+                    let salt = crate::crypto::random_hex(16);
+                    config.web_password_hash = Some(crate::crypto::hash_password_v2(&p, &salt));
+                    config.web_password_salt = Some(salt);
+                    config.web_password_version = Some(crate::crypto::PWD_HASH_V2);
+                    config.web_password_must_change = false;
+                    // 首次启动就由环境变量给定时不算"重置"，只是初始化
+                    env_password_applied = had_password;
+                }
+                Some(_) => {
+                    // 已一致：保留既有 hash/盐，不写盘
+                }
+                None if !had_password => {
+                    let password = crate::crypto::generate_passphrase(16);
+                    let salt = crate::crypto::random_hex(16);
+                    config.web_password_hash =
+                        Some(crate::crypto::hash_password_v2(&password, &salt));
+                    config.web_password_salt = Some(salt);
+                    config.web_password_version = Some(crate::crypto::PWD_HASH_V2);
+                    config.web_password_must_change = true;
+                    initial_password = Some(password);
+                }
+                None => {}
+            }
+        }
+        // 兼容历史配置：v1（单轮 sha256 + 8 字节盐）在口令校验通过后就地升级为 v2
+        if config.web_password_version.is_none() {
+            config.web_password_version = Some(crate::crypto::PWD_HASH_V1);
+        }
         store.save_config(&config)?;
+
+        // 免鉴权模式：环境变量 TAYGEDO_NO_AUTH=1/true/yes/on 时开启。
+        // **仅 OpenWrt 平台生效**：独立部署有 WebUI 登录，免鉴权等于把业务
+        // 接口完全敞开；OpenWrt 上也只有 LuCI 会话校验被显式关闭（排障降级）
+        // 时才作为兼容路径生效。
+        let session_auth = openwrt && luci_session_required();
+        let no_auth_env = std::env::var("TAYGEDO_NO_AUTH")
+            .map(|v| parse_bool_env(&v))
+            .unwrap_or(false);
+        let no_auth = no_auth_env && openwrt && !session_auth;
 
         let lan = LanMatcher::new(&config.lan_cidrs);
 
@@ -118,7 +220,12 @@ impl AppState {
             logs: std::sync::Mutex::new(Vec::new()),
             pending_devices: std::sync::Mutex::new(HashMap::new()),
             run_lock: Mutex::new(()),
+            sessions: std::sync::Mutex::new(HashMap::new()),
+            login_fails: std::sync::Mutex::new(HashMap::new()),
+            no_auth,
+            is_openwrt: openwrt,
             crypto,
+            initial_password: initial_password.clone(),
             lan: std::sync::RwLock::new(Arc::new(lan)),
         });
 
@@ -148,15 +255,77 @@ impl AppState {
                 ),
             );
         }
-        // 访问控制方式：OpenWrt 上额外校验 LuCI/ubus 会话；其它平台只接受
-        // 回环/受信内网来源（本服务已无自有登录界面）。
-        let auth_note = if luci_session_required() {
-            "LuCI 会话（OpenWrt 内部 ucode/rpcd 通道）"
-        } else {
-            "受信来源（回环/内网白名单，无内置登录）"
-        };
-        app.push_log("info", format!("访问控制：{auth_note}"));
+        // 访问控制方式与初始凭据提示。
+        if initial_password.is_some() {
+            // 明文口令**不写入日志缓冲区**（日志可经 /api/logs 读取），
+            // 只在启动横幅中出现一次，供操作者记录。
+            app.push_log(
+                "warn",
+                "已初始化 WebUI 登录账号 admin，口令为本次启动随机生成，\
+                 请在启动横幅中查看并在首次登录后立即修改。"
+                    .into(),
+            );
+        }
+        if env_password_applied {
+            app.push_log(
+                "warn",
+                "已按环境变量 TAYGEDO_WEB_PASSWORD 重置 WebUI 登录口令（该变量优先级最高，\
+                 不设置它才会沿用 UI 中修改过的口令）"
+                    .into(),
+            );
+        }
+        if session_auth {
+            app.push_log(
+                "info",
+                "OpenWrt 集成模式：LuCI 为唯一入口，鉴权由 OpenWrt（LuCI/ubus）会话负责；\
+                 仅接受受信内网来源"
+                    .into(),
+            );
+        } else if no_auth_env && !openwrt {
+            app.push_log(
+                "warn",
+                "检测到 TAYGEDO_NO_AUTH=1，但当前非 OpenWrt 平台：\
+                 免鉴权模式已强制关闭，请使用 WebUI 账号密码登录"
+                    .into(),
+            );
+        } else if no_auth {
+            app.push_log(
+                "warn",
+                "免鉴权模式已开启（OpenWrt 专享）：API 无需登录即可访问，仅限内网使用".into(),
+            );
+        } else if openwrt {
+            app.push_log(
+                "warn",
+                "LuCI 会话校验已关闭（排障降级）：业务接口仅按来源放行，请尽快恢复".into(),
+            );
+        } else if !openwrt {
+            app.push_log(
+                "info",
+                "WebUI 已启用：独立部署自带登录页，业务接口需 Bearer token".into(),
+            );
+        }
         Ok(app)
+    }
+
+    /// 判定来源是否可享受免鉴权放行。
+    ///
+    /// 即使 `no_auth` 已开启，非内网来源也不放行——避免"免鉴权开关被打开
+    /// 后服务被直接暴露到公网"这一配置失误演变为完全开放。
+    pub async fn no_auth_allows(&self, peer_ip: Option<std::net::IpAddr>) -> bool {
+        if !self.no_auth {
+            return false;
+        }
+        let lan_ok = self.config.read().await.lan_no_auth;
+        if !lan_ok {
+            // 未启用 LAN 白名单时，按原语义放行全部来源（保持向后兼容）
+            return true;
+        }
+        match peer_ip {
+            Some(ip) => self.lan_matches(ip),
+            // 无法解析来源（如 Unix socket / 代理未透传）时保守放行：
+            // 免鉴权模式本身即为内网自用设计，此处不额外收紧以免破坏既有部署。
+            None => true,
+        }
     }
 
     /// 按当前（可热更新的）内网网段判定来源 IP 是否属于 LAN。
@@ -191,7 +360,194 @@ impl AppState {
         let start = logs.len().saturating_sub(limit);
         logs[start..].to_vec()
     }
+
+    // ---- WebUI 登录（仅独立部署；OpenWrt 上调用方会先返回 404/410） ----
+
+    /// 校验登录账号密码。
+    ///
+    /// 按 `web_password_version` 选择哈希算法：v2（scrypt）为当前格式，
+    /// v1（单轮 sha256）仅用于兼容历史配置。两者均使用恒定时间比较。
+    pub async fn verify_login(&self, username: &str, password: &str) -> bool {
+        let config = self.config.read().await;
+        let expected_user = config.web_username.as_deref().unwrap_or("admin");
+        // 用户名比较也走恒定时间，避免枚举有效用户名
+        if !crate::crypto::constant_time_eq(username.as_bytes(), expected_user.as_bytes()) {
+            return false;
+        }
+        match (&config.web_password_hash, &config.web_password_salt) {
+            (Some(hash), Some(salt)) => {
+                let version = config
+                    .web_password_version
+                    .unwrap_or(crate::crypto::PWD_HASH_V1);
+                let computed = if version >= crate::crypto::PWD_HASH_V2 {
+                    crate::crypto::hash_password_v2(password, salt)
+                } else {
+                    crate::crypto::hash_password(password, salt)
+                };
+                crate::crypto::constant_time_eq(computed.as_bytes(), hash.as_bytes())
+            }
+            _ => false,
+        }
+    }
+
+    /// 历史 v1 口令校验通过后就地升级为 v2。
+    ///
+    /// 仅在**校验成功**后调用，因此不会把错误口令固化为新哈希。
+    pub async fn upgrade_password_hash_if_legacy(&self, password: &str) -> bool {
+        let needs_upgrade = {
+            let config = self.config.read().await;
+            config
+                .web_password_version
+                .unwrap_or(crate::crypto::PWD_HASH_V1)
+                < crate::crypto::PWD_HASH_V2
+        };
+        if !needs_upgrade {
+            return false;
+        }
+        let mut config = self.config.write().await;
+        let salt = crate::crypto::random_hex(16);
+        config.web_password_hash = Some(crate::crypto::hash_password_v2(password, &salt));
+        config.web_password_salt = Some(salt);
+        config.web_password_version = Some(crate::crypto::PWD_HASH_V2);
+        if let Err(e) = self.store.save_config(&config) {
+            self.push_log("error", format!("升级口令哈希失败: {e}"));
+            return false;
+        }
+        true
+    }
+
+    /// 修改登录账号与口令。成功后**吊销全部登录会话**。
+    ///
+    /// `keep_crypto_sid`：发起本次改密的加密会话号。加密会话与登录会话是
+    /// 两套独立凭据，但改密必须让**所有**已协商的信道失效（否则旧客户端
+    /// 仍能继续用旧密钥通信）。唯一的例外是当前这条：它还要负责把
+    /// "改密成功"的响应加密送回去，销毁它会让客户端收到 428 而误判失败。
+    pub async fn set_credentials(
+        &self,
+        username: &str,
+        new_password: &str,
+        keep_crypto_sid: Option<&str>,
+    ) -> Result<(), String> {
+        {
+            let mut config = self.config.write().await;
+            if !username.trim().is_empty() {
+                config.web_username = Some(username.trim().to_string());
+            }
+            let salt = crate::crypto::random_hex(16);
+            config.web_password_hash = Some(crate::crypto::hash_password_v2(new_password, &salt));
+            config.web_password_salt = Some(salt);
+            config.web_password_version = Some(crate::crypto::PWD_HASH_V2);
+            // 使用者已自行设置口令，撤销"必须修改口令"状态
+            config.web_password_must_change = false;
+            self.store.save_config(&config)?;
+        }
+        // 口令变更后立即吊销全部既有会话，堵住"凭据已泄露但旧 token 仍有效"的窗口
+        let revoked = self.revoke_all_sessions();
+        // 加密会话同样作废（保留发起本次请求的那条，见函数文档）
+        let crypto_revoked = match keep_crypto_sid {
+            Some(sid) => self.crypto.destroy_all_except(sid),
+            None => self.crypto.destroy_all(),
+        };
+        self.push_log(
+            "info",
+            format!("登录口令已更新，已吊销 {revoked} 个会话 / {crypto_revoked} 个加密会话"),
+        );
+        Ok(())
+    }
+
+    /// 签发登录 token（有效期 7 天）。token 与该用户名绑定，便于按用户吊销。
+    pub fn issue_token(&self, username: &str) -> String {
+        let token = crate::crypto::random_hex(32);
+        let expiry = now_unix() + SESSION_TTL_SECS;
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(token.clone(), (expiry, username.to_string()));
+        token
+    }
+
+    /// 校验 token，返回所属用户名。
+    pub fn validate_token(&self, token: &str) -> Option<String> {
+        if token.is_empty() {
+            return None;
+        }
+        // 形态前置校验：拒绝非法长度，减少无谓的锁竞争
+        if token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let now = now_unix();
+        let mut sessions = self.sessions.lock().unwrap();
+        sessions.retain(|_, (exp, _)| *exp > now);
+        sessions.get(token).map(|(_, user)| user.clone())
+    }
+
+    /// 吊销单个会话。
+    pub fn revoke_session(&self, token: &str) -> bool {
+        self.sessions.lock().unwrap().remove(token).is_some()
+    }
+
+    /// 吊销全部登录会话，返回吊销数量。
+    pub fn revoke_all_sessions(&self) -> usize {
+        let mut s = self.sessions.lock().unwrap();
+        let n = s.len();
+        s.clear();
+        n
+    }
+
+    /// 当前有效会话数（诊断用；顺带清理过期条目）。
+    #[allow(dead_code)]
+    pub fn active_sessions(&self) -> usize {
+        let now = now_unix();
+        let mut s = self.sessions.lock().unwrap();
+        s.retain(|_, (exp, _)| *exp > now);
+        s.len()
+    }
+
+    /// 是否需要强制修改口令（初始为随机口令时为真）。
+    pub async fn must_change_password(&self) -> bool {
+        self.config.read().await.web_password_must_change
+    }
+
+    /// 是否处于登录锁定。返回 Some(剩余秒数) 表示已锁定。
+    pub fn login_lock_remaining(&self, username: &str) -> Option<i64> {
+        let now = now_unix();
+        let fails = self.login_fails.lock().unwrap();
+        match fails.get(username) {
+            Some((count, lock_until)) if *count >= MAX_LOGIN_FAILS && *lock_until > now => {
+                Some(*lock_until - now)
+            }
+            _ => None,
+        }
+    }
+
+    /// 记录一次登录失败；连续失败达到阈值后锁定 5 分钟。
+    pub fn record_login_fail(&self, username: &str) {
+        let now = now_unix();
+        let mut fails = self.login_fails.lock().unwrap();
+        let entry = fails.entry(username.to_string()).or_insert((0, 0));
+        entry.0 += 1;
+        if entry.0 >= MAX_LOGIN_FAILS {
+            entry.1 = now + LOGIN_LOCK_SECS;
+        }
+        if entry.0 > MAX_LOGIN_FAILS * 3 {
+            // 防止无限膨胀
+            entry.0 = MAX_LOGIN_FAILS;
+            entry.1 = now + LOGIN_LOCK_SECS;
+        }
+    }
+
+    /// 登录成功后清除失败计数。
+    pub fn reset_login_fails(&self, username: &str) {
+        self.login_fails.lock().unwrap().remove(username);
+    }
 }
+
+/// WebUI 登录连续失败阈值。
+pub const MAX_LOGIN_FAILS: u32 = 5;
+/// 达到阈值后的锁定时长（秒）。
+pub const LOGIN_LOCK_SECS: i64 = 300;
+/// 登录会话有效期（秒，7 天）。
+pub const SESSION_TTL_SECS: i64 = 7 * 24 * 3600;
 
 /// 受信来源匹配器。
 ///

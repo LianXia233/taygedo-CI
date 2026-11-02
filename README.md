@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <em>深度适配 OpenWrt LuCI 原生界面 · 无头 HTTP REST API · X25519+XChaCha20 链路端到端加密 · 静态落盘密文保护 · 零运行时依赖</em>
+  <em>深度适配 OpenWrt LuCI 原生界面 · 独立部署自带 WebUI · X25519+XChaCha20 链路端到端加密 · 静态落盘密文保护 · 零运行时依赖</em>
 </p>
 
 <p align="center">
@@ -38,12 +38,14 @@
 <a id="architecture-notice"></a>
 
 > [!IMPORTANT]
-> ### 📢 v0.7.1+ 架构演进与实际运行口径说明（必读）
+> ### 📢 v0.7.1 之后（Unreleased）的分平台口径说明（必读）
 >
-> 自 **v0.7.1** 起，系统彻底移除旧版内置网页（WebUI 专用静态资源与口令配置已全部剔除，`GET /` 直接返回 404），鉴权边界全面收敛：
+> 同一份二进制，两种形态，**区别只在于"有没有内置 WebUI"**：
 >
-> 1. **🌐 OpenWrt 环境**：**LuCI 界面是唯一的图形交互入口**（「服务 ➔ 塔吉多签到」）。浏览器不直连服务端口、不持有加密材料；数据由服务端的 rpcd ucode 内部通道（`luci.taygedo`）以已认证 LuCI 会话身份回环请求 `http://127.0.0.1:<port>`。后端只监听回环，端口不对局域网开放，安全性极高。
-> 2. **🪟 Windows / 🐧 Linux / 🐳 Docker 独立部署**：作为**纯绿色无头（Headless）后台服务**运行。无任何捆绑前端页面，由内置调度器定时执行，或通过标准化 HTTP REST API（支持 X25519 + Ed25519 + XChaCha20-Poly1305 应用层加密）供外部脚本与客户端对接。
+> 1. **🌐 OpenWrt 环境**：**LuCI 界面是唯一的图形交互入口**（「服务 ➔ 塔吉多签到」）。不提供内置 WebUI（`GET /` 返回 404），也没有自有口令登录。浏览器不直连服务端口、不持有加密材料；数据由服务端的 rpcd ucode 内部通道（`luci.taygedo`）以已认证 LuCI 会话身份回环请求 `http://127.0.0.1:<port>`。后端只监听回环，端口不对局域网开放。
+> 2. **🪟 Windows / 🐧 Debian / 🐳 Docker 独立部署**：**自带内置 WebUI**（`http://127.0.0.1:8787`），账号密码登录，业务接口需 Bearer token。首次启动生成随机口令，仅在启动横幅 / 日志中打印一次。浏览器与后端之间走应用层加密 v2（X25519 + Ed25519 + XChaCha20-Poly1305），并配合 Ed25519 签名的静态资源清单做前端完整性校验——**没有静默明文降级**。
+>
+> 两条形态共用同一套业务 API 与加密实现，OpenWrt 侧的行为与 v0.7.1 完全一致。
 
 ---
 
@@ -79,11 +81,11 @@ flowchart TD
         RPCD -->|"回环安全透传 (HTTP Loopback)"| CORE_OW
     end
 
-    subgraph StandaloneTrack["🪟 Windows / 🐧 Linux / 🐳 Docker (独立无头模式)"]
-        CLIENT_ST["外部 API 客户端 / 自动化脚本"]
-        ENVELOPE["应用层端到端加密 v2 (可选)<br/>• X25519 临时密钥协商<br/>• XChaCha20-Poly1305 AEAD<br/>• Ed25519 全 Transcript 签名"]
-        FIREWALL["来源准入控制 (IP 白名单)<br/>• 仅放行回环与 lan_cidrs"]
-        CORE_ST["taygedo-rs REST API 服务<br/>(无内置前端，GET / 报 404)"]
+    subgraph StandaloneTrack["🪟 Windows / 🐧 Debian / 🐳 Docker (独立部署，自带 WebUI)"]
+        CLIENT_ST["浏览器 WebUI / 外部 API 客户端"]
+        ENVELOPE["应用层端到端加密 v2 (强制)<br/>• X25519 临时密钥协商<br/>• XChaCha20-Poly1305 AEAD<br/>• Ed25519 全 Transcript 签名<br/>• 签名清单校验前端资源"]
+        FIREWALL["来源准入 + 登录鉴权<br/>• 仅放行回环与 lan_cidrs<br/>• Bearer token (7 天有效)"]
+        CORE_ST["taygedo-rs 服务<br/>(GET / 下发 WebUI，首次随机口令)"]
 
         CLIENT_ST --> ENVELOPE --> FIREWALL --> CORE_ST
     end
@@ -191,11 +193,12 @@ logread | grep taygedo
      $env:TAYGEDO_DATA_DIR = "D:\taygedo-data"
      .\taygedo-rs.exe
      ```
-3. **验证连通性**：
+3. **打开界面**：启动后会自动用默认浏览器打开 `http://127.0.0.1:8787`；后台窗口首次启动会打印一次随机口令（账号固定 `admin`），登录后请在「设置 ➔ 修改账号密码」立即改掉。
+4. **验证连通性**：
    ```powershell
    curl http://127.0.0.1:8787/api/meta
    ```
-   输出包含 `edition=standalone` 与 `auth_mode=trusted_source` 即表示服务正常运行。
+   输出包含 `"edition":"standalone"`、`"webui_enabled":true` 与 `"auth_mode":"token"` 即表示服务正常运行。
 
 ---
 
@@ -215,6 +218,11 @@ logread | grep taygedo
    ```bash
    sudo journalctl -u taygedo-rs -f
    ```
+4. **打开界面**：浏览器访问 `http://<服务器IP>:8787`。首次启动的随机口令在启动日志里只出现一次：
+   ```bash
+   sudo journalctl -u taygedo-rs | grep -A3 "首次启动"
+   ```
+   也可以在安装前用 `TAYGEDO_WEB_PASSWORD` 指定初始口令（见下方环境变量表）。
 
 ---
 
@@ -227,7 +235,10 @@ logread | grep taygedo
 docker compose up -d --build
 ```
 
-服务将在 `http://localhost:8787` 暴露无头 REST API，所有账号与密钥数据自动挂载持久化于本地 `./data` 目录。
+服务将在 `http://localhost:8787` 暴露 REST API 与内置 WebUI，所有账号与密钥数据自动挂载持久化于本地 `./data` 目录。
+
+> [!NOTE]
+> 容器内监听 `0.0.0.0`，浏览器访问 `http://<宿主机IP>:8787` 时来源必须命中 `lan_cidrs`（默认已含 RFC1918 私网段），否则会返回 403。首次启动口令请用 `docker compose logs` 查看，或在 `environment` 中显式设置 `TAYGEDO_WEB_PASSWORD`。
 
 ---
 
@@ -252,7 +263,8 @@ docker compose up -d --build
 | **防篡改与防重放** | **AAD 强绑定 + 4096 滑窗** | AAD 绑定请求方法、路径、序列号与会话 ID；滑动窗口严格防重放 |
 
 > [!NOTE]
-> OpenWrt 内部通信走回环内部通道（127.0.0.1），并由 LuCI 会话校验接管，不强制使用上述信封层；该层主要服务于 Windows/Linux 等暴露在局域网或外部网络中的独立 API 客户端。
+> 独立部署的内置 WebUI 与外部 API 客户端**都走**上述信封层：页面加载 `taygedo-crypto.js` 后先验签资源清单、再握手验签，登录口令与业务数据一律加密传输，`crypto_policy` 要求加密时明文请求直接 `428`（不存在"失败后降级明文"的旁路）。
+> OpenWrt 内部通信走回环内部通道（127.0.0.1），由 LuCI 会话校验接管，不强制使用信封层。
 
 ---
 
@@ -282,6 +294,8 @@ docker compose up -d --build
 | `TAYGEDO_DATA_DIR` | `data` (独立) / `/etc/taygedo` (OpenWrt) | 数据持久化存放目录路径 |
 | `TAYGEDO_LAN_CIDRS` | RFC1918 网段全集 | 受信来源 IP 网段白名单（CIDR），未命中来源一律拦截 403 |
 | `TAYGEDO_CRYPTO_POLICY` | `auto` | 传输加密准入策略：`auto`（局域网明文/外网强制加密）、`always`、`never` |
+| `TAYGEDO_WEB_PASSWORD` | 随机生成 | （仅独立部署）首次启动的 WebUI 初始口令，账号固定 `admin`；不设置则随机生成并只在启动横幅打印一次 |
+| `TAYGEDO_NO_AUTH` | 关闭 | （仅 OpenWrt 排障路径）免鉴权放行；独立部署设置该变量会被**强制忽略** |
 | `TAYGEDO_DEFAULT_SCHEDULE`| 无 | 覆盖全局默认签到执行时间（格式：`HH:MM`） |
 | `TAYGEDO_COIN_TASKS` | 无 | 覆盖金币打卡任务全局开关（`true` / `false`） |
 | `TAYGEDO_CLOUD_DURATION` | 无 | 覆盖云异环免费时长全局开关（`true` / `false`） |
@@ -293,12 +307,20 @@ docker compose up -d --build
 ## ❓ 常见问题 (FAQ)
 
 <details>
-<summary><strong>Q: 为什么在浏览器打开 <code>http://127.0.0.1:8787</code> 返回 404 Not Found？</strong></summary>
+<summary><strong>Q: 在浏览器打开 <code>http://127.0.0.1:8787</code> 返回 404 Not Found？</strong></summary>
 
-> **这是完全符合预期的正常现象**。
-> 自 v0.7.1 起，内置 WebUI 已彻底移除以追求极致的轻量与安全性。
-> - 在 **OpenWrt** 上，请直接访问 OpenWrt 管理控制台菜单「**服务 ➔ 塔吉多签到**」进行图形化管理；
-> - 在 **Windows / Linux** 独立部署时，该服务作为无头 API 守护进程运行，供定时任务自驱或通过 REST 接口管理。
+> 这是 **OpenWrt 形态**的正常现象：该形态不提供内置 WebUI，入口是 LuCI 菜单「**服务 ➔ 塔吉多签到**」。
+> 在 **Windows / Debian / Docker** 独立部署下，同一地址应直接打开登录界面；若也返回 404，检查是否误设了 `TAYGEDO_EDITION=openwrt`（`/api/meta` 的 `edition` 字段可直接确认）。
+</details>
+
+<details>
+<summary><strong>Q: 忘了 WebUI 登录口令怎么办？</strong></summary>
+
+> 用环境变量覆盖，**不需要**删数据目录：
+> ```bash
+> TAYGEDO_WEB_PASSWORD='新的口令' taygedo-rs   # 或写进 systemd / docker-compose 的环境变量
+> ```
+> `TAYGEDO_WEB_PASSWORD` 是显式优先项：设置即以它为准并覆盖存储口令，不设置才沿用 UI 里改过的口令。改完记得移除该变量，或在 UI 里重新设置一个。
 </details>
 
 <details>
@@ -320,7 +342,8 @@ docker compose up -d --build
 <summary><strong>Q: 手机移动端可以访问管理吗？</strong></summary>
 
 > **完全支持**。
-> 在 OpenWrt 部署环境下，原生 LuCI 视图对移动端做了全尺寸响应式适配，使用手机浏览器登录路由器后台即可随时随地管理。
+> 在 OpenWrt 部署环境下，原生 LuCI 视图对移动端做了全尺寸响应式适配，使用手机浏览器登录路由器后台即可随时随地管理；
+> 独立部署的内置 WebUI 同样是移动优先的响应式布局（含 `viewport-fit=cover` 刘海屏适配），手机浏览器直连 `http://<IP>:8787` 即可操作。
 </details>
 
 ---

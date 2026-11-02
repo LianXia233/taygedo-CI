@@ -295,11 +295,15 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
   }
 }
 
-// 自检：服务端已无自有登录，脚本不应再构造授权头
-assert(
-  !new RegExp('Authori' + 'zation').test(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8')),
-  '测试脚本不再使用 Authorization'
-);
+// 自检：服务端已无自有登录，脚本不应再构造授权头。
+// 匹配「带引号的头名」与「头名后跟冒号」两种代码形态，不会命中注释里的说明文字。
+{
+  const src = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  assert(
+    !/['"]Authori[z]ation|Authori[z]ation:/.test(src),
+    '测试脚本不再使用授权请求头'
+  );
+}
 
 console.log(failures === 0 ? '\nE2E 全部通过' : `\nE2E 失败项：${failures}`);
 process.exit(failures === 0 ? 0 : 1);

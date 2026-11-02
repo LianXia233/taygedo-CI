@@ -305,6 +305,11 @@ cargo +stable-x86_64-pc-windows-gnu build --release
 | **x86_64** | `x86_64-unknown-linux-musl` | 常见 PC 软路由、工控机、PVE/ESXi 虚拟机 |
 | **aarch64 (cortex-a53)** | `aarch64-unknown-linux-musl` | MediaTek MT7986、Rockchip RK3568/RK3588 等现代路由器 |
 
+发布前必须先过质量门禁：PR 打开或更新时，`quality` 工作流会跑
+`cargo fmt --check`、`clippy --all-targets -- -D warnings`、`cargo test`，
+并用**真实二进制 + 仓库内真实前端文件**跑端到端协议测试；`release` 作业通过
+`uses:` 复用同一份定义并 `needs` 它，所以安全回归不会流到 Release。
+
 ---
 
 ## OpenWrt / LuCI 集成（开发者）
@@ -471,7 +476,7 @@ taygedo-rs --rotate-storage-key
 
 | 校验项 | 手法 | 结果 |
 | :--- | :--- | :---: |
-| 单元/集成测试 | `cargo test` | **96 passed / 0 failed** |
+| 单元/集成测试 | `cargo test --all-targets --locked` | **97 passed / 0 failed** |
 | 端到端协议 | `node scripts/e2e_web.mjs`（真实二进制 + 真实前端文件） | **21/21 通过** |
 | 资源完整性 | 同上，加载**仓库里真实的 `web_guard.js`** 对真实清单执行：验签、11 资源哈希、TOFU、指纹已固定、指纹变更拒绝、资源被替换拒绝、恢复后自愈 | **7/7 通过** |
 | 落盘密态 | `store::tests`：断言文件以 `TGDENV01` 开头且不含明文手机号/密码/`credential_key` | **通过** |
@@ -480,7 +485,8 @@ taygedo-rs --rotate-storage-key
 | 权限过宽 | `chmod 644 keys/master.key` | 拒绝启动并报权限错误 |
 | 并发写 | 两个进程同时打开同一数据目录 | 第二个 `Locked` 退出 |
 | 轮换 | `--rotate-storage-key` | 数据可读、Key ID 变化、断电续做 |
-| 格式检查 | `cargo fmt --all -- --check` / `cargo clippy --all-targets -- -D warnings` | **均无输出** |
+| 格式检查 | `cargo fmt --all -- --check` / `cargo clippy --all-targets -- -D warnings`（rustc 1.99.1） | **均无输出** |
+| PR 门禁 | GitHub Actions `quality` 工作流在 `pull_request` 上运行 | 已接入；首次运行即拦下 2 处 clippy（见 CHANGELOG「修复」） |
 
 **尚未在本环境执行的验证**（下面这些需要真机/真浏览器，不能替它们盖章）：
 
@@ -606,7 +612,8 @@ static/
 ├── taygedo-crypto.js    # 浏览器端协议 v2 客户端
 └── vendor/              # @noble 纯 JS 密码学（MIT）+ noble-loader.js
 openwrt/luci-app-taygedo/   # OpenWrt 固件集成与 LuCI 原生应用
-.github/workflows/build.yml # 质量门禁 + 多架构交叉编译 + 发布
+.github/workflows/quality.yml  # 质量门禁（PR 预检 + 发布前复用同一份）
+.github/workflows/build.yml    # 多架构交叉编译 + deb/ipk/apk 打包 + Release
 scripts/package.sh          # deb / ipk / apk 自动化打包
 scripts/e2e_web.mjs         # 端到端协议测试（真实二进制 + 真实前端）
 docs/encrypted-storage.md   # 加密存储规格

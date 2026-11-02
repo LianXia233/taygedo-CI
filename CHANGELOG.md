@@ -9,7 +9,7 @@
 > 0.5.0 起首次启动一律由 CSPRNG 随机生成初始口令，仅在启动横幅打印一次。
 > 以 [README](README.md) 的说明为准。
 
-## [0.6.0] - 2026-11-20
+## [0.6.0] - 2026-11-02
 
 > **破坏性安全升级**：配置不再以明文落盘，WebUI 通信协议升级到 `taygedo/v2`。
 > 升级前请先阅读 [docs/encrypted-storage.md](docs/encrypted-storage.md) 的「备份与恢复」一节，
@@ -71,9 +71,17 @@
   关于 aarch64 `aes_armv8` 编译参数的性能/侧信道提示**不再适用于传输加密**。
   注意：`aes` / `aes-gcm` 依赖仍然保留——它们分别用于游戏接口的签名计算
   （`protocol.rs`）与账号凭据的二次加密（`crypto.rs`），与本次改造无关。
-- `.github/workflows/build.yml` 新增 `quality` 作业（fmt / clippy `-D warnings` /
-  `cargo test` / 真实二进制端到端协议测试）与 `audit` 作业（RustSec，非阻塞）；
-  `release` 改为依赖 `quality`，安全回归不再可能流到 Release。
+- 质量门禁抽成可复用工作流 `.github/workflows/quality.yml`（fmt / clippy
+  `-D warnings` / `cargo test` / 真实二进制端到端协议测试），触发条件为
+  `pull_request`(main) / `workflow_dispatch` / `workflow_call`：PR 打开或更新即可
+  看到结论，`build.yml` 的 `release` 通过 `uses:` 复用同一份定义并 `needs` 它。
+  抽成单一来源而不是复制两份，是因为两份脚本必然漂移，且漂移方向通常是
+  "PR 上跑的那份悄悄放宽了"。
+- `.github/workflows/build.yml` 新增 `audit` 作业（RustSec advisory，非阻塞）：
+  一条与本次改动无关的新 advisory 不应把发布流水线卡死；结论在 Actions 里
+  显式可见，由维护者评估后单独升级依赖。
+- 原有 Windows / musl x86_64 / musl aarch64 / debian / openwrt(ipk+apk) /
+  release 流程保持不变。
 - `scripts/package.sh`：deb 的 systemd unit 补充 systemd 凭据用法说明，postinst
   收紧 `/var/lib/taygedo` 与 `keys/` 权限；OpenWrt `init.d` 兜底 `chmod 700/600`。
 - README 的加密章节重写，明确区分「传输加密」与「存储加密」，并如实列出
@@ -85,6 +93,13 @@
   但进程内 `StorageCrypto` 仍持旧密钥，导致本次启动读新密文必然 `KeyIdMismatch`
   ——等于要求用户重启两次。现在续做成功后立即重新装载主密钥。
   （新增测试 `interrupted_rotation_is_resumed_in_one_start`，去掉修复即失败。）
+- **CI 首次运行拦下的两处 lint**（本地 rustc 1.93 不报，CI 用 1.99 才触发）：
+  - `clippy::for_kv_map`（`src/protocol.rs`）：遍历 `BTreeMap` 却丢弃 key，
+    改为 `data.values()`。语义等价——`BTreeMap` 本就按 key 字典序迭代。
+  - `clippy::result_large_err`（`src/web_security/middleware.rs`）：中间件返回
+    `Result<Response, Response>`，`Err` 变体 128 字节。这是 axum 的既定约定
+    （`Err` 必须实现 `IntoResponse`），装箱只会多一次堆分配、不减少实际成本，
+    因此加 `#[allow]` 并写明理由，而不是为了消 lint 去改签名。
 
 ### 测试
 
@@ -97,6 +112,9 @@
   - 握手验签、登录、账号/配置/日志往返；
   - 重放拒绝、跨接口搬移拒绝、GET 走头与 POST 走 body、正文与头并存拒绝、明文 428。
 - `cargo fmt --all -- --check` 与 `cargo clippy --all-targets -- -D warnings` 均无输出。
+- 上述 fmt / clippy / 测试在 **rustc 1.99.1**（与 CI 同版本）下复验通过。此前本地
+  为 1.93，有两条新 lint 未触发，已由 PR 门禁拦下并修正——这也是把质量门禁放到
+  PR 上的直接理由：本地版本落后时，"我这儿是干净的"并不等于 CI 干净。
 
 ## [0.5.2] - 2026-11-01
 

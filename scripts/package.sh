@@ -120,6 +120,15 @@ Environment=TAYGEDO_DATA_DIR=/var/lib/taygedo
 Restart=on-failure
 RestartSec=5
 
+# 主密钥保护（配置静态加密）：
+# 默认使用 /var/lib/taygedo/keys/master.key（root:root 0600）。
+# 若要用 systemd 凭据（推荐，密钥不进可读文件系统），执行：
+#   systemd-creds encrypt --name=taygedo_storage_key /root/taygedo.key /etc/taygedo/taygedo_storage_key.cred
+# 然后取消下面这行注释（LoadCredentialEncrypted 需要 systemd >= 250）。
+# 启用后 CREDENTIALS_DIRECTORY 由 systemd 自动注入，无需手工设置环境变量；
+# 二进制会优先读取该凭据，其次才回落到 keys/master.key。
+#LoadCredentialEncrypted=taygedo_storage_key:/etc/taygedo/taygedo_storage_key.cred
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -141,7 +150,16 @@ EOF
         cat > "$DEBIAN/postinst" <<EOF
 #!/bin/sh
 set -e
+# 数据目录承载账号/配置/密钥（配置以密文落盘），必须仅 root 可读写。
+# 升级时不覆盖既有权限设置之外的内容，只做收紧。
 if [ ! -d /var/lib/taygedo ]; then mkdir -p /var/lib/taygedo; fi
+chown root:root /var/lib/taygedo 2>/dev/null || true
+chmod 700 /var/lib/taygedo 2>/dev/null || true
+if [ -d /var/lib/taygedo/keys ]; then
+    chown -R root:root /var/lib/taygedo/keys 2>/dev/null || true
+    chmod 700 /var/lib/taygedo/keys 2>/dev/null || true
+    chmod 600 /var/lib/taygedo/keys/* 2>/dev/null || true
+fi
 if command -v systemctl >/dev/null 2>&1; then systemctl enable $PKG_NAME.service >/dev/null 2>&1 || true; fi
 exit 0
 EOF

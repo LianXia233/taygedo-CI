@@ -14,79 +14,15 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 0) 质量门禁：格式 / 静态检查 / 单元测试 / 端到端协议测试
+  # 0) 质量门禁（定义在 .github/workflows/quality.yml）
   #
-  # 这一层刻意跑在发布之前（release 通过 needs 依赖它）：加密存储与传输协议
-  # 的回归一旦漏到 Release，用户那边的表现是"密钥损坏/登录进不去"，
-  # 属于不可接受的故障，必须在打包前拦住。
+  # 抽成可复用工作流，是因为同一份检查要在两个时机跑：
+  #   - PR 打开/更新时（pull_request）：评审看代码前就拿到结论；
+  #   - 发布之前（下面的 release 通过 needs 依赖本作业）：挡住 Release。
+  # 复制两份脚本必然漂移，所以这里只做调用。
   # ---------------------------------------------------------------------------
   quality:
-    name: quality
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # 与 build 作业一致：GitHub runner 直连 crates.io，清空镜像 include
-      - name: Use default crates.io on GitHub runners
-        shell: bash
-        run: printf '' > .cargo/config.mirror.toml
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Format check
-        run: cargo fmt --all -- --check
-
-      - name: Clippy (deny warnings)
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Unit tests
-        run: cargo test --all-targets --locked
-
-      # 端到端协议测试：用**真实二进制** + **仓库里真实的前端客户端文件**
-      # 走完整链路（清单验签 → 握手验签 → 登录 → 业务 → 重放/搬移/降级拒绝）。
-      # 只跑 Rust 单测无法覆盖这条链路，因为半条实现都在 JS 里。
-      - name: Build binary for E2E
-        run: cargo build --locked
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: End-to-end protocol test
-        run: |
-          set -euo pipefail
-          DATA_DIR="$(mktemp -d)"
-          # always：强制所有来源加密，才能验证"明文降级被拒"这条分支
-          TAYGEDO_DATA_DIR="$DATA_DIR" \
-          TAYGEDO_WEB_PASSWORD=e2e-password-123 \
-          TAYGEDO_CRYPTO_POLICY=always \
-          ./target/debug/taygedo-rs > server.log 2>&1 &
-          SRV_PID=$!
-          trap 'kill $SRV_PID 2>/dev/null || true' EXIT
-          for i in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:8787/api/meta >/dev/null 2>&1; then break; fi
-            sleep 0.5
-          done
-          curl -fsS http://127.0.0.1:8787/api/meta >/dev/null
-          node scripts/e2e_web.mjs http://127.0.0.1:8787 e2e-password-123
-          kill $SRV_PID 2>/dev/null || true
-          wait $SRV_PID 2>/dev/null || true
-          trap - EXIT
-
-      # 归档服务端日志，失败时方便定位（E2E 失败时二进制日志是第一现场）
-      - name: Upload server log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-server-log
-          path: server.log
-          if-no-files-found: ignore
+    uses: ./.github/workflows/quality.yml
 
   # ---------------------------------------------------------------------------
   # 0b) 依赖安全审计（RustSec advisory）

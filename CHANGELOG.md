@@ -2,7 +2,7 @@
 
 本文件记录塔吉多自动签到（Rust 版）的所有版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.6.0`。
+> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.7.0`。
 
 > **关于初始口令的重要提示**：`admin / admin` 这类固定初始口令**仅存在于 0.5.0 之前的历史版本**，
 > 下方旧版本条目（如 0.2.0）中的相关描述是当时的事实记录，**不代表当前行为**。
@@ -10,6 +10,8 @@
 > 以 [README](README.md) 的说明为准。
 
 ## [Unreleased]
+
+## [0.7.0] - 2026-11-02
 
 ### 变更 · OpenWrt 上退役内置 WebUI（LuCI 唯一入口）
 
@@ -49,10 +51,20 @@
 ### 验证
 
 - `cargo fmt --all -- --check`、`cargo clippy --all-targets -- -D warnings`、
-  `cargo test --all-targets` 与 `cargo build` 结果见 PR 描述。
+  `cargo test --all-targets` 与 `cargo build` 均通过；CI 的 quality 作业给出同样结论。
 - 改动文件行尾均为 LF（CRLF 计数为 0）。
-- `ubus session get` 路径需在真机 OpenWrt 上验证；本机只能覆盖到格式校验、
-  JSON 解析与 fail-closed 分支的单测，PR 描述中已标注。
+- **`ubus session get` 路径已在真机 OpenWrt 上实测通过**（ImmortalWrt SNAPSHOT，
+  `aarch64_cortex-a53`，候选二进制是 CI 产出的 `aarch64-unknown-linux-musl`）。
+  以 `TAYGEDO_EDITION=openwrt` 在 127.0.0.1 高位端口跑临时实例，生产二进制与配置
+  全程未改动，实测：`GET /` 返回 `404 webui_retired`；`/api/meta` 为
+  `edition=openwrt` / `webui_enabled=false` / `auth_mode=luci_session`；无会话访问
+  `/api/config` 返回 `401 luci_session_missing`；伪造 sid 走真实 ubus 校验返回
+  `401 luci_session_invalid`（7.3ms）；`POST /api/login` 返回 `410`。
+- **超时截断与并发上界实测生效**：注入一个 `exec sleep 10` 的 ubus 替身让校验挂起，
+  单请求在 2.003s 返回失败（三轮复测 2.003 / 2.004 / 2.004s），再过 3s 后替身
+  子进程数为 0、僵尸数为 0（请求期间该子进程确为本实例的直接子进程，PPid 相符）。
+  8 个不同 sid 并发时存活替身进程峰值为 4（上限生效），其中 7 个约 2.00s 返回、
+  1 个 4.01s 返回，批次墙钟约 4s，未观察到进程泄漏。
 
 ## [0.6.0] - 2026-11-02
 

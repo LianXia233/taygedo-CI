@@ -9,7 +9,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%20|%20Linux%20|%20OpenWrt-lightgrey?style=flat-square)](#安装教程)
 [![Design: White MD3](https://img.shields.io/badge/Design-White%20MD3-3b66f5?style=flat-square)](#界面展示)
 [![Security](https://img.shields.io/badge/Security-X25519%20%2B%20Ed25519%20%2B%20XChaCha20-green?style=flat-square)](#应用层加密与加密存储)
-[![Release](https://img.shields.io/badge/Release-v0.6.0-orange?style=flat-square)](https://github.com/LianXia233/taygedo-CI/releases)
+[![Release](https://img.shields.io/badge/Release-v0.7.0-orange?style=flat-square)](https://github.com/LianXia233/taygedo-CI/releases)
 
 <p align="center">
   📦 <b>下载单文件、双击即启</b>，Windows / Debian 下全部操作在<b>现代化白色 Material Design 3、自适应双端</b>的内置 WebUI 中完成。<br>
@@ -29,7 +29,7 @@
 
 > [!NOTE]
 > **版本发布轨道**  
-> - **正式版**（如 `v0.5.1`、`v0.5.2`）：稳定，推荐生产环境使用。访问 [Latest Release](https://github.com/LianXia233/taygedo-CI/releases/latest)。  
+> - **正式版**（如 `v0.7.0`）：稳定，推荐生产环境使用。访问 [Latest Release](https://github.com/LianXia233/taygedo-CI/releases/latest)。  
 > - **`nightly` 版**：滚动预发布，每次手动触发构建后覆盖更新，供快速尝鲜。  
 > 
 > 📦 各平台安装包见 [Releases](https://github.com/LianXia233/taygedo-CI/releases)。上游逻辑参考 [zzstar101/taygedo-auto-attendance](https://github.com/zzstar101/taygedo-auto-attendance)（TypeScript 版，MIT 许可）。本项目自身代码以 **GPL-3.0** 发布，详见 [许可证](#许可证)。

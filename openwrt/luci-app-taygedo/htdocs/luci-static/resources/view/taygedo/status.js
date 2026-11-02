@@ -24,7 +24,41 @@ var TGD = (function () {
 		t._t = setTimeout(function () { t.className = 'tgd-toast'; }, 2600);
 	}
 
-	function api(path, method, body) {
+	// ---- 应用层加密（协议 v2）客户端 ----
+	//
+	// LuCI 页面与后端的 8787 端口不同源，因此加密客户端及其依赖（内置
+	// noble 密码学库、完整性校验器）都从后端动态加载，baseUrl 指向后端根。
+	// 加载后先做资源完整性校验，再建立加密会话；任何一步失败都不会退回
+	// 到"看起来正常但明文"的请求。
+	var cryptoClient = null;
+	var cryptoReady = null;
+
+	function loadScript(src) {
+		return new Promise(function (resolve, reject) {
+			var el = document.createElement('script');
+			el.src = src;
+			el.onload = function () { resolve(); };
+			el.onerror = function () { reject(new Error('脚本加载失败：' + src)); };
+			document.head.appendChild(el);
+		});
+	}
+
+	function ensureCrypto() {
+		if (cryptoReady) return cryptoReady;
+		cryptoReady = loadScript(apiBase + '/static/vendor/noble-loader.js')
+			.then(function () { return loadScript(apiBase + '/static/web_guard.js'); })
+			.then(function () { return loadScript(apiBase + '/static/taygedo-crypto.js'); })
+			.then(function () { return window.TgdCheckIntegrity(apiBase); })
+			.then(function (g) {
+				if (!g || !g.ok) throw new Error('前端资源完整性校验失败：' + ((g && g.error) || '未知原因'));
+				cryptoClient = window.TaygedoCrypto.create({ baseUrl: apiBase });
+				return cryptoClient.ready();
+			});
+		cryptoReady.catch(function () { cryptoReady = null; });
+		return cryptoReady;
+	}
+
+	function plainApi(path, method, body) {
 		var opts = { method: method || 'GET', headers: {} };
 		if (body !== undefined) {
 			opts.headers['Content-Type'] = 'application/json';
@@ -36,6 +70,25 @@ var TGD = (function () {
 				return data;
 			});
 		});
+	}
+
+	function api(path, method, body) {
+		// 先问后端："这个来源必须加密吗？"
+		return fetch(apiBase + '/api/meta', { cache: 'no-store' })
+			.then(function (r) { return r.json(); })
+			.catch(function () { return {}; })
+			.then(function (meta) {
+				if (meta && meta.crypto_required) {
+					return ensureCrypto().then(function () {
+						return cryptoClient.request(path, method || 'GET', body);
+					}).then(function (res) {
+						if (!res.ok) throw new Error((res.data && res.data.error) || ('HTTP ' + res.status));
+						return res.data;
+					});
+				}
+				// 策略为 auto + 内网来源：沿用原有直连（LuCI 与本服务同机部署）。
+				return plainApi(path, method, body);
+			});
 	}
 
 	function initApiBase() {

@@ -635,6 +635,10 @@ header {
 
 <div class="toast" id="toast"></div>
 
+<!-- 应用层加密（协议 v2）：纯 JS 密码学实现，不依赖 crypto.subtle，
+     因此普通 HTTP 下同样可用。加载顺序固定：库 → 完整性门禁 → 客户端。 -->
+<script src="/static/vendor/noble-loader.js"></script>
+<script src="/static/web_guard.js"></script>
 <script src="/static/taygedo-crypto.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -670,19 +674,12 @@ async function api(path, method, body) {
   const headers = {};
   if (token) headers['Authorization'] = 'Bearer ' + token;
 
-  let res;
-  if (cryptoClient) {
-    res = await cryptoClient.request(path, method || 'GET', body, headers);
-  } else {
-    const opts = { method: method || 'GET', headers };
-    if (body !== undefined && method !== 'GET') {
-      headers['Content-Type'] = 'application/json';
-      opts.body = JSON.stringify(body);
-    }
-    const r = await fetch(path, opts);
-    const data = await r.json().catch(() => ({}));
-    res = { ok: r.ok, status: r.status, data };
+  // 没有加密客户端 = 无法保护请求。这里**不**回退到明文 fetch：
+  // 明文降级会让"看起来一切正常"的部署实际上毫无保护。
+  if (!cryptoClient) {
+    throw new Error('当前页面无法加载安全通信模块，已阻止发送明文请求');
   }
+  const res = await cryptoClient.request(path, method || 'GET', body, headers);
 
   if (res.status === 401) {
     clearToken();
@@ -711,22 +708,10 @@ async function doLogin(e) {
   const btn = $('loginBtn');
   btn.disabled = true; btn.textContent = '登录中...';
   try {
-    let r, j;
-    if (cryptoClient) {
-      await cryptoClient.ready(false);
-      const res = await cryptoClient.request('/api/login', 'POST', { username: user, password: pwd });
-      r = { ok: res.ok, status: res.status };
-      j = res.data || {};
-      if (!res.ok) throw new Error(j.error || '登录失败');
-    } else {
-      const resp = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: user, password: pwd }),
-      });
-      j = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(j.error || '登录失败');
-    }
+    if (!cryptoClient) throw new Error('安全通信模块不可用，已阻止明文登录');
+    const res = await cryptoClient.request('/api/login', 'POST', { username: user, password: pwd });
+    const j = res.data || {};
+    if (!res.ok) throw new Error(j.error || '登录失败');
     token = j.token;
     localStorage.setItem('taygedo_token', token);
     $('loginPwd').value = '';
@@ -1059,15 +1044,25 @@ async function loadMeta() {
 
 (async function init() {
   await loadMeta();
-  try {
-    const r = await fetch('/api/config', { method: 'GET' });
-    if (r.ok) {
+  // 资源完整性没通过：不建立会话、不允许登录，直接把问题摆到用户面前。
+  if (window.TgdIntegrityPromise) {
+    try {
+      const g = await window.TgdIntegrityPromise;
+      if (g && !g.ok) {
+        toast('前端资源完整性校验失败：' + (g.error || '未知原因'), 'err');
+        $('loginBtn').disabled = true;
+      }
+    } catch (e) { }
+  }
+  if (token) {
+    try {
+      await api('/api/config', 'GET');
       showMain();
       loadAccounts();
       loadLogs();
       return;
-    }
-  } catch (e) { }
+    } catch (e) { }
+  }
   if (!token) { showLogin(); return; }
   try {
     await api('/api/accounts', 'GET');

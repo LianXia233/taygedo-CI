@@ -2,7 +2,7 @@
 
 本文件记录塔吉多自动签到（Rust 版）的所有版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.7.1`。
+> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.7.2`。
 
 > **关于初始口令的重要提示**：`admin / admin` 这类固定初始口令**仅存在于 0.5.0 之前的历史版本**，
 > 下方旧版本条目（如 0.2.0）中的相关描述是当时的事实记录，**不代表当前行为**。
@@ -10,6 +10,11 @@
 > 以 [README](README.md) 的说明为准。
 
 ## [Unreleased]
+
+## [0.7.2] - 2026-11-03
+
+> **破坏性变更**：OpenWrt 产物不再包含 WebUI、登录/改密接口与前端加密资产，
+> 入口只有 LuCI。Windows / Debian / Docker 不受影响（默认 `webui` 形态）。
 
 ### 解耦 · OpenWrt 与 Windows/Debian 改为编译期双形态
 

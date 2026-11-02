@@ -38,7 +38,7 @@
 <a id="architecture-notice"></a>
 
 > [!IMPORTANT]
-> ### 📢 v0.7.1 之后（Unreleased）的构建形态说明（必读）
+> ### 📢 v0.7.2 起的构建形态说明（必读）
 >
 > **同一份源码，两个互斥的编译产物**——形态由 Cargo feature 在编译期决定，
 > 运行期不再做任何探测（`TAYGEDO_EDITION` 已移除）：
@@ -173,10 +173,10 @@ flowchart TD
 #### 1. 安装软件包
 ```sh
 # apk 系统（OpenWrt 24.10 / 25.12+ / ImmortalWrt SNAPSHOT）
-apk add --allow-untrusted /tmp/luci-app-taygedo_0.7.1-r1_x86_64.apk
+apk add --allow-untrusted /tmp/luci-app-taygedo_0.7.2-r1_x86_64.apk
 
 # opkg 系统（OpenWrt 23.05 及更早分支）
-opkg install /tmp/luci-app-taygedo_0.7.1-1_x86_64.ipk
+opkg install /tmp/luci-app-taygedo_0.7.2-1_x86_64.ipk
 ```
 
 #### 2. 开箱即用
@@ -220,7 +220,7 @@ logread | grep taygedo
 
 1. **安装 deb 软件包**：
    ```bash
-   sudo dpkg -i taygedo-rs_0.7.1_amd64.deb
+   sudo dpkg -i taygedo-rs_0.7.2_amd64.deb
    sudo apt-get install -f # 补齐依赖（静态单文件通常零依赖）
    ```
 2. **启用 systemd 服务**：

@@ -75,5 +75,5 @@ g.s-div>line{stroke:#444441}
 <text x="551" y="211" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">ipk（23.05 及以下）</text>
 <text x="551" y="228" font-size="12" fill="#5F5E5A" text-anchor="middle" dominant-baseline="central">apk（24.10 及以上）</text>
 </g>
-<g class="s-t3"><text x="40" y="274" font-size="12" fill="#888780">安装后统一访问 http://&lt;主机&gt;:8787，或从 LuCI 菜单进入。</text></g>
+<g class="s-t3"><text x="40" y="274" font-size="12" fill="#888780">Windows / Debian 访问 http://&lt;主机&gt;:8787；OpenWrt 从 LuCI 菜单进入。</text></g>
 </svg>

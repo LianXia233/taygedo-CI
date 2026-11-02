@@ -13,7 +13,7 @@
 | 文件 | 内容 | 是否受管 |
 | :--- | :--- | :---: |
 | `accounts.json` | 游戏账号（手机号、密码、token、设备指纹） | ✅ |
-| `config.json` | 全局配置（WebUI 口令哈希、`credential_key`、调度、开关） | ✅ |
+| `config.json` | 全局配置（`credential_key`、调度、开关、加密策略、网段白名单） | ✅ |
 | `state.json` | 签到幂等状态缓存 | ✅ |
 | `keyring.json` | 服务端长期身份私钥（Ed25519 seed） | ✅ |
 | `keys/master.key` | 配置加密主密钥 | 否（它就是密钥本身，见 §4） |

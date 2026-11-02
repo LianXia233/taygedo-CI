@@ -1,9 +1,12 @@
 # OpenWrt LuCI app: 塔吉多自动签到 (Taygedo auto attendance)
 #
 # 现代 LuCI JS 前端：htdocs/luci-static/resources/view/taygedo/status.js
-# 这是 OpenWrt 上的唯一 Web 入口，直接调用 Rust 后端（默认 8787 端口）的 REST API；
-# 后端内置 WebUI 已退役（不再下发前端页面、不监听其登录流程），登录与鉴权交给
-# OpenWrt（LuCI/ubus 会话）。
+# 这是 OpenWrt 上的唯一入口，只做展示与交互：
+#   - 无内置 WebUI、无浏览器侧加密前端（不加载 taygedo-crypto.js、不构造信封）；
+#   - 数据经 rpcd 内部通道取得：页面调用 ubus 对象 luci.taygedo，由
+#     /usr/share/rpcd/ucode/luci.taygedo 在服务端以 curl 调本机回环
+#     http://127.0.0.1:<port>；后端只监听 127.0.0.1，不对 LAN 暴露；
+#   - 鉴权由 OpenWrt 负责（LuCI/ubus 会话，后端用 ubus session get 校验）。
 #
 # 两种构建方式（二选一）：
 #   A. 预编译二进制下载（默认）：从 GitHub Release 下载对应架构的 musl 二进制。
@@ -62,7 +65,7 @@ define Package/luci-app-taygedo
   SUBMENU:=3. Applications
   TITLE:=Taygedo auto attendance (塔吉多自动签到)
   URL:=$(TAYGEDO_REPO)
-  DEPENDS:=+ca-bundle +luci-base
+  DEPENDS:=+ca-bundle +luci-base +curl
   PKGARCH:=all
 endef
 
@@ -81,8 +84,9 @@ endef
 define Package/luci-app-taygedo/description
   LuCI interface (JS) for the Taygedo (Hotta 幻塔 / Neverness to Everness 异环)
   daily attendance tool. Multi-account, SMS/password login, daily scheduling.
-  LuCI is the only web entry on OpenWrt; authentication is delegated to
-  OpenWrt (LuCI/ubus session). The built-in WebUI is retired and not included.
+  LuCI is the only entry on OpenWrt; there is no built-in WebUI and no
+  browser-side crypto frontend. Data is fetched through an internal rpcd/ucode
+  channel over loopback; authentication is delegated to the OpenWrt session.
 endef
 
 define Build/Prepare
@@ -118,6 +122,11 @@ define Package/luci-app-taygedo/install
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/taygedo
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/taygedo/status.js \
 		$(1)/www/luci-static/resources/view/taygedo/status.js
+
+	# rpcd 内部通道（ucode 插件，服务端调 loopback）
+	$(INSTALL_DIR) $(1)/usr/share/rpcd/ucode
+	$(INSTALL_DATA) ./root/usr/share/rpcd/ucode/luci.taygedo \
+		$(1)/usr/share/rpcd/ucode/luci.taygedo
 
 	# 菜单 / ACL
 	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d

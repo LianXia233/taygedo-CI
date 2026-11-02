@@ -17,7 +17,7 @@
 //! ## AAD 绑定
 //!
 //! `method` 与 `path?query` 取自 HTTP 请求本身（不是客户端声明的），
-//! 因此把 `/api/accounts` 的密文搬到 `/api/password` 上必然认证失败。
+//! 因此把 `/api/accounts` 的密文搬到 `/api/config` 上必然认证失败。
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -60,7 +60,7 @@ pub const HDR_ENVELOPE: HeaderName = HeaderName::from_static("x-tgd-envelope");
 /// ## AAD 绑定
 ///
 /// `method` 与 `path?query` 取自 HTTP 请求本身（不是客户端声明的），
-/// 因此把 `/api/accounts` 的密文搬到 `/api/password` 上必然认证失败。
+/// 因此把 `/api/accounts` 的密文搬到 `/api/config` 上必然认证失败。
 ///
 /// ## 为什么允许 `clippy::result_large_err`
 ///
@@ -107,10 +107,19 @@ pub async fn crypto_middleware(
     }
 
     let require_enc = match policy.as_str() {
-        "always" => true,
-        // auto：内网来源（LAN 白名单）可明文；其余来源必须加密
+        "always" => {
+            // OpenWrt 上后端只监听回环，回环调用就是 rpcd/ucode 内部通道：
+            // 该通道由 LuCI 会话鉴权，浏览器触达不到，因此不强制信封。
+            // 独立部署保持 always 的严格语义（含回环来源）。
+            let internal =
+                crate::service::is_openwrt() && matches!(peer_ip, Some(ip) if ip.is_loopback());
+            !internal
+        }
+        // auto：回环与内网白名单来源可明文；其余来源必须加密。
+        // 回环无条件受信：OpenWrt 的内部通道由 rpcd/ucode 经 loopback 调用，
+        // 不能因为用户把 lan_cidrs 改坏就让它 428。
         _ => match peer_ip {
-            Some(ip) => !state.lan_matches(ip),
+            Some(ip) => !(ip.is_loopback() || state.lan_matches(ip)),
             None => true,
         },
     };
@@ -125,8 +134,8 @@ pub async fn crypto_middleware(
                 "该来源需要启用应用层加密，请刷新页面完成安全握手",
             ));
         }
-        // auto + 内网：允许明文（LuCI 直连场景）。这是一条**显式**策略分支，
-        // 由 crypto_policy 与 lan_cidrs 共同决定，不是失败后的自动回退。
+        // auto + 受信来源：允许明文（OpenWrt 内部通道 / 内网自用）。这是一条
+        // **显式**策略分支，由 crypto_policy 与来源地址共同决定，不是失败后的自动回退。
         let mut resp = next.run(req).await;
         resp.headers_mut()
             .insert(HDR_ENC, HeaderValue::from_static("0"));

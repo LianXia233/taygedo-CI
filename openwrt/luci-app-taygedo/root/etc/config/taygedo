@@ -7,37 +7,29 @@ config taygedo 'main'
 	option data_dir '/etc/taygedo'
 
 	# ---- 鉴权（OpenWrt 集成模式）----
-	# 内置 WebUI 已退役，LuCI 是唯一入口；登录与鉴权交由 OpenWrt：
-	# 页面把 LuCI 会话号随请求带给后端，后端用本机 ubus `session get` 校验，
-	# 本服务不签发也不校验自有凭据。
+	# 无内置 WebUI，LuCI 是唯一入口。后端只监听回环，由 rpcd/ucode 插件在
+	# 服务端以已认证的 LuCI 会话身份调用；ucode 把 ubus_rpc_session 作为
+	# X-TGD-Luci-Session 透传，后端用本机 ubus `session get` 校验。
+	# 本服务不签发也不校验任何自有凭据。
 	option luci_session_check '1'
 
-	# 已废弃选项（保留仅为兼容旧配置，默认配置下不参与鉴权判定）：
-	#   web_password —— WebUI 口令，WebUI 退役后不再使用（且不再经 init 传给后端）
-	#   no_auth      —— 免鉴权放行，仅在 luci_session_check=0 的排障路径下有意义
-	#   lan_no_auth  —— 同上，作为 luci_session_check=0 时的内网来源限制
-	option no_auth '1'
 	# 业务配置（默认签到时间/金币任务/云时长/分享平台）统一在 config.json 中管理，
-	# LuCI 页面通过 /api/config 读写。
+	# LuCI 页面经 rpcd 通道读写 /api/config。
 
 	# ---- 应用层加密（X25519 + HKDF-SHA256 + XChaCha20-Poly1305）----
 	# 加密策略，三选一：
-	#   auto   —— 内网（见 lan_cidrs）明文直通，非内网来源强制加密（默认，最省 CPU）
+	#   auto   —— 受信来源（回环/内网白名单）明文直通，其余来源强制加密（默认）
 	#   always —— 所有来源都要求加密，未加密请求返回 428
 	#   never  —— 关闭应用层加密（仅排障/兼容旧客户端时使用）
-	# 注意：LuCI 页面走内网，auto 下不会被强制加密，功能不受影响；
-	#       若设为 always，LuCI 页面会自动加载加密客户端后再请求。
+	# 注意：OpenWrt 上浏览器侧不存在加密消费者（LuCI 经 rpcd 内部通道走回环），
+	#       因此实际总是明文直通；该策略主要影响独立部署形态。
 	option crypto_policy 'auto'
 
 	# 内网网段（逗号分隔 CIDR）。用于两处判定：
-	#   1) 受信来源判定（LuCI 会话请求必须来自这些网段）；
+	#   1) 受信来源判定（本机回环始终受信，不受此配置影响）；
 	#   2) auto 策略下是否豁免加密。
 	# 留空则回落到内置默认：RFC1918 三段 + loopback + IPv6 ULA/链路本地。
 	option lan_cidrs ''
-
-	# 已废弃：内网来源免鉴权放行。仅当 luci_session_check=0（排障路径）时生效，
-	# 用于在退回"仅内网放行"模式时仍限制来源范围。
-	option lan_no_auth '1'
 
 	# ---- 配置文件静态加密（XChaCha20-Poly1305 + HKDF-SHA256）----
 	# /etc/taygedo 下的 accounts.json / config.json / state.json / keyring.json

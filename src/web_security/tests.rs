@@ -108,17 +108,17 @@ fn handshake_signature_verifies_and_roundtrip_works() {
     let m = mgr();
     let mut c = Client::connect(&m).expect("握手应成功");
 
-    let (seq, env) = c.encrypt_req("POST", "/api/login", br#"{"password":"x"}"#);
-    let (sid, rseq, pt) = m.decrypt_request("POST", "/api/login", &env).unwrap();
+    let (seq, env) = c.encrypt_req("POST", "/api/config", br#"{"default_schedule":"08:00"}"#);
+    let (sid, rseq, pt) = m.decrypt_request("POST", "/api/config", &env).unwrap();
     assert_eq!(sid, c.sid);
     assert_eq!(rseq, seq);
-    assert_eq!(pt.as_slice(), br#"{"password":"x"}"#);
+    assert_eq!(pt.as_slice(), br#"{"default_schedule":"08:00"}"#);
 
     let resp = m
-        .encrypt_response(&sid, "POST", "/api/login", rseq, br#"{"ok":true}"#)
+        .encrypt_response(&sid, "POST", "/api/config", rseq, br#"{"ok":true}"#)
         .unwrap();
     assert_eq!(
-        c.decrypt_resp("POST", "/api/login", seq, &resp).unwrap(),
+        c.decrypt_resp("POST", "/api/config", seq, &resp).unwrap(),
         br#"{"ok":true}"#
     );
 }
@@ -208,7 +208,7 @@ fn tampered_transcript_fields_fail_verification() {
 fn ciphertext_bound_to_method_and_path() {
     let m = mgr();
     let mut c = Client::connect(&m).unwrap();
-    let (_, env) = c.encrypt_req("POST", "/api/password", b"secret");
+    let (_, env) = c.encrypt_req("POST", "/api/config", b"secret");
 
     // 同一份密文搬到别的路径 / 改方法，都必须认证失败
     assert_eq!(
@@ -217,7 +217,7 @@ fn ciphertext_bound_to_method_and_path() {
         CryptoError::AuthFailed
     );
     assert_eq!(
-        m.decrypt_request("GET", "/api/password", &env).unwrap_err(),
+        m.decrypt_request("GET", "/api/config", &env).unwrap_err(),
         CryptoError::AuthFailed
     );
 }
@@ -300,7 +300,7 @@ fn malformed_bodies_and_plaintext_downgrade_are_rejected() {
     }
     // 明文 JSON（降级请求）不可能被当成信封解析成功
     assert!(m
-        .decrypt_request("POST", "/api/login", br#"{"username":"a","password":"b"}"#)
+        .decrypt_request("POST", "/api/config", br#"{"default_schedule":"08:00"}"#)
         .is_err());
 }
 

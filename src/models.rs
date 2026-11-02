@@ -64,37 +64,19 @@ pub struct Config {
     pub share_platform: String,
     #[serde(default = "default_retries")]
     pub max_retries: u32,
-    /// WebUI 登录用户名（默认 admin）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web_username: Option<String>,
-    /// WebUI 登录口令哈希（v2: hex(scrypt(salt,pwd))），None 表示未设置。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web_password_hash: Option<String>,
-    /// 口令哈希盐（v2 为 16 字节 hex）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web_password_salt: Option<String>,
-    /// 口令哈希版本：1 = 旧单轮 sha256，2 = scrypt。缺省按 1 处理以兼容历史配置。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web_password_version: Option<u8>,
-    /// 是否强制首次登录修改口令（初始为随机口令时为 true）。
-    #[serde(default)]
-    pub web_password_must_change: bool,
     /// 应用层加密策略："auto" | "always" | "never"。
     ///
-    /// - `auto`（默认）：内网来源直通明文，非内网来源强制加密；
+    /// - `auto`（默认）：内网/回环来源直通明文，非内网来源强制加密；
     /// - `always`：所有来源都要求加密，未加密请求返回 428；
     /// - `never`：关闭应用层加密（排障/兼容旧客户端）。
     #[serde(default = "default_crypto_policy")]
     pub crypto_policy: String,
-    /// 免鉴权模式是否放行内网来源（LAN 白名单）。
-    #[serde(default = "default_true")]
-    pub lan_no_auth: bool,
-    /// 内网 CIDR 白名单，逗号分隔。缺省为 RFC1918 + loopback + 链路本地。
+    /// 受信来源 CIDR 白名单，逗号分隔。缺省为 RFC1918 + loopback + 链路本地。
+    ///
+    /// 本服务不提供自有登录界面，业务 API 的"可访问范围"由该白名单界定
+    /// （OpenWrt 上另有 LuCI 会话校验）。
     #[serde(default = "default_lan_cidrs")]
     pub lan_cidrs: String,
-    /// 是否已向使用者提示过初始随机口令（避免重复泄露到日志）。
-    #[serde(default)]
-    pub initial_password_announced: bool,
 }
 
 /// 应用层加密的默认策略。
@@ -134,15 +116,8 @@ impl Default for Config {
             cloud_duration: true,
             share_platform: default_share(),
             max_retries: 3,
-            web_username: None,
-            web_password_hash: None,
-            web_password_salt: None,
-            web_password_version: None,
-            web_password_must_change: false,
             crypto_policy: default_crypto_policy(),
-            lan_no_auth: true,
             lan_cidrs: default_lan_cidrs(),
-            initial_password_announced: false,
         }
     }
 }

@@ -142,8 +142,9 @@ Architecture: $DARCH
 Maintainer: LianXia233
 Depends: libc6
 Description: Taygedo auto attendance (塔吉多自动签到)
-  Rust 重写的塔吉多（幻塔/异环）每日自动签到工具，
-  带鉴权的响应式 WebUI。
+  Rust 重写的塔吉多（幻塔/异环）每日自动签到工具。
+  二进制只提供 API，无内置网页界面；访问控制仅放行回环与
+  lan_cidrs 白名单来源。
 EOF
 
         # conffiles / postinst 目录

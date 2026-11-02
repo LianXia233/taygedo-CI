@@ -2,18 +2,20 @@
  * 端到端协议测试（Node ≥ 18）。
  *
  * 它加载**仓库里真实的内置库与前端客户端文件**，对着**真实的 Rust 服务**
- * 走一遍：资源清单验签 → 握手验签 → 登录 → 业务请求 → 响应解密，
+ * 走一遍：资源清单验签 → 握手验签 → 业务请求 → 响应解密，
  * 并额外验证重放与跨接口搬移都会被拒绝。
  *
+ * 服务端已无内置 WebUI、也没有自有登录接口：本测试不携带任何 Authorization，
+ * 靠"来源是本机回环"通过访问控制（这是独立部署下的受信来源分支）。
+ *
  * 用法：
- *   node scripts/e2e_web.mjs http://127.0.0.1:18787 <web_password>
+ *   node scripts/e2e_web.mjs http://127.0.0.1:18787
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const base = process.argv[2] || 'http://127.0.0.1:18787';
-const password = process.argv[3] || 'e2e-password-123';
 // 用于验证 CORS 预检声明：取同主机 Origin，保证命中服务端来源白名单
 const originForTest = new URL(base).origin;
 
@@ -153,7 +155,7 @@ console.log('1b) 前端资源完整性（真实 verifier）');
 console.log('2) 握手 + 验签 + 业务往返');
 // 服务元信息：据此判断本来源是否被强制加密
 const meta = await (await fetch(base + '/api/meta')).json();
-// 跨源预检必须声明 GET/HEAD 的信封头，否则 LuCI（同主机不同端口）读取会被浏览器拦下
+// 跨源预检必须声明 GET/HEAD 的信封头，否则独立部署的外部 API 客户端读取会被浏览器拦下
 {
   const pre = await fetch(base + '/api/logs', {
     method: 'OPTIONS',
@@ -176,17 +178,14 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
   assert(hs.proto === 'taygedo/v2', '协议版本为 v2');
   assert(typeof C.fingerprint() === 'string' && C.fingerprint().length === 32, '取得服务端身份指纹');
 
-  const login = await C.request('/api/login', 'POST', { username: 'admin', password });
-  assert(login.ok && !!login.data.token, '登录成功并拿到 token', JSON.stringify(login.data));
-  const token = login.data.token;
-
-  const list = await C.request('/api/accounts', 'GET', undefined, { Authorization: 'Bearer ' + token });
+  // 无内置登录：业务接口靠"来源受信"放行，不带任何 Authorization
+  const list = await C.request('/api/accounts', 'GET');
   assert(list.ok && Array.isArray(list.data.accounts), '读取账号列表成功');
 
-  const cfg = await C.request('/api/config', 'GET', undefined, { Authorization: 'Bearer ' + token });
+  const cfg = await C.request('/api/config', 'GET');
   assert(cfg.ok && typeof cfg.data.default_schedule === 'string', '读取配置成功');
 
-  const logs = await C.request('/api/logs', 'GET', undefined, { Authorization: 'Bearer ' + token });
+  const logs = await C.request('/api/logs', 'GET');
   assert(logs.ok && Array.isArray(logs.data.logs), '读取日志成功');
 
   console.log('3) 防重放 / 防搬移 / body 路径');
@@ -222,7 +221,6 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
     const headers = {
       'Content-Type': 'application/json',
       'X-TGD-Session': C.sid,
-      Authorization: 'Bearer ' + token,
     };
     if (noBody) {
       headers['X-TGD-Envelope'] = b64u(Buffer.from(envJson, 'utf8'));
@@ -256,7 +254,6 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
   const bothHeaders = {
     'Content-Type': 'application/json',
     'X-TGD-Session': C.sid,
-    Authorization: 'Bearer ' + token,
     'X-TGD-Envelope': b64u(Buffer.from(encFor(9004, '/api/logs', 'GET', ''), 'utf8')),
   };
   const both = await fetch(base + '/api/logs', {
@@ -269,12 +266,9 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
 
   console.log('3b) 错误响应解密 / 会话失效重握手');
 
-  // 业务错误（401）同样被中间件加密：客户端必须解密后拿到 error 文本
-  const wrong = await C.request('/api/login', 'POST', {
-    username: 'admin',
-    password: 'e2e-wrong-password-xyz',
-  });
-  assert(!wrong.ok && wrong.status === 401, '错误登录返回 401', String(wrong.status));
+  // 业务错误（400）同样被中间件加密：客户端必须解密后拿到 error 文本
+  const wrong = await C.request('/api/config', 'POST', { default_schedule: '25:99' });
+  assert(!wrong.ok && wrong.status === 400, '非法配置返回 400', String(wrong.status));
   assert(
     typeof (wrong.data && wrong.data.error) === 'string' && !wrong.data.ct,
     '错误响应已解密（调用方拿到的不是密文）',
@@ -284,17 +278,12 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
   // 服务端不认识的 sid：明文返回 no_session，客户端应自动重握手并重试一次
   const stale = '0'.repeat(32);
   C.sid = stale;
-  const retried = await C.request('/api/accounts', 'GET', undefined, {
-    Authorization: 'Bearer ' + token,
-  });
+  const retried = await C.request('/api/accounts', 'GET');
   assert(retried.ok && Array.isArray(retried.data.accounts), 'no_session 触发重握手后请求成功');
   assert(C.sid !== stale, '重握手后会话 ID 已更新', String(C.sid));
 
   console.log('4) 明文降级被拒绝');
-  const plain = await fetch(base + '/api/accounts', {
-    method: 'GET',
-    headers: { Authorization: 'Bearer ' + token },
-  });
+  const plain = await fetch(base + '/api/accounts', { method: 'GET' });
   if (meta.crypto_required === true) {
     // crypto_policy=always（或来源不在白名单）：明文必须被硬拒，不得回退
     assert(plain.status === 428, '无信封的业务请求返回 428', String(plain.status));
@@ -304,6 +293,16 @@ const C = window.TaygedoCrypto.create({ baseUrl: base });
     console.log('  ! 当前 crypto_policy 未对本来源强制加密，跳过 428 断言');
     console.log('    以 TAYGEDO_CRYPTO_POLICY=always 启动服务可完整验证该分支');
   }
+}
+
+// 自检：服务端已无自有登录，脚本不应再构造授权头。
+// 匹配「带引号的头名」与「头名后跟冒号」两种代码形态，不会命中注释里的说明文字。
+{
+  const src = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  assert(
+    !/['"]Authori[z]ation|Authori[z]ation:/.test(src),
+    '测试脚本不再使用授权请求头'
+  );
 }
 
 console.log(failures === 0 ? '\nE2E 全部通过' : `\nE2E 失败项：${failures}`);

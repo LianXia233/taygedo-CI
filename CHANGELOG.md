@@ -11,6 +11,36 @@
 
 ## [Unreleased]
 
+### 安全 · 升级受 RustSec 公告影响的传递依赖
+
+`v0.7.0` 的发布流水线里 `dependency-audit` 作业实测报告 **9 条漏洞**
+（另有 1 条 unsound、1 条 yanked 告警）。本次只在 semver 兼容范围内做
+`cargo update`，不改变任何直接依赖的版本约束、也不加 ignore 列表：
+
+| 包 | 原版本 | 新版本 | 公告 | 修复版本 |
+|---|---|---|---|---|
+| `rustls` | 0.23.43 | 0.23.46 | RUSTSEC-2026-0285 / 0346 / 0348 / 0349 | >=0.23.45、>=0.23.46 |
+| `rustls-webpki` | 0.103.14 | 0.103.16 | RUSTSEC-2026-0382（CVE-2026-111943） | >=0.103.16 |
+| `webpki-roots` | 1.0.9 | 1.0.11 | RUSTSEC-2026-0381（CVE-2026-111943） | >=1.0.10 |
+| `quinn-proto` | 0.11.17 | 0.11.19 | RUSTSEC-2026-0338 / 0340 / 0343 | >=0.11.18 |
+| `tokio` | 1.53.1 | 1.54.1 | RUSTSEC-2026-0386（unsound: `AsyncFd` I/O safety） | >=1.53.3 |
+
+其中 `rustls` 的四条正是 GitHub 默认分支上 4 个 Dependabot 告警
+（2 moderate / 2 low）的同一批 GHSA；`quinn-proto` 的三条与
+`rustls-webpki` / `webpki-roots` 的两条 Dependabot 尚未列出。
+
+`quinn-proto` / `quinn` 只经 `reqwest` 的 **可选 `http3` 特性** 进入
+`Cargo.lock`（本项目只用 `rustls-tls`，该特性未启用，编译产物里不含任何
+`quinn*` 目标文件），但 `cargo-audit` 扫描的是锁文件，因此一并升级。
+
+**残余告警（无法用 `cargo update` 消除，也不需要 ignore）**：`chacha20 0.10.1`
+已被上游撤回（yanked），它只由 `rand 0.10` → `quinn-proto` 的 `http3` 路径
+引入；本项目未启用该特性，该包不参与编译，锁文件里的这一条属于上游
+依赖图噪声，等上游重新发版后随 `cargo update` 自然消失。
+
+审计作业的策略未改动：仍是 `rustsec/audit-check@v2`、仍无 `ignore` 列表、
+未调高阈值、未关闭作业。
+
 ## [0.7.0] - 2026-11-02
 
 ### 变更 · OpenWrt 上退役内置 WebUI（LuCI 唯一入口）

@@ -77,9 +77,11 @@ COPY --from=builder /app/target/release/taygedo-rs /usr/local/bin/taygedo-rs
 
 WORKDIR /data
 
+# 形态（webui / openwrt）是编译期 feature，不是运行期环境变量：
+# `TAYGEDO_EDITION` 自双形态解耦后已彻底废弃，程序不再读取它。
+# 这里只留两个真正生效的默认值；其余配置项见 docs/docker.md。
 ENV TAYGEDO_DATA_DIR=/data \
-    TAYGEDO_LISTEN=0.0.0.0:8787 \
-    TAYGEDO_EDITION=standalone
+    TAYGEDO_LISTEN=0.0.0.0:8787
 
 EXPOSE 8787
 VOLUME ["/data"]

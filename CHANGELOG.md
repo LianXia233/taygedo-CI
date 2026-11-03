@@ -11,6 +11,21 @@
 
 ## [Unreleased]
 
+### 文档 · Docker 部署手册独立成篇
+
+- 新增 `docs/docker.md`：镜像构成、标签与 digest 选择、端口与来源白名单、
+  反向代理、`/data` 文件清单与备份/恢复/迁移、环境变量（含"容器里无效"的分组）、
+  口令重置、主密钥轮换、升级与回滚、本地多架构构建、故障排查表、安全建议。
+- README 第四节改为「快速上手 + 手册入口」，补上镜像规格表、数据文件说明与
+  403 `untrusted_source` 的成因，不再让人对着一条 `docker run` 猜参数。
+- 环境变量表补 `TAYGEDO_ALLOWED_ORIGINS`、`TAYGEDO_SHARE_PLATFORM`、
+  `TAYGEDO_LAN_NO_AUTH`，并注明 Docker 镜像的预设值。
+
+### 修复 · Dockerfile 移除已废弃的 TAYGEDO_EDITION
+
+双形态解耦后形态由编译期 feature 决定，程序不再读取 `TAYGEDO_EDITION`。
+镜像里继续声明它只会让人误以为可以切形态，删掉并加注释说明。
+
 ## [0.7.3] - 2026-11-03
 
 ### 新增 · 成品 Docker 镜像发布到 GHCR

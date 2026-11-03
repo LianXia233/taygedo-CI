@@ -3,22 +3,34 @@ services:
     # 默认直接拉 GitHub 上构建好的成品镜像（linux/amd64 与 linux/arm64 双架构）。
     # 想自己从源码构建：把下面这行换成 `build: .`，或执行
     #   docker compose build --build-arg CARGO_MIRROR=keep   # 国内网络
+    #
+    # 完整部署说明（反代、备份、密钥轮换、排障）见 docs/docker.md
     image: ghcr.io/lianxia233/taygedo-rs:latest
     container_name: taygedo-rs
     restart: unless-stopped
     ports:
       - "8787:8787"
     environment:
+      # 镜像里已预设这两个值，写出来只是让配置自解释。
       TAYGEDO_LISTEN: 0.0.0.0:8787
       TAYGEDO_DATA_DIR: /data
+
       # 本镜像以 webui 形态构建（Dockerfile 显式 --features webui）：
       # 内置 WebUI 随服务一起启动，浏览器访问 http://<宿主机IP>:8787 即可。
-      # 首次启动的随机口令用 `docker compose logs taygedo` 查看（只打印一次），
-      # 或用 TAYGEDO_WEB_PASSWORD 直接指定初始口令。
-      # 访问控制：只接受回环或 lan_cidrs 白名单来源——容器内 127.0.0.1 不是
-      # 宿主机，外部访问需要放通内网网段，例如收窄到实际调用方：
-      #   TAYGEDO_LAN_CIDRS: "192.168.1.0/24"
+      # 首次启动的随机口令用 `docker compose logs taygedo` 查看（只打印一次）。
+      #
+      # 想固定初始口令就取消下面这行注释。注意它优先级最高，**每次启动都会
+      # 把口令对齐成这个值**，重置完记得再注释掉，否则界面上改的口令会被覆盖。
+      # TAYGEDO_WEB_PASSWORD: "ChangeMe123!"
+
+      # 来源白名单：默认已含 RFC1918 三段 + 回环 + IPv6 ULA/链路本地。
+      # 默认 bridge 网络下服务看到的是网桥网关（172.17.0.1），属于私网，
+      # 所以开箱即用。以下两种情况才需要调整：
+      #   1) 用 --network host 且从公网直连；
+      #   2) 反向代理与容器不在同一私网段。
+      # TAYGEDO_LAN_CIDRS: "192.168.1.0/24,172.17.0.0/16"
     volumes:
       # 容器以 uid/gid 10001 运行，宿主机目录需对齐权限：
       #   mkdir -p ./data && sudo chown -R 10001:10001 ./data
+      # /data 里全是密文，master.key 是唯一钥匙，备份要整个目录一起打包。
       - ./data:/data

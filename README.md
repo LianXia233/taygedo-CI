@@ -242,21 +242,34 @@ logread | grep taygedo
 
 ### 四、Docker 容器化部署
 
+> 完整手册（端口与反代、数据备份、密钥轮换、排障表）见 **[docs/docker.md](docs/docker.md)**。
+> 这里只放最短路径。
+
 **方式 A：直接拉取成品镜像（推荐）**
 
 GitHub Actions 会把镜像发布到 GitHub Container Registry，`linux/amd64` 与 `linux/arm64` 双架构：
 
 ```bash
-# 拉取并启动（compose 文件里已指向 ghcr.io）
-docker compose up -d
-
-# 或者不用 compose，直接跑
+# 一行起服务
+mkdir -p ./data && sudo chown -R 10001:10001 ./data
 docker run -d --name taygedo-rs \
   -p 8787:8787 \
   -v "$PWD/data:/data" \
   --restart unless-stopped \
   ghcr.io/lianxia233/taygedo-rs:latest
+
+# 或者用仓库里的 compose（已指向 GHCR）
+docker compose up -d
 ```
+
+首次启动的随机口令**只打印一次**：
+
+```bash
+docker logs taygedo-rs
+```
+
+也可以启动时用 `-e TAYGEDO_WEB_PASSWORD='你的口令'` 直接指定。
+注意这个变量优先级最高，**每次启动都会把口令对齐成它**，重置完记得去掉。
 
 可用标签：
 
@@ -268,10 +281,10 @@ docker run -d --name taygedo-rs \
 | `sha-abc1234` | 某次提交的精确产物，最适合复现问题 |
 
 ```bash
-# 钉住某个版本（生产建议）
-docker pull ghcr.io/lianxia233/taygedo-rs:0.7.3
+# 生产建议钉 digest，tag 被重推也不会变
+docker pull ghcr.io/lianxia233/taygedo-rs@sha256:7583aa49...
 
-# 查看架构是否匹配当前机器
+# 确认架构匹配当前机器
 docker image inspect ghcr.io/lianxia233/taygedo-rs:latest --format '{{.Architecture}}'
 ```
 
@@ -283,17 +296,27 @@ docker compose build          # 或 docker build -t taygedo-rs:local .
 docker build --build-arg CARGO_MIRROR=keep -t taygedo-rs:local .
 ```
 
-服务将在 `http://localhost:8787` 暴露 REST API 与内置 WebUI，所有账号与密钥数据自动挂载持久化于本地 `./data` 目录。
+服务在 `http://<宿主机IP>:8787` 同时暴露 REST API 与内置 WebUI。
+
+**镜像与数据**
+
+| 项目 | 值 |
+| :--- | :--- |
+| 基础镜像 | Debian `bookworm-slim`（与 `.deb` 同一套 glibc），约 80.7 MB |
+| 运行用户 | `taygedo`，uid/gid `10001`，非 root |
+| 数据卷 | `/data`，内含 `config.json` / `keyring.json` / `accounts.json` / `state.json` 与 `keys/master.key` |
+| 健康检查 | 每 30 s 探测 `/api/meta`，`docker ps` 显示 `healthy` |
+| 镜像内工具 | 只有 `sh` 与 `wget`，排障用 `docker exec -it taygedo-rs sh` |
+
+> [!IMPORTANT]
+> `/data` 里的业务文件全是 XChaCha20-Poly1305 密文，`keys/master.key` 是唯一钥匙。
+> 备份要整个目录一起打包（含 `keys/master.key`），单独拷 `accounts.json` 没有意义。
 
 > [!NOTE]
-> 容器以非 root 用户（uid/gid `10001`）运行。挂载宿主机目录时需对齐权限，否则会因无法写入而启动失败：
-> ```bash
-> mkdir -p ./data && sudo chown -R 10001:10001 ./data
-> ```
-> 容器内监听 `0.0.0.0`，浏览器访问 `http://<宿主机IP>:8787` 时来源必须命中 `lan_cidrs`（默认已含 RFC1918 私网段），否则会返回 403。首次启动口令请用 `docker compose logs` 查看，或在 `environment` 中显式设置 `TAYGEDO_WEB_PASSWORD`。
-
-> [!TIP]
-> 镜像内置 `HEALTHCHECK`（探测 `/api/meta`），`docker ps` 的 STATUS 列会显示 `healthy`。容器基础镜像是 Debian `bookworm-slim`，与 `.deb` 产物共用同一套 glibc 运行时；镜像里没有 shell 之外的工具链，排障用 `docker exec -it taygedo-rs sh`。
+> 业务接口要求来源命中 `lan_cidrs`（默认含 RFC1918 私网段），否则返回 403
+> `untrusted_source`。默认 bridge 网络下服务看到的是网桥网关 `172.17.0.1`，
+> 属于私网，所以开箱即用；`--network host` 或反代跨网段时需要显式加白名单，
+> 详见 [docs/docker.md](docs/docker.md#4-网络与访问控制)。
 
 ---
 
@@ -355,6 +378,13 @@ docker build --build-arg CARGO_MIRROR=keep -t taygedo-rs:local .
 | `TAYGEDO_COIN_TASKS` | 无 | 覆盖金币打卡任务全局开关（`true` / `false`） |
 | `TAYGEDO_CLOUD_DURATION` | 无 | 覆盖云异环免费时长全局开关（`true` / `false`） |
 | `TAYGEDO_LUCI_SESSION_CHECK` | `true` | （仅 `openwrt` 产物）是否强校验 LuCI 会话，设为 `false` 退回仅回环放行 |
+| `TAYGEDO_LAN_NO_AUTH` | `true` | （仅 `openwrt` 产物）内网来源免鉴权放行，配合 `TAYGEDO_NO_AUTH` 使用 |
+| `TAYGEDO_ALLOWED_ORIGINS` | 无 | 额外放行的跨域来源，逗号分隔 |
+| `TAYGEDO_SHARE_PLATFORM` | `qq` | 分享任务平台 |
+
+> Docker 镜像里已预设 `TAYGEDO_DATA_DIR=/data`、`TAYGEDO_LISTEN=0.0.0.0:8787`，
+> 一般不用改；容器专属的用法（数据卷、反代、密钥轮换）见
+> [docs/docker.md](docs/docker.md#6-配置项)。
 
 > 形态相关变量不会互相"串味"：`TAYGEDO_WEB_PASSWORD` 在 OpenWrt 产物里没有
 > 读取点，`TAYGEDO_NO_AUTH` / `TAYGEDO_LUCI_SESSION_CHECK` 在 `webui` 产物里

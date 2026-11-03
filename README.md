@@ -173,10 +173,10 @@ flowchart TD
 #### 1. 安装软件包
 ```sh
 # apk 系统（OpenWrt 24.10 / 25.12+ / ImmortalWrt SNAPSHOT）
-apk add --allow-untrusted /tmp/luci-app-taygedo_0.7.2-r1_x86_64.apk
+apk add --allow-untrusted /tmp/luci-app-taygedo_0.7.3-r1_x86_64.apk
 
 # opkg 系统（OpenWrt 23.05 及更早分支）
-opkg install /tmp/luci-app-taygedo_0.7.2-1_x86_64.ipk
+opkg install /tmp/luci-app-taygedo_0.7.3-1_x86_64.ipk
 ```
 
 #### 2. 开箱即用
@@ -220,7 +220,7 @@ logread | grep taygedo
 
 1. **安装 deb 软件包**：
    ```bash
-   sudo dpkg -i taygedo-rs_0.7.2_amd64.deb
+   sudo dpkg -i taygedo-rs_0.7.3_amd64.deb
    sudo apt-get install -f # 补齐依赖（静态单文件通常零依赖）
    ```
 2. **启用 systemd 服务**：
@@ -263,13 +263,13 @@ docker run -d --name taygedo-rs \
 | 标签 | 含义 |
 | :--- | :--- |
 | `latest` | 最新正式版（对应 `v*` tag） |
-| `0.7.2` / `0.7` | 具体版本，适合钉住不升级 |
+| `0.7.3` / `0.7` | 具体版本，适合钉住不升级 |
 | `edge` | 跟随 `main` 主干，含未发版改动 |
 | `sha-abc1234` | 某次提交的精确产物，最适合复现问题 |
 
 ```bash
 # 钉住某个版本（生产建议）
-docker pull ghcr.io/lianxia233/taygedo-rs:0.7.2
+docker pull ghcr.io/lianxia233/taygedo-rs:0.7.3
 
 # 查看架构是否匹配当前机器
 docker image inspect ghcr.io/lianxia233/taygedo-rs:latest --format '{{.Architecture}}'

@@ -1,6 +1,6 @@
 [package]
 name = "taygedo-rs"
-version = "0.7.2"
+version = "0.7.3"
 edition = "2021"
 description = "塔吉多自动签到 - Rust 重写版（webui / openwrt 双构建形态：独立部署自带 WebUI，OpenWrt 只走 LuCI）"
 license = "GPL-3.0-only"

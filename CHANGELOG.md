@@ -11,6 +11,20 @@
 
 ## [Unreleased]
 
+### 新增 · 成品 Docker 镜像发布到 GHCR
+
+`docker.yml` 在 `v*` tag / `main` / 手动触发时构建 `linux/amd64` + `linux/arm64`
+双架构镜像并推送到 `ghcr.io/lianxia233/taygedo-rs`，不再需要目标机器装 Rust 工具链。
+
+- 标签体系：`latest` / `<版本>` / `<主>.<次>` / `edge`（跟随 main）/ `sha-<短哈希>`。
+- 基础镜像仍为 Debian `bookworm-slim`，与 `.deb` 共用 glibc 运行时；
+  相比旧 Dockerfile 多做了四件事：依赖编译分层缓存（改业务代码不重编第三方
+  crate）、非 root 运行（uid/gid 10001）、`HEALTHCHECK` 探活 `/api/meta`、
+  以及构建期清空 `.cargo/config.mirror.toml`（海外 runner 直连 crates.io）。
+- `docker-compose.yml` 默认改为拉取 GHCR 成品镜像，本地构建降到「方式 B」。
+- 镜像内含 `wget`（仅用于健康检查），不装 curl、不装 ca-certificates
+  ——reqwest 用 rustls + webpki-roots，根证书已编进二进制。
+
 ## [0.7.2] - 2026-11-03
 
 > **破坏性变更**：OpenWrt 产物不再包含 WebUI、登录/改密接口与前端加密资产，

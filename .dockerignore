@@ -1,3 +1,6 @@
+# 构建上下文只需三样东西：Cargo.toml / Cargo.lock、src/、static/，
+# 外加 .cargo/（config.toml 里的 aarch64 aes_armv8 rustflags 必须保留）。
+# 其余一律不进上下文，避免无谓的 layer 失效与上传体积。
 target/
 .git/
 .github/
@@ -6,3 +9,8 @@ target/
 data/
 openwrt/
 upstream-taygedo/
+docs/
+scripts/
+docker-compose.yml
+Dockerfile
+.dockerignore

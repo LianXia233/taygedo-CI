@@ -1,7 +1,9 @@
 services:
   taygedo:
-    build: .
-    image: taygedo-rs:latest
+    # 默认直接拉 GitHub 上构建好的成品镜像（linux/amd64 与 linux/arm64 双架构）。
+    # 想自己从源码构建：把下面这行换成 `build: .`，或执行
+    #   docker compose build --build-arg CARGO_MIRROR=keep   # 国内网络
+    image: ghcr.io/lianxia233/taygedo-rs:latest
     container_name: taygedo-rs
     restart: unless-stopped
     ports:
@@ -17,4 +19,6 @@ services:
       # 宿主机，外部访问需要放通内网网段，例如收窄到实际调用方：
       #   TAYGEDO_LAN_CIDRS: "192.168.1.0/24"
     volumes:
+      # 容器以 uid/gid 10001 运行，宿主机目录需对齐权限：
+      #   mkdir -p ./data && sudo chown -R 10001:10001 ./data
       - ./data:/data

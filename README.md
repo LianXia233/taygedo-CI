@@ -242,17 +242,58 @@ logread | grep taygedo
 
 ### 四、Docker 容器化部署
 
-项目根目录已附带 `Dockerfile` 与 `docker-compose.yml`：
+**方式 A：直接拉取成品镜像（推荐）**
+
+GitHub Actions 会把镜像发布到 GitHub Container Registry，`linux/amd64` 与 `linux/arm64` 双架构：
 
 ```bash
-# 启动容器
-docker compose up -d --build
+# 拉取并启动（compose 文件里已指向 ghcr.io）
+docker compose up -d
+
+# 或者不用 compose，直接跑
+docker run -d --name taygedo-rs \
+  -p 8787:8787 \
+  -v "$PWD/data:/data" \
+  --restart unless-stopped \
+  ghcr.io/lianxia233/taygedo-rs:latest
+```
+
+可用标签：
+
+| 标签 | 含义 |
+| :--- | :--- |
+| `latest` | 最新正式版（对应 `v*` tag） |
+| `0.7.2` / `0.7` | 具体版本，适合钉住不升级 |
+| `edge` | 跟随 `main` 主干，含未发版改动 |
+| `sha-abc1234` | 某次提交的精确产物，最适合复现问题 |
+
+```bash
+# 钉住某个版本（生产建议）
+docker pull ghcr.io/lianxia233/taygedo-rs:0.7.2
+
+# 查看架构是否匹配当前机器
+docker image inspect ghcr.io/lianxia233/taygedo-rs:latest --format '{{.Architecture}}'
+```
+
+**方式 B：本地从源码构建**
+
+```bash
+docker compose build          # 或 docker build -t taygedo-rs:local .
+# 国内网络下让 cargo 走 rsproxy 镜像
+docker build --build-arg CARGO_MIRROR=keep -t taygedo-rs:local .
 ```
 
 服务将在 `http://localhost:8787` 暴露 REST API 与内置 WebUI，所有账号与密钥数据自动挂载持久化于本地 `./data` 目录。
 
 > [!NOTE]
+> 容器以非 root 用户（uid/gid `10001`）运行。挂载宿主机目录时需对齐权限，否则会因无法写入而启动失败：
+> ```bash
+> mkdir -p ./data && sudo chown -R 10001:10001 ./data
+> ```
 > 容器内监听 `0.0.0.0`，浏览器访问 `http://<宿主机IP>:8787` 时来源必须命中 `lan_cidrs`（默认已含 RFC1918 私网段），否则会返回 403。首次启动口令请用 `docker compose logs` 查看，或在 `environment` 中显式设置 `TAYGEDO_WEB_PASSWORD`。
+
+> [!TIP]
+> 镜像内置 `HEALTHCHECK`（探测 `/api/meta`），`docker ps` 的 STATUS 列会显示 `healthy`。容器基础镜像是 Debian `bookworm-slim`，与 `.deb` 产物共用同一套 glibc 运行时；镜像里没有 shell 之外的工具链，排障用 `docker exec -it taygedo-rs sh`。
 
 ---
 

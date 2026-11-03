@@ -1,0 +1,102 @@
+name: docker-image
+
+# 成品镜像发布到 GitHub Container Registry（ghcr.io），供 docker compose / docker run
+# 直接拉取，不需要在目标机器上装 Rust 工具链。
+#
+# 触发策略：
+#   - push tag v*      → 打语义化版本标签 + latest（正式发版）
+#   - push main        → 打 edge + sha-<短哈希>（跟随主干，供自用尝鲜）
+#   - pull_request     → 只构建不推送、只编 amd64，用来验证 Dockerfile 没坏
+#   - workflow_dispatch→ 手动重发
+#
+# 镜像名固定为 ghcr.io/<owner>/taygedo-rs：与仓库名 taygedo-CI 脱钩，
+# 因为仓库名描述的是"CI 仓库"，镜像名应描述"这是什么程序"。
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/docker.yml
+      - Cargo.toml
+      - Cargo.lock
+      - src/**
+      - static/**
+  workflow_dispatch:
+
+# 同一分支/标签只保留最新一次构建：镜像推送是幂等的，旧构建被新构建取消即可。
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write   # 推 ghcr 必需；GITHUB_TOKEN 即可，无需额外 PAT
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: taygedo-rs
+
+jobs:
+  image:
+    name: build-and-push
+    runs-on: ubuntu-latest
+    # arm64 走 QEMU 模拟编译，Rust 冷构建约 20~35 分钟；给足余量但不无限等。
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # ghcr 要求仓库路径全小写，而 GitHub 用户名可能含大写（本仓库是 LianXia233）。
+      # 直接拿 github.repository 拼会得到 "LianXia233/taygedo-CI"，
+      # 推送时报 invalid reference format，所以在这里显式归一化。
+      - name: 归一化镜像地址
+        run: |
+          echo "IMAGE=${REGISTRY}/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}" >> "$GITHUB_ENV"
+
+      # PR 上只验证 amd64 可构建；正式构建才拉 QEMU 做双架构。
+      - name: Set up QEMU
+        if: github.event_name != 'pull_request'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 计算标签
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=edge,branch=main
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+          labels: |
+            org.opencontainers.image.title=塔吉多自动签到
+            org.opencontainers.image.description=幻塔 / 异环每日自动签到，内置 WebUI
+            org.opencontainers.image.licenses=MIT
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # 生成 SLSA provenance：别人拉到镜像时能追溯是哪个 commit / 哪次 run 产出的。
+          provenance: true

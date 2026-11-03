@@ -56,7 +56,7 @@ docker compose logs -f
 | 镜像地址 | `ghcr.io/lianxia233/taygedo-rs` |
 | 架构 | `linux/amd64`、`linux/arm64`（同一 tag 的多架构 manifest） |
 | 基础镜像 | `debian:bookworm-slim`（与 `.deb` 产物同一套 glibc） |
-| 镜像体积 | 约 80.7 MB（其中二进制 4.9 MB） |
+| 镜像体积 | 80~82 MB（其中二进制约 5 MB） |
 | 运行用户 | `taygedo`，uid/gid `10001`，非 root |
 | 监听 | `0.0.0.0:8787`（`TAYGEDO_LISTEN` 可改） |
 | 数据卷 | `/data` |
@@ -172,7 +172,7 @@ XChaCha20-Poly1305），与 TLS 是两层独立的东西：
 | :--- | :--- |
 | `auto`（默认） | 受信内网来源允许明文；非受信来源强制走 v2 加密 |
 | `always` | 所有来源强制 v2，浏览器端 WebUI 自带实现，访问无感 |
-| `never` | 全部明文，仅建议在完全隔离的内网排障时临时使用 |
+| `never` | 不强制加密，明文与加密请求都接受；仅建议在完全隔离的内网排障时临时使用 |
 
 已经上了 HTTPS 反代的话，保持 `auto` 即可；加密层仍会保护"反代到容器"
 这一段明文链路，属于纵深防御。
@@ -348,8 +348,12 @@ docker start taygedo-rs
 ### 7.4 升级
 
 ```bash
+docker compose pull           # 只跑 up -d 不会重新拉取已存在的镜像
+docker compose up -d
+
+# 不用 compose 的话：先 pull，再删旧容器重建
 docker pull ghcr.io/lianxia233/taygedo-rs:latest
-docker compose up -d          # 或 docker rm -f 后重新 run
+docker rm -f taygedo-rs && docker run -d --name taygedo-rs ...
 ```
 
 升级前先按 §5.3 备份。存储层会自动做格式迁移（旧明文 → 密文、密钥格式升级），

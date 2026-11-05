@@ -91,18 +91,22 @@ impl RootView {
             .child(
                 h_flex()
                     .gap(px(8.))
-                    .child(nav_button("主面板", dashboard_active).on_click(cx.listener(
-                        |this, _, _, cx| {
-                            this.page = Page::Dashboard;
-                            cx.notify();
-                        },
-                    )))
-                    .child(nav_button("设置", settings_active).on_click(cx.listener(
-                        |this, _, _, cx| {
-                            this.page = Page::Settings;
-                            cx.notify();
-                        },
-                    ))),
+                    .child(
+                        nav_button("nav-dashboard", "主面板", dashboard_active).on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.page = Page::Dashboard;
+                                cx.notify();
+                            }),
+                        ),
+                    )
+                    .child(
+                        nav_button("nav-settings", "设置", settings_active).on_click(cx.listener(
+                            |this, _, _, cx| {
+                                this.page = Page::Settings;
+                                cx.notify();
+                            },
+                        )),
+                    ),
             )
     }
 
@@ -192,14 +196,13 @@ impl Render for RootView {
     }
 }
 
-#[track_caller]
-fn nav_button(label: &'static str, active: bool) -> gpui::Stateful<gpui::Div> {
+fn nav_button(id: &'static str, label: &'static str, active: bool) -> gpui::Stateful<gpui::Div> {
     let (background, foreground) = if active {
         (ACCENT, 0xffffff)
     } else {
         (ACCENT_SOFT, ACCENT)
     };
-    action_button(label, background, foreground)
+    action_button(id, label, background, foreground)
 }
 
 /// 通用按钮底样。
@@ -208,16 +211,16 @@ fn nav_button(label: &'static str, active: bool) -> gpui::Stateful<gpui::Div> {
 /// `Stateful<Div>` 才有；裸 `Div` 只有命令式的 `&mut self -> ()` 版本。因此这里
 /// 必须先 `.id(...)` 返回 `Stateful<Div>`，调用方才能链式接 `.on_click(...)`。
 ///
-/// ElementId 取 `#[track_caller]` 捕获的调用点位置：它跨帧恒定，符合 GPUI
-/// retained mode 对稳定 ID 的要求。这里刻意不用自增序号 —— 每次 render 都会
-/// 调用本函数，自增会让 ID 每帧都变，跨帧的 interactivity 状态就无法保留。
-#[track_caller]
+/// `id` 必须是**跨帧稳定且同帧唯一**的值：单实例按钮用静态字符串，列表行内
+/// 重复出现的按钮用 `format!("signin-{id}")` 这类带行标识的值。不要用自增序号
+/// —— 本函数每次 render 都会被调用，自增会让 ID 每帧都变，interactivity 状态
+/// 无法跨帧保留。
 pub fn action_button(
+    id: impl Into<gpui::ElementId>,
     label: impl Into<SharedString>,
     background: u32,
     foreground: u32,
 ) -> gpui::Stateful<gpui::Div> {
-    let id = gpui::ElementId::from(std::panic::Location::caller());
     let label: SharedString = label.into();
     div()
         .px(px(12.))

@@ -135,15 +135,20 @@ impl DashboardView {
                 h_flex()
                     .gap(px(8.))
                     .child(
-                        action_button("签到", ACCENT, 0xffffff).on_click(cx.listener(
-                            move |this, _, _, cx| {
+                        action_button(format!("signin-{}", row.id), "签到", ACCENT, 0xffffff)
+                            .on_click(cx.listener(move |this, _, _, cx| {
                                 this.state
                                     .update(cx, |state, cx| state.signin(cx, id_signin.clone()));
-                            },
-                        )),
+                            })),
                     )
                     .child(
-                        action_button("设置时间", ACCENT_SOFT, ACCENT).on_click(cx.listener(
+                        action_button(
+                            format!("schedule-{}", row.id),
+                            "设置时间",
+                            ACCENT_SOFT,
+                            ACCENT,
+                        )
+                        .on_click(cx.listener(
                             move |this, _, window, cx| {
                                 this.schedule_target = Some(id_schedule.clone());
                                 this.schedule.update(cx, |input, cx| {
@@ -154,13 +159,12 @@ impl DashboardView {
                         )),
                     )
                     .child(
-                        action_button("删除", 0xfee2e2, DANGER).on_click(cx.listener(
-                            move |this, _, _, cx| {
+                        action_button(format!("delete-{}", row.id), "删除", 0xfee2e2, DANGER)
+                            .on_click(cx.listener(move |this, _, _, cx| {
                                 this.state.update(cx, |state, cx| {
                                     state.delete_account(cx, id_delete.clone())
                                 });
-                            },
-                        )),
+                            })),
                     ),
             )
     }
@@ -202,7 +206,7 @@ impl Render for DashboardView {
                 )
                 .child(div().w(px(160.)).child(Input::new(&self.schedule)))
                 .child(
-                    action_button("保存", ACCENT, 0xffffff).on_click(cx.listener(
+                    action_button("save-schedule", "保存", ACCENT, 0xffffff).on_click(cx.listener(
                         move |this, _, _, cx| {
                             let id = editing_id.clone();
                             let value = this.schedule.read(cx).value().trim().to_string();
@@ -214,12 +218,12 @@ impl Render for DashboardView {
                     )),
                 )
                 .child(
-                    action_button("取消", ACCENT_SOFT, ACCENT).on_click(cx.listener(
-                        |this, _, _, cx| {
+                    action_button("cancel-schedule", "取消", ACCENT_SOFT, ACCENT).on_click(
+                        cx.listener(|this, _, _, cx| {
                             this.schedule_target = None;
                             cx.notify();
-                        },
-                    )),
+                        }),
+                    ),
                 )
                 .into_any_element()
         } else {
@@ -270,16 +274,14 @@ impl Render for DashboardView {
                     .child(
                         h_flex()
                             .gap(px(8.))
+                            .child(action_button("refresh", "刷新", ACCENT, 0xffffff).on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.state.update(cx, |state, cx| state.refresh(cx));
+                                }),
+                            ))
                             .child(
-                                action_button("刷新", ACCENT, 0xffffff).on_click(cx.listener(
-                                    |this, _, _, cx| {
-                                        this.state.update(cx, |state, cx| state.refresh(cx));
-                                    },
-                                )),
-                            )
-                            .child(
-                                action_button("全部签到", OK, 0xffffff).on_click(cx.listener(
-                                    |this, _, _, cx| {
+                                action_button("signin-all", "全部签到", OK, 0xffffff).on_click(
+                                    cx.listener(|this, _, _, cx| {
                                         let ids: Vec<String> = this
                                             .state
                                             .read(cx)
@@ -292,8 +294,8 @@ impl Render for DashboardView {
                                                 state.signin(cx, id);
                                             }
                                         });
-                                    },
-                                )),
+                                    }),
+                                ),
                             ),
                     ),
             )
@@ -324,6 +326,7 @@ impl Render for DashboardView {
                             .child(div().w(px(170.)).child(Input::new(&self.name)))
                             .child(
                                 action_button(
+                                    "toggle-mode",
                                     if self.mode_captcha {
                                         "模式：验证码登录"
                                     } else {
@@ -346,52 +349,55 @@ impl Render for DashboardView {
                             .items_center()
                             .child(div().w(px(200.)).child(Input::new(&self.password)))
                             .child(div().w(px(170.)).child(Input::new(&self.captcha)))
-                            .child(action_button("发送验证码", ACCENT_SOFT, ACCENT).on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    let phone = this.phone.read(cx).value().trim().to_string();
-                                    if phone.is_empty() {
-                                        this.state.update(cx, |state, cx| {
-                                            state.status = "请先填写手机号".to_string();
-                                            state.status_error = true;
-                                            cx.notify();
-                                        });
-                                        return;
-                                    }
-                                    this.state
-                                        .update(cx, |state, cx| state.send_code(cx, phone));
-                                }),
-                            ))
-                            .child(action_button("添加账号", ACCENT, 0xffffff).on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    let phone = this.phone.read(cx).value().trim().to_string();
-                                    let password =
-                                        this.password.read(cx).value().trim().to_string();
-                                    let captcha = this.captcha.read(cx).value().trim().to_string();
-                                    let name = this.name.read(cx).value().trim().to_string();
-                                    let mode = if this.mode_captcha {
-                                        "captcha"
-                                    } else {
-                                        "password"
-                                    };
-                                    if phone.is_empty() {
-                                        this.state.update(cx, |state, cx| {
-                                            state.status = "手机号不能为空".to_string();
-                                            state.status_error = true;
-                                            cx.notify();
-                                        });
-                                        return;
-                                    }
-                                    let req = AddAccountRequest {
-                                        phone,
-                                        mode: mode.to_string(),
-                                        password: (!password.is_empty()).then_some(password),
-                                        captcha: (!captcha.is_empty()).then_some(captcha),
-                                        name: (!name.is_empty()).then_some(name),
-                                    };
-                                    this.state
-                                        .update(cx, |state, cx| state.add_account(cx, req));
-                                }),
-                            )),
+                            .child(
+                                action_button("send-code", "发送验证码", ACCENT_SOFT, ACCENT)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        let phone = this.phone.read(cx).value().trim().to_string();
+                                        if phone.is_empty() {
+                                            this.state.update(cx, |state, cx| {
+                                                state.status = "请先填写手机号".to_string();
+                                                state.status_error = true;
+                                                cx.notify();
+                                            });
+                                            return;
+                                        }
+                                        this.state
+                                            .update(cx, |state, cx| state.send_code(cx, phone));
+                                    })),
+                            )
+                            .child(
+                                action_button("add-account", "添加账号", ACCENT, 0xffffff)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        let phone = this.phone.read(cx).value().trim().to_string();
+                                        let password =
+                                            this.password.read(cx).value().trim().to_string();
+                                        let captcha =
+                                            this.captcha.read(cx).value().trim().to_string();
+                                        let name = this.name.read(cx).value().trim().to_string();
+                                        let mode = if this.mode_captcha {
+                                            "captcha"
+                                        } else {
+                                            "password"
+                                        };
+                                        if phone.is_empty() {
+                                            this.state.update(cx, |state, cx| {
+                                                state.status = "手机号不能为空".to_string();
+                                                state.status_error = true;
+                                                cx.notify();
+                                            });
+                                            return;
+                                        }
+                                        let req = AddAccountRequest {
+                                            phone,
+                                            mode: mode.to_string(),
+                                            password: (!password.is_empty()).then_some(password),
+                                            captcha: (!captcha.is_empty()).then_some(captcha),
+                                            name: (!name.is_empty()).then_some(name),
+                                        };
+                                        this.state
+                                            .update(cx, |state, cx| state.add_account(cx, req));
+                                    })),
+                            ),
                     ),
             )
             .child(

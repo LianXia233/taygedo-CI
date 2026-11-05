@@ -76,7 +76,7 @@ impl Render for ConnectionView {
                             ),
                     )
                     .child(
-                        action_button("重试连接", ACCENT, 0xffffff).on_click(
+                        action_button("retry-connect", "重试连接", ACCENT, 0xffffff).on_click(
                             cx.listener(|this, _, _, cx| {
                                 this.state.update(cx, |state, cx| state.bootstrap(cx));
                             }),

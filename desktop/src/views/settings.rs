@@ -156,7 +156,7 @@ impl Render for SettingsView {
                             .items_center()
                             .child(div().w(px(280.)).child(Input::new(&self.base_input)))
                             .child(
-                                action_button("应用并重连", ACCENT, 0xffffff).on_click(
+                                action_button("apply-reconnect", "应用并重连", ACCENT, 0xffffff).on_click(
                                     cx.listener(|this, _, _, cx| {
                                         let new_base = this
                                             .base_input
@@ -201,7 +201,7 @@ impl Render for SettingsView {
                             .items_center()
                             .child(div().w(px(160.)).child(Input::new(&self.interval_input)))
                             .child(
-                                action_button("应用间隔", ACCENT_SOFT, ACCENT).on_click(
+                                action_button("apply-interval", "应用间隔", ACCENT_SOFT, ACCENT).on_click(
                                     cx.listener(|this, _, _, cx| {
                                         let value = this
                                             .interval_input
@@ -249,7 +249,13 @@ impl Render for SettingsView {
                             .items_center()
                             .child(div().w(px(160.)).child(Input::new(&self.schedule_input)))
                             .child(
-                                action_button("保存默认签到时间", ACCENT, 0xffffff).on_click(
+                                action_button(
+                                    "save-default-schedule",
+                                    "保存默认签到时间",
+                                    ACCENT,
+                                    0xffffff,
+                                )
+                                .on_click(
                                     cx.listener(|this, _, _, cx| {
                                         let value = this
                                             .schedule_input

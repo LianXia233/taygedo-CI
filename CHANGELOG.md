@@ -11,6 +11,12 @@
 
 ## [Unreleased]
 
+### 架构 · 平台抽象层与桌面交互层
+
+平台相关实现收敛到 `src/platform/`，构建形态新增 `desktop`，Windows 桌面交互
+改用原生 Rust GPUI 客户端。接口契约、安全边界与构建命令见
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
 ### 文档 · Docker 部署手册独立成篇
 
 - 新增 `docs/docker.md`：镜像构成、标签与 digest 选择、端口与来源白名单、

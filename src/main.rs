@@ -1,16 +1,18 @@
 // 构建形态在编译期确定，运行期不再做任何探测。
 //
-// 两者互斥：一个二进制不可能同时"自带 WebUI"和"由 LuCI 独占入口"。
-// 同时开启会让路由与鉴权出现二义性；一个都不开则没有任何访问控制路径。
-// 因此这里用编译错误把配置错误挡在构建阶段，而不是留到运行期才暴露。
-#[cfg(all(feature = "webui", feature = "openwrt"))]
-compile_error!(
-    "`webui` 与 `openwrt` 是互斥形态：一次构建只能产出一种。\
-     请用 --no-default-features --features openwrt 构建 OpenWrt 版本"
-);
+// 三者互斥：一个二进制不可能同时"自带 WebUI"、"由 LuCI 独占入口"和
+// "只给本机 GPUI 客户端提供回环 API"。同时开启会让路由与鉴权出现二义性；
+// 一个都不开则没有任何访问控制路径。因此这里用编译错误把配置错误挡在
+// 构建阶段，而不是留到运行期才暴露。
+#[cfg(any(
+    all(feature = "webui", feature = "openwrt"),
+    all(feature = "webui", feature = "desktop"),
+    all(feature = "openwrt", feature = "desktop")
+))]
+compile_error!("构建形态互斥：一次只能选择 webui / openwrt / desktop 之一");
 
-#[cfg(not(any(feature = "webui", feature = "openwrt")))]
-compile_error!("必须显式选择构建形态：`webui`（Windows/Debian/Docker）或 `openwrt`（LuCI 集成）");
+#[cfg(not(any(feature = "webui", feature = "openwrt", feature = "desktop")))]
+compile_error!("必须显式选择构建形态：webui / openwrt / desktop");
 
 mod api;
 mod constants;
@@ -20,6 +22,7 @@ mod login;
 #[cfg(feature = "openwrt")]
 mod luci_session;
 mod models;
+mod platform;
 mod protocol;
 mod runner;
 mod scheduler;
@@ -35,7 +38,15 @@ use std::path::PathBuf;
 #[tokio::main]
 async fn main() {
     let data_dir = std::env::var("TAYGEDO_DATA_DIR").unwrap_or_else(|_| "data".to_string());
-    let listen = std::env::var("TAYGEDO_LISTEN").unwrap_or_else(|_| "0.0.0.0:8787".to_string());
+    // 桌面形态默认只监听回环：安全边界是"同机 + 回环来源"，不暴露到 LAN。
+    // 其余形态保持兼容默认值（可由 TAYGEDO_LISTEN 显式覆盖）。
+    let listen = std::env::var("TAYGEDO_LISTEN").unwrap_or_else(|_| {
+        if cfg!(feature = "desktop") {
+            "127.0.0.1:8787".to_string()
+        } else {
+            "0.0.0.0:8787".to_string()
+        }
+    });
 
     // 运维子命令：密钥轮换。必须在建立 AppState 之前单独处理，
     // 因为它要求"先取锁 → 重新加密全部文件 → 提升新密钥"的独占流程。
@@ -77,7 +88,6 @@ async fn main() {
     // ---- 启动横幅 ----
     //
     // 形态在**编译期**已确定，这里只按 feature 选择文案，不含任何运行期探测。
-    // OpenWrt 产物里没有 WebUI 代码，因此连"浏览器打开 :8787"这句话都不会出现。
     #[cfg(feature = "webui")]
     let display_url = if bind_addr.ip().is_unspecified() {
         format!("http://127.0.0.1:{}", bind_addr.port())
@@ -86,6 +96,8 @@ async fn main() {
     };
     #[cfg(feature = "openwrt")]
     let display_url = "LuCI 菜单：服务 → 塔吉多签到".to_string();
+    #[cfg(feature = "desktop")]
+    let display_url = "GPUI 桌面客户端（本机回环 API）".to_string();
 
     let listen_note = if bind_addr.ip().is_unspecified() {
         format!("监听所有接口 0.0.0.0:{}", bind_addr.port())
@@ -105,6 +117,8 @@ async fn main() {
         // 不能显示"账号密码登录"，否则会把排障者引到不存在的入口。
         "仅受信来源 (LuCI 校验已关闭)"
     };
+    #[cfg(feature = "desktop")]
+    let auth_note = "免鉴权（仅本机回环来源）";
 
     #[cfg(feature = "webui")]
     let crypto_note = match state.config.read().await.crypto_policy.as_str() {
@@ -112,9 +126,12 @@ async fn main() {
         "never" => "应用层加密: 已关闭 (明文传输)",
         _ => "应用层加密: 内网明文/外网强制",
     };
-    // OpenWrt 形态不存在浏览器侧消费者：不挂加密信封中间件，也没有握手端点。
+    // OpenWrt / 桌面形态都不存在浏览器侧消费者：不挂加密信封中间件，
+    // 也没有握手端点。
     #[cfg(feature = "openwrt")]
     let crypto_note = "应用层加密: 不适用 (内部通道)";
+    #[cfg(feature = "desktop")]
+    let crypto_note = "应用层加密: 不适用 (本机回环)";
 
     // 横幅按**终端显示宽度**对齐：全角字符占 2 列，`{:<40}` 这类按 char
     // 计数的格式会把中文行整体挤歪（历史上这个框一直是斜的）。
@@ -141,8 +158,8 @@ async fn main() {
     // 传输层身份指纹：供**带外核对**（TOFU 首次信任窗口的唯一缓解手段）。
     // 打印它是安全的：指纹是公钥的哈希，不是密钥材料。
     //
-    // 仅 webui 形态存在握手端点；OpenWrt 走 LuCI 内部通道，没有 TOFU 场景，
-    // 打印一个无消费者的指纹只会让人误以为需要核对。
+    // 仅 webui 形态存在握手端点；其它形态没有 TOFU 场景，打印一个无消费者的
+    // 指纹只会让人误以为需要核对。
     #[cfg(feature = "webui")]
     print_box_row(
         &format!("身份指纹: {}", state.crypto.identity_fingerprint()),
@@ -164,6 +181,15 @@ async fn main() {
         }
     }
 
+    // 桌面形态：Windows 端已放弃 WebUI，交互层由独立 GPUI 客户端承担。
+    #[cfg(feature = "desktop")]
+    {
+        println!();
+        println!("[桌面形态] 本二进制不含 WebUI、不含任何浏览器侧资产。");
+        println!("  交互入口：GPUI 桌面客户端（taygedo-desktop）");
+        println!("  安全边界：仅本机回环监听 + 回环来源校验，不提供远程/LAN 访问");
+    }
+
     // 初始随机口令：仅在 stdout 出现一次，**不写入日志缓冲区**（日志可经 API 读取）。
     #[cfg(feature = "webui")]
     if let Some(pwd) = state.initial_password.as_deref() {
@@ -180,38 +206,14 @@ async fn main() {
         println!();
     }
 
-    // Windows 桌面端：启动后自动用默认浏览器打开 WebUI。
-    // 服务器 / Docker 无桌面环境，仅在 Windows 下执行，避免无意义弹窗。
-    #[cfg(all(feature = "webui", target_os = "windows"))]
-    {
-        let open_url = display_url.clone();
-        tokio::spawn(async move {
-            // 稍等，确保 axum 已开始监听，避免浏览器首请求连不上
-            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-            let status = std::process::Command::new("cmd")
-                .args(["/C", "start", "", open_url.as_str()])
-                .status();
-            match status {
-                Ok(code) if code.success() => {
-                    state.push_log("info", format!("已自动打开 WebUI：{}", open_url));
-                }
-                Ok(code) => {
-                    state.push_log(
-                        "warn",
-                        format!(
-                            "自动打开 WebUI 失败（退出码 {}），请手动访问 {}",
-                            code, open_url
-                        ),
-                    );
-                }
-                Err(e) => {
-                    state.push_log(
-                        "warn",
-                        format!("自动打开 WebUI 失败（{}），请手动访问 {}", e, open_url),
-                    );
-                }
-            }
-        });
+    // 可选的浏览器自启动：由**平台抽象层**完成，业务侧不出现 cfg(windows)，
+    // 也不依赖 cmd.exe / 任何 Shell。默认关闭，桌面形态不需要浏览器。
+    #[cfg(feature = "webui")]
+    if env_flag("TAYGEDO_OPEN_BROWSER") {
+        match crate::platform::current().desktop().open_url(&display_url) {
+            Ok(()) => state.push_log("info", format!("已打开 WebUI：{}", display_url)),
+            Err(e) => state.push_log("warn", format!("打开 WebUI 失败：{e}")),
+        }
     }
 
     // 通过 into_make_service_with_connect_info 注入来源地址，
@@ -222,6 +224,18 @@ async fn main() {
     )
     .await
     .expect("服务运行失败");
+}
+
+#[cfg(feature = "webui")]
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 /// `--rotate-storage-key` 实现：轮换配置加密主密钥。

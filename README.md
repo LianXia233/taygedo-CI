@@ -40,26 +40,34 @@
 > [!IMPORTANT]
 > ### 📢 v0.7.2 起的构建形态说明（必读）
 >
-> **同一份源码，两个互斥的编译产物**——形态由 Cargo feature 在编译期决定，
+> **同一份源码，三个互斥的编译产物**——形态由 Cargo feature 在编译期决定，
 > 运行期不再做任何探测（`TAYGEDO_EDITION` 已移除）：
 >
 > | 形态 | 构建命令 | 产物 | 入口 |
 > | :--- | :--- | :--- | :--- |
-> | `webui`（默认） | `cargo build --release` | Windows / Debian / Docker / 静态 Linux | 内置 WebUI |
+> | `webui`（默认） | `cargo build --release` | Debian / Docker / 静态 Linux | 内置 WebUI |
 > | `openwrt` | `cargo build --release --no-default-features --features openwrt` | `*.tar.gz`（`-openwrt` 后缀） | 仅 LuCI |
+> | `desktop` | `cargo build --release --no-default-features --features desktop` | Windows 回环服务 + GPUI 客户端 | 原生 GPUI 窗口 |
 >
 > 1. **🌐 OpenWrt 形态**：**LuCI 界面是唯一的图形交互入口**（「服务 ➔ 塔吉多签到」）。
 >    该产物里**不存在**首页、登录/登出/改密接口、静态资源与握手端点——不是
 >    "注册了路由再返回 404/410"，而是这些代码根本没有被编译进去。浏览器不直连
 >    服务端口、不持有加密材料；数据由服务端的 rpcd ucode 内部通道（`luci.taygedo`）
 >    以已认证 LuCI 会话身份回环请求 `http://127.0.0.1:<port>`，后端只监听回环。
-> 2. **🪟 Windows / 🐧 Debian / 🐳 Docker 形态**：**自带内置 WebUI**
+> 2. **🐧 Debian / 🐳 Docker 形态**：**自带内置 WebUI**
 >    （`http://127.0.0.1:8787`），账号密码登录，业务接口需 Bearer token。首次启动
 >    生成随机口令，仅在启动横幅打印一次。浏览器与后端之间走应用层加密 v2
 >    （X25519 + Ed25519 + XChaCha20-Poly1305），并配合 Ed25519 签名的静态资源
 >    清单做前端完整性校验——**没有静默明文降级**。
+> 3. **🪟 Windows 桌面形态**：**放弃 WebUI**，交互层改为原生 Rust 的 GPUI
+>    客户端（`desktop/` 独立 crate）。`desktop` 形态的服务只暴露本机回环 REST API，
+>    不编译首页、静态资源、登录/改密、加密握手与浏览器侧加密资产；
+>    **无需鉴权，打开即用**，安全边界是「只监听回环 + 只接受回环来源」与
+>    Windows 账户隔离（DPAPI 保护主密钥）。该形态不提供远程 / LAN 访问。
 >
-> 两者共用同一套业务 API 与存储层；差异只在"有没有前端与自有凭据"。
+> 三者共用同一套业务 API、存储层与平台抽象层（`src/platform/`）；差异只在
+> "交互层在哪、鉴权边界在哪"。架构契约见
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ---
 
@@ -73,14 +81,14 @@
 
 | 步骤 | 🌐 OpenWrt (软路由 / 硬件路由) | 🪟 Windows | 🐧 Debian / Ubuntu |
 | :---: | :--- | :--- | :--- |
-| **① 获取制品** | 下载对应架构的 `.ipk` 或 `.apk` | 下载解压 `taygedo-rs-windows-x86_64.zip` | 下载对应架构的 `taygedo-rs_*.deb` |
-| **② 部署运行** | `opkg install` 或 `apk add`<br>*(自动注册守护进程并开机拉起)* | **双击 `taygedo-rs.exe`**<br>*(静默启动 HTTP API 服务，默认 8787)* | `sudo dpkg -i taygedo-rs_*.deb`<br>`sudo systemctl enable --now taygedo-rs` |
-| **③ 交互管理** | 进入 LuCI 菜单：**服务 ➔ 塔吉多签到**<br>*(唯一管理入口；鉴权完全由 OpenWrt 负责)* | 启动后自动打开内置 WebUI<br>*(账号密码登录，首次随机口令)* | 浏览器访问 `http://<服务器IP>:8787`<br>*(内置 WebUI，账号密码登录)* |
+| **① 获取制品** | 下载对应架构的 `.ipk` 或 `.apk` | 下载解压 `taygedo-rs-windows-x86_64.zip`（含服务 + GPUI 客户端） | 下载对应架构的 `taygedo-rs_*.deb` |
+| **② 部署运行** | `opkg install` 或 `apk add`<br>*(自动注册守护进程并开机拉起)* | **双击 `taygedo-desktop.exe`**<br>*(客户端自动拉起同目录的回环服务)* | `sudo dpkg -i taygedo-rs_*.deb`<br>`sudo systemctl enable --now taygedo-rs` |
+| **③ 交互管理** | 进入 LuCI 菜单：**服务 ➔ 塔吉多签到**<br>*(唯一管理入口；鉴权完全由 OpenWrt 负责)* | GPUI 原生窗口，**打开即用、无需登录** | 浏览器访问 `http://<服务器IP>:8787`<br>*(内置 WebUI，账号密码登录)* |
 
 ---
 
 <a id="architecture"></a>
-## 🌐 双轨管理架构对比
+## 🌐 三形态管理架构对比
 
 ```mermaid
 flowchart TD
@@ -95,7 +103,13 @@ flowchart TD
         RPCD -->|"回环安全透传 (HTTP Loopback)"| CORE_OW
     end
 
-    subgraph StandaloneTrack["🪟 Windows / 🐧 Debian / 🐳 Docker (独立部署，自带 WebUI)"]
+    subgraph DesktopTrack["🪟 Windows (desktop 形态：GPUI 原生客户端)"]
+        CLIENT_DT["taygedo-desktop (GPUI)<br/>打开即用，无登录态"]
+        CORE_DT["taygedo-rs 回环服务<br/>仅 127.0.0.1 + 回环来源校验"]
+        CLIENT_DT -->|"本机 HTTP JSON（无浏览器加密层）"| CORE_DT
+    end
+
+    subgraph StandaloneTrack["🐧 Debian / 🐳 Docker (webui 形态：自带 WebUI)"]
         CLIENT_ST["浏览器 WebUI / 外部 API 客户端"]
         ENVELOPE["应用层端到端加密 v2 (强制)<br/>• X25519 临时密钥协商<br/>• XChaCha20-Poly1305 AEAD<br/>• Ed25519 全 Transcript 签名<br/>• 签名清单校验前端资源"]
         FIREWALL["来源准入 + 登录鉴权<br/>• 仅放行回环与 lan_cidrs<br/>• Bearer token (7 天有效)"]
@@ -113,10 +127,13 @@ flowchart TD
         CORE_OW --> CRYPTO
         CORE_ST --> SCHED
         CORE_ST --> CRYPTO
+        CORE_DT --> SCHED
+        CORE_DT --> CRYPTO
         SCHED --> TAYGEDO_API
     end
 
     style OpenWrtTrack fill:#eff6ff,stroke:#93c5fd,stroke-width:1px
+    style DesktopTrack fill:#fdf4ff,stroke:#d8b4fe,stroke-width:1px
     style StandaloneTrack fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px
     style BackendCore fill:#f0fdf4,stroke:#86efac,stroke-width:1px
 ```
@@ -162,7 +179,7 @@ flowchart TD
 | :--- | :--- | :--- |
 | **OpenWrt (x86_64 软路由)** | `luci-app-taygedo_<版本>-1_x86_64.ipk`<br>`luci-app-taygedo_<版本>-r1_x86_64.apk` | 常见 PC 软路由、虚拟机（PVE/ESXi） |
 | **OpenWrt (ARM64 路由)** | `luci-app-taygedo_<版本>-1_aarch64_cortex-a53.ipk`<br>`luci-app-taygedo_<版本>-r1_aarch64_cortex-a53.apk` | MT7986、RK3568、RK3588、高通等现代硬件路由器 |
-| **Windows (x86_64)** | `taygedo-rs-windows-x86_64.zip` | 绿色解压即用单文件可执行程序 |
+| **Windows (x86_64)** | `taygedo-rs-windows-x86_64.zip` | 含 `taygedo-rs.exe`（回环服务）与 `taygedo-desktop.exe`（GPUI 客户端），绿色解压即用 |
 | **Debian / Ubuntu (amd64)** | `taygedo-rs_<版本>_amd64.deb` | 集成 systemd 服务管理与开机自启 |
 | **Linux 通用 (musl)** | `taygedo-rs-<arch>-unknown-linux-musl.tar.gz` | 纯静态链接单文件，适用于 Alpine、Docker 或其他 Linux |
 
@@ -196,23 +213,39 @@ logread | grep taygedo
 
 ---
 
-### 二、Windows 平台
+### 二、Windows 平台（GPUI 桌面客户端）
 
-1. **下载解压**：在 [Releases](https://github.com/LianXia233/taygedo-CI/releases/latest) 下载 `taygedo-rs-windows-x86_64.zip` 并解压，得到单文件 `taygedo-rs.exe`。
-2. **启动运行**：
-   - 双击 `taygedo-rs.exe` 直接在后台运行服务（默认监听 `127.0.0.1:8787`）；
-   - 或在 PowerShell 中带环境变量启动：
-     ```powershell
-     $env:TAYGEDO_LISTEN = "127.0.0.1:8787"
-     $env:TAYGEDO_DATA_DIR = "D:\taygedo-data"
-     .\taygedo-rs.exe
-     ```
-3. **打开界面**：启动后会自动用默认浏览器打开 `http://127.0.0.1:8787`；后台窗口首次启动会打印一次随机口令（账号固定 `admin`），登录后请在「设置 ➔ 修改账号密码」立即改掉。
+Windows 端**不再提供 WebUI**：发布包含两个可执行文件，交互层是原生 Rust 的
+GPUI 窗口，服务端只提供本机回环 API。
+
+1. **下载解压**：在 [Releases](https://github.com/LianXia233/taygedo-CI/releases/latest)
+   下载 `taygedo-rs-windows-x86_64.zip` 并解压，得到 `taygedo-rs.exe`（回环服务）
+   与 `taygedo-desktop.exe`（GPUI 客户端）。
+2. **启动运行**：双击 `taygedo-desktop.exe`。客户端探测
+   `http://127.0.0.1:8787/api/meta`，服务未运行时自动拉起同目录的
+   `taygedo-rs.exe`（Windows 子进程设置 `CREATE_NO_WINDOW`，不闪黑窗），并传入
+   `TAYGEDO_LISTEN=127.0.0.1:8787`、`TAYGEDO_CRYPTO_POLICY=never`。
+   也可以先手动启动服务：
+   ```powershell
+   $env:TAYGEDO_DATA_DIR = "D:\taygedo-data"
+   .\taygedo-rs.exe
+   ```
+3. **打开即用**：GPUI 窗口**无需鉴权**，不收集口令、不签发 token。
+   安全边界是「只监听回环 + 只接受回环来源」与 Windows 账户隔离；
+   **请勿把该形态用于远程 / LAN 访问**，需要远程管理请用 Linux / Docker 的
+   `webui` 形态。
 4. **验证连通性**：
    ```powershell
    curl http://127.0.0.1:8787/api/meta
    ```
-   输出包含 `"edition":"webui"`、`"webui_enabled":true` 与 `"auth_mode":"token"` 即表示服务正常运行。
+   输出包含 `"edition":"desktop"`、`"webui_enabled":false`、
+   `"auth_mode":"loopback"` 即表示服务正常运行。
+
+> 本地构建：先执行
+> `cargo build --release --locked --no-default-features --features desktop`，
+> 再执行 `cd desktop && cargo build --release --locked`。GPUI 依赖栈与平台
+> 要求见 [desktop/README.md](desktop/README.md)，架构契约见
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ---
 
@@ -368,12 +401,16 @@ docker build --build-arg CARGO_MIRROR=keep -t taygedo-rs:local .
 
 | 环境变量 | 默认值 | 功能说明 |
 | :--- | :--- | :--- |
-| `TAYGEDO_LISTEN` | `0.0.0.0:8787` (独立) / `127.0.0.1:8787` (OpenWrt) | HTTP 服务监听地址与绑定端口 |
+| `TAYGEDO_LISTEN` | `0.0.0.0:8787` (webui) / `127.0.0.1:8787` (openwrt / desktop) | HTTP 服务监听地址与绑定端口 |
 | `TAYGEDO_DATA_DIR` | `data` (独立) / `/etc/taygedo` (OpenWrt) | 数据持久化存放目录路径 |
-| `TAYGEDO_LAN_CIDRS` | RFC1918 网段全集 | 受信来源 IP 网段白名单（CIDR），未命中来源一律拦截 403 |
-| `TAYGEDO_CRYPTO_POLICY` | `auto` | 传输加密准入策略：`auto`（局域网明文/外网强制加密）、`always`、`never`；**仅 `webui` 产物生效**（OpenWrt 不挂信封中间件） |
+| `TAYGEDO_LAN_CIDRS` | RFC1918 网段全集 | 受信来源 IP 网段白名单（CIDR），未命中来源一律拦截 403；`desktop` 形态不放宽到内网 |
+| `TAYGEDO_CRYPTO_POLICY` | `auto` | 传输加密准入策略：`auto`（局域网明文/外网强制加密）、`always`、`never`；**仅 `webui` 产物生效**（OpenWrt / desktop 都不挂信封中间件） |
 | `TAYGEDO_WEB_PASSWORD` | 随机生成 | （仅 `webui` 产物）首次启动的 WebUI 初始口令，账号固定 `admin`；不设置则随机生成并只在启动横幅打印一次 |
 | `TAYGEDO_NO_AUTH` | 关闭 | （仅 `openwrt` 产物的排障路径）免鉴权放行；`webui` 产物里该变量**连代码都不存在** |
+| `TAYGEDO_API_BASE` | `http://127.0.0.1:8787` | （GPUI 客户端）本机回环服务基址，见 `desktop/README.md` |
+| `TAYGEDO_HOST_KIND` | 自动探测 | 平台层宿主类型覆盖：`openwrt` / `linux` / `macos`；容器或交叉环境可显式声明，避免依赖固件标记文件 |
+| `TAYGEDO_BROWSER` | 平台默认 | （Unix）打开 URL 所用程序；Windows 走系统 GUI 处理器，均不依赖 Shell |
+| `TAYGEDO_OPEN_BROWSER` | 关闭 | （仅 `webui`）启动时自动打开浏览器，由平台抽象层完成；`desktop` 形态无浏览器入口 |
 | `TAYGEDO_DEFAULT_SCHEDULE`| 无 | 覆盖全局默认签到执行时间（格式：`HH:MM`） |
 | `TAYGEDO_COIN_TASKS` | 无 | 覆盖金币打卡任务全局开关（`true` / `false`） |
 | `TAYGEDO_CLOUD_DURATION` | 无 | 覆盖云异环免费时长全局开关（`true` / `false`） |
@@ -386,9 +423,10 @@ docker build --build-arg CARGO_MIRROR=keep -t taygedo-rs:local .
 > 一般不用改；容器专属的用法（数据卷、反代、密钥轮换）见
 > [docs/docker.md](docs/docker.md#6-配置项)。
 
-> 形态相关变量不会互相"串味"：`TAYGEDO_WEB_PASSWORD` 在 OpenWrt 产物里没有
-> 读取点，`TAYGEDO_NO_AUTH` / `TAYGEDO_LUCI_SESSION_CHECK` 在 `webui` 产物里
-> 也没有。设置错产物对应的变量不会有任何效果，也不会报错。
+> 形态相关变量不会互相"串味"：`TAYGEDO_WEB_PASSWORD` 在 OpenWrt / desktop
+> 产物里没有读取点，`TAYGEDO_NO_AUTH` / `TAYGEDO_LUCI_SESSION_CHECK` 在
+> `webui` 产物里也没有。`desktop` 形态免鉴权，不接受任何口令变量。
+> 设置错产物对应的变量不会有任何效果，也不会报错。
 
 ---
 

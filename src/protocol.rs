@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "openwrt", allow(dead_code))]
+#![cfg_attr(any(feature = "openwrt", feature = "desktop"), allow(dead_code))]
 //! 签名 / 加密 / 请求构造 辅助函数，与上游 Node 实现一一对应。
 
 use std::collections::BTreeMap;

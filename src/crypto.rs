@@ -152,7 +152,7 @@ pub fn hash_password(password: &str, salt: &str) -> String {
 /// 恒定时间字节比较，避免口令校验的时序侧信道。
 ///
 /// 仅 `webui` 形态的登录校验使用；OpenWrt 形态由 ubus 会话判定身份。
-#[cfg_attr(feature = "openwrt", allow(dead_code))]
+#[cfg_attr(any(feature = "openwrt", feature = "desktop"), allow(dead_code))]
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;

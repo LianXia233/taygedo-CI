@@ -152,6 +152,39 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+/// `desktop` 形态路由表：**只有本机回环 REST API**。
+///
+/// Windows 端已放弃 WebUI，交互层是独立的 GPUI 原生客户端（`desktop/`）。
+/// 因此首页、静态资源、签名清单、加密握手、登录/改密/登出端点
+/// 全部不编译进来；产物中不存在任何 HTML/JS/加密前端字节。
+///
+/// 安全边界不是口令，而是「只监听回环 + 只接受回环来源」：
+/// 即使误把服务绑到 0.0.0.0，非回环请求也会在鉴权层被 403 拒绝。
+#[cfg(feature = "desktop")]
+pub fn router(state: Arc<AppState>) -> Router {
+    let public = Router::new().route("/api/meta", get(meta_api));
+    let protected = Router::new()
+        .route("/api/accounts", get(list_accounts).post(login))
+        .route("/api/accounts/{id}", delete(delete_account))
+        .route("/api/accounts/{id}/signin", post(signin))
+        .route("/api/accounts/{id}/schedule", post(set_schedule))
+        .route("/api/send-code", post(send_code))
+        .route("/api/config", get(get_config).post(update_config))
+        .route("/api/logs", get(get_logs))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
+    public
+        .merge(protected)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            cors_middleware,
+        ))
+        .with_state(state)
+}
+
 /// 跨源预检允许的请求头。
 ///
 /// 必须与前端实际发送的头一致：`X-TGD-Envelope` 是 GET/HEAD 的信封载体，
@@ -527,6 +560,43 @@ async fn auth_middleware(
     openwrt_auth(req, next, peer_ip).await
 }
 
+/// 鉴权中间件（`desktop` 形态）：**无口令，只认回环来源**。
+///
+/// GPUI 客户端与服务端同机运行，桌面形态的信任边界是操作系统账户隔离
+/// 与回环监听，而不是 Bearer token。这里刻意不放宽到 `lan_cidrs`：
+/// 桌面服务不应被同网段其它主机调用。
+#[cfg(feature = "desktop")]
+async fn auth_middleware(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let peer_ip = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.ip())
+        .map(normalize_ip);
+
+    // 回环是硬条件；再复用统一的来源归一化判定，避免另立一套 IP 语义。
+    let trusted = peer_ip
+        .map(|ip| ip.is_loopback() && is_trusted_source(&state, ip))
+        .unwrap_or(false);
+    if !trusted {
+        return api_error(
+            StatusCode::FORBIDDEN,
+            "untrusted_source",
+            "仅接受本机回环来源的请求",
+        );
+    }
+
+    let mut req = req;
+    req.extensions_mut().insert(AuthIdentity {
+        username: None,
+        token: None,
+    });
+    next.run(req).await
+}
+
 /// OpenWrt 集成模式鉴权：受信来源 + 有效 LuCI 会话。
 ///
 /// 两道门槛：
@@ -678,7 +748,7 @@ fn api_error(status: StatusCode, code: &str, msg: &str) -> Response {
 ///
 /// OpenWrt 形态下身份完全由 LuCI/ubus 持有，本结构只用于让下游代码
 /// 不必区分形态；因此该形态下字段不会被读取。
-#[cfg_attr(feature = "openwrt", allow(dead_code))]
+#[cfg_attr(any(feature = "openwrt", feature = "desktop"), allow(dead_code))]
 #[derive(Clone, Debug)]
 pub struct AuthIdentity {
     pub username: Option<String>,
@@ -743,7 +813,7 @@ where
                 parts.extensions.get::<CryptoSid>().map(|c| c.0.clone()),
             ))
         }
-        #[cfg(feature = "openwrt")]
+        #[cfg(any(feature = "openwrt", feature = "desktop"))]
         {
             let _ = parts;
             Ok(CryptoCtx(None))
@@ -818,6 +888,29 @@ async fn meta_api(
         "crypto_policy": cfg.crypto_policy,
         // 内部通道是回环明文，本形态不挂信封中间件。
         "crypto_required": false,
+    }))
+}
+
+/// 服务元信息（`desktop` 形态）。
+///
+/// GPUI 客户端用它探活并确认形态；不返回任何协议参数或身份指纹，
+/// 因为本形态没有浏览器侧加密通道，也没有登录态。
+#[cfg(feature = "desktop")]
+async fn meta_api(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Json<serde_json::Value> {
+    let cfg = state.config.read().await;
+    Json(serde_json::json!({
+        "ok": true,
+        "edition": service::EDITION,
+        "webui_enabled": false,
+        "entry": "gpui",
+        "auth_mode": "loopback",
+        "no_auth": true,
+        "crypto_policy": cfg.crypto_policy,
+        "crypto_required": false,
+        "loopback": normalize_ip(addr.ip()).is_loopback(),
     }))
 }
 

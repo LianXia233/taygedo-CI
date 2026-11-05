@@ -13,8 +13,8 @@
 //!   └─ StorageCrypto（seal / open：把 bytes 变成密文，反之亦然）
 //!        ├─ envelope   统一密文格式（Magic/Version/KeyID/Salt/Nonce/密文+Tag）
 //!        ├─ key_manager 主密钥 + HKDF-SHA256 文件专用密钥派生 + Key ID
-//!        ├─ platform   三平台主密钥保护（systemd 凭据 / DPAPI / 0600 文件）
-//!        ├─ atomic     安全原子写入、基于 fd 的安全读取
+//!        ├─ platform   存储层适配：调用 crate::platform 的平台抽象（唯一 OS 边界）
+//!        ├─ atomic     安全 I/O 薄包装：实现位于平台层，业务侧零 cfg
 //!        └─ migration  旧版明文自动迁移 + 加密备份 + 迁移日志
 //! ```
 //!
@@ -168,6 +168,19 @@ impl std::error::Error for StorageError {}
 impl From<std::io::Error> for StorageError {
     fn from(e: std::io::Error) -> Self {
         StorageError::Io(e.to_string())
+    }
+}
+
+impl From<crate::platform::PlatformError> for StorageError {
+    fn from(e: crate::platform::PlatformError) -> Self {
+        use crate::platform::PlatformError as P;
+        match e {
+            P::Io(m) => StorageError::Io(m),
+            P::Corrupt(m) => StorageError::Corrupt(m),
+            P::KeyCorrupt(m) => StorageError::MasterKeyCorrupt(m),
+            P::TooLarge(n) => StorageError::TooLarge(n),
+            P::Unsupported(m) => StorageError::Platform(m),
+        }
     }
 }
 

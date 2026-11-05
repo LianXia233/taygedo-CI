@@ -11,6 +11,8 @@ openwrt/
 upstream-taygedo/
 docs/
 scripts/
+# GPUI 桌面客户端是独立 crate（含自己的 target/），不进服务端镜像上下文
+desktop/
 docker-compose.yml
 Dockerfile
 .dockerignore

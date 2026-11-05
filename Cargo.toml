@@ -2,7 +2,7 @@
 name = "taygedo-rs"
 version = "0.7.3"
 edition = "2021"
-description = "塔吉多自动签到 - Rust 重写版（webui / openwrt 双构建形态：独立部署自带 WebUI，OpenWrt 只走 LuCI）"
+description = "塔吉多自动签到 - Rust 重写版（webui / openwrt / desktop 三构建形态：平台抽象层隔离 OS 差异，Windows 桌面走原生 GPUI）"
 license = "GPL-3.0-only"
 
 [[bin]]
@@ -10,26 +10,33 @@ name = "taygedo-rs"
 path = "src/main.rs"
 
 # ---------------------------------------------------------------------------
-# 构建形态（互斥，必须二选一）
+# 构建形态（互斥，必须三选一）
 # ---------------------------------------------------------------------------
-# 两种部署形态在**编译期**彻底分离，不再靠运行期探测决定行为：
+# 三种部署形态在**编译期**彻底分离，不靠运行期探测决定行为：
 #
-#   webui   —— Windows / Debian / Docker / 独立服务器
+#   webui   —— Linux / Docker / 独立服务器
 #              内置 WebUI（首页 + 自有登录 + 改密 + 应用层加密信封）
 #   openwrt —— OpenWrt 集成
 #              只有业务 API，入口是 LuCI；鉴权交给 LuCI/ubus 会话
+#   desktop —— Windows 桌面（GPUI 客户端）
+#              无首页、无静态资源、无浏览器侧加密资产、无登录/改密；
+#              只暴露本机回环 REST API，鉴权边界是「回环来源」。
+#              UI 由独立 crate `desktop/`（原生 Rust GPUI）承担。
 #
-# OpenWrt 产物里不存在首页、登录/改密接口、静态资源与前端加密资产——
-# 不是"注册了路由再返回 404/410"，而是这些代码根本没有被编译进去。
+# desktop 产物里不存在任何 WebUI 字节：路由、静态资源与加密中间件
+# 根本没有被编译进去，不是"注册了路由再返回 404/410"。
 #
 # 构建：
 #   cargo build --release --locked                                  # webui
 #   cargo build --release --locked --no-default-features \
 #                --features openwrt                                # openwrt
+#   cargo build --release --locked --no-default-features \
+#                --features desktop                                # desktop
 [features]
 default = ["webui"]
 webui = []
 openwrt = []
+desktop = []
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

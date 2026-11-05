@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "openwrt", allow(dead_code))]
+#![cfg_attr(any(feature = "openwrt", feature = "desktop"), allow(dead_code))]
 //! 应用层安全通信层（协议 v2）。
 //!
 //! ## 结构

@@ -93,11 +93,11 @@ pub const ASSETS: &[(&str, &str)] = &[
     ("/", include_str!("../ui.html")),
 ];
 
-/// `openwrt` 形态没有浏览器侧资源：清单为空。
+/// `openwrt` / `desktop` 形态没有浏览器侧资源：清单为空。
 ///
-/// 该形态不注册 `/static/*` 与 `/static/manifest.json`，清单只作为
+/// 两者都不注册 `/static/*` 与 `/static/manifest.json`，清单只作为
 /// "确实没有任何前端资产"的显式声明存在，而不是一个可供下载的端点。
-#[cfg(feature = "openwrt")]
+#[cfg(any(feature = "openwrt", feature = "desktop"))]
 pub const ASSETS: &[(&str, &str)] = &[];
 
 /// 单个资源的清单项。

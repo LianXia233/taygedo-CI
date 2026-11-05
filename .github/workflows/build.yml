@@ -51,9 +51,11 @@ jobs:
   # ---------------------------------------------------------------------------
   # 1) 编译各平台二进制
   #
-  # 形态在编译期确定（Cargo feature），因此同一 target 要出两份产物：
-  #   - 默认（webui）：Windows / Debian / Docker / 静态 Linux 部署
+  # 形态在编译期确定（Cargo feature），因此同一 target 要出不同产物：
+  #   - 默认（webui）：Debian / Docker / 静态 Linux 部署，自带 WebUI
   #   - openwrt：只含业务 API，入口是 LuCI，不含任何前端资产
+  #   - desktop：Windows 桌面，无 WebUI 资产，只提供本机回环 API；
+  #     GPUI 客户端由 desktop/ 独立 crate 构建，与服务端一起打包
   # OpenWrt 包必须用后者：它下载的是 `*-openwrt.tar.gz`，而不是通配的
   # Linux 产物——否则装到路由器上的仍是一个带 WebUI 的通用二进制。
   # ---------------------------------------------------------------------------
@@ -64,11 +66,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows（内置 WebUI）
+          # Windows（desktop：GPUI 客户端 + 回环服务，不含 WebUI）
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            cargo_features: ""
+            cargo_features: "--no-default-features --features desktop"
             suffix: ""
             cross: false
           # Linux musl（独立部署：静态二进制，带 WebUI）
@@ -132,6 +134,12 @@ jobs:
         if: matrix.cross == true
         run: cross build --release --locked --target ${{ matrix.target }} ${{ matrix.cargo_features }}
 
+      # Windows 桌面端：GPUI 客户端是独立 crate / 独立 Cargo.lock，
+      # 与主服务分开编译，避免 GPUI 依赖进入 Linux / OpenWrt 构建图。
+      - name: Build GPUI desktop client
+        if: matrix.os == 'windows-latest'
+        run: cargo build --release --locked --manifest-path desktop/Cargo.toml
+
       - name: Locate binary
         id: bin
         shell: bash
@@ -148,7 +156,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item "${{ steps.bin.outputs.path }}" dist/taygedo-rs.exe
-          Compress-Archive -Path dist/taygedo-rs.exe -DestinationPath dist/taygedo-rs-windows-x86_64.zip -Force
+          Copy-Item "desktop/target/release/taygedo-desktop.exe" dist/taygedo-desktop.exe
+          Compress-Archive -Path dist/taygedo-rs.exe,dist/taygedo-desktop.exe -DestinationPath dist/taygedo-rs-windows-x86_64.zip -Force
 
       - name: Package (Linux tar.gz)
         if: matrix.os == 'ubuntu-latest'

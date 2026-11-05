@@ -655,12 +655,14 @@ pub fn normalize_crypto_policy(v: &str) -> Option<String> {
 /// `/etc/openwrt_release` 文件判定已经删除——那会让同一个二进制在两种形态
 /// 之间摇摆：既无法裁剪代码与前端资产，也让"OpenWrt 上没有 WebUI"变成一句
 /// 依赖部署者正确设置环境变量的约定。
-#[cfg_attr(feature = "openwrt", allow(dead_code))]
+#[cfg_attr(any(feature = "openwrt", feature = "desktop"), allow(dead_code))]
 pub const IS_OPENWRT: bool = cfg!(feature = "openwrt");
 
-/// 当前构建形态标识（`openwrt` / `webui`），供 `/api/meta` 与日志使用。
+/// 当前构建形态标识（`openwrt` / `desktop` / `webui`），供 `/api/meta` 与日志使用。
 pub const EDITION: &str = if cfg!(feature = "openwrt") {
     "openwrt"
+} else if cfg!(feature = "desktop") {
+    "desktop"
 } else {
     "webui"
 };

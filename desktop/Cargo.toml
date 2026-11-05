@@ -1,0 +1,34 @@
+# taygedo 桌面客户端（GPUI 原生）。
+#
+# 独立 crate：空的 [workspace] 让本目录成为自己的工作区根，生成独立的
+# Cargo.lock，不参与主服务 taygedo-rs 的 `--locked` 构建。
+[package]
+name = "taygedo-desktop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "塔吉多签到 GPUI 原生桌面客户端（Windows 端替代 WebUI）"
+license = "GPL-3.0-only"
+
+[workspace]
+
+[[bin]]
+name = "taygedo-desktop"
+path = "src/main.rs"
+
+[dependencies]
+# 与 FluxDown 同款 GPUI 栈：gpui-fast（Retained Mode）+ gpui-kit 组件，
+# 组件一律开 `gpui-fast` feature 直接编译到 gpui-fast 上。
+gpui = { package = "gpui-fast", version = "0.1.13" }
+gpui_platform = { package = "gpui-fast-platform", version = "0.1.13", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui-component = { version = "0.9.0", features = ["gpui-fast"] }
+gpui-component-assets = { package = "gpui-kit-assets", version = "0.9.0", features = ["gpui-fast"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 仅 rustls-tls，关闭默认特性（内含 native-tls）以免引入 OpenSSL/系统 TLS。
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "process", "macros"] }
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"

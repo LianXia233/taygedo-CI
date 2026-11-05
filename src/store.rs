@@ -222,26 +222,11 @@ impl Store {
     ///
     /// 即使内容已加密，元数据（大小、改名时间）仍可能泄漏信息，
     /// 且权限过宽意味着任意本地用户可离线爆破/替换文件。
-    #[cfg(unix)]
     pub fn keyring_permission_warning(&self) -> Option<String> {
-        use std::os::unix::fs::PermissionsExt;
-        let path = self.path_of(FileIdentity::KeyRing);
-        let meta = std::fs::symlink_metadata(&path).ok()?;
-        let mode = meta.permissions().mode() & 0o777;
-        if mode & 0o077 != 0 {
-            Some(format!(
-                "{} 权限为 {mode:o}，建议收紧为 600（chmod 600 {}）",
-                path.display(),
-                path.display()
-            ))
-        } else {
-            None
-        }
-    }
-
-    #[cfg(not(unix))]
-    pub fn keyring_permission_warning(&self) -> Option<String> {
-        None
+        // 权限语义属于平台能力：Unix 检查 0600，Windows 由 ACL/重解析点校验替代。
+        crate::platform::current()
+            .key_store()
+            .permission_warning(&self.path_of(FileIdentity::KeyRing))
     }
 
     /// 主密钥文件/凭据的可读状态描述，用于启动日志（不含任何密钥材料）。
@@ -336,8 +321,7 @@ fn acquire_lock(data_dir: &Path) -> Result<std::fs::File, StorageError> {
         }
     }
     Err(StorageError::Locked(format!(
-        "{} 已被另一个 taygedo 实例锁定（等待 10 秒超时）。\
-         请先停止其它实例：systemctl stop taygedo / /etc/init.d/taygedo stop",
+        "{} 已被另一个 taygedo 实例锁定（等待 10 秒超时）。请先停止其它实例后重试",
         data_dir.display()
     )))
 }

@@ -1,34 +1,65 @@
-# taygedo 桌面客户端（GPUI 原生）。
+# taygedo 桌面单包（GPUI 原生界面 + 同进程内嵌 HTTP 服务）。
 #
 # 独立 crate：空的 [workspace] 让本目录成为自己的工作区根，生成独立的
-# Cargo.lock，不参与主服务 taygedo-rs 的 `--locked` 构建。
+# Cargo.lock，不把 GPUI 依赖树灌进主仓库的 `--locked` 构建
+# （Linux / OpenWrt / Docker 都不需要 GPUI）。
 [package]
 name = "taygedo-desktop"
-version = "0.1.0"
+version = "0.7.3"
 edition = "2024"
 rust-version = "1.95"
-description = "塔吉多签到 GPUI 原生桌面客户端（Windows 端替代 WebUI）"
+description = "塔吉多签到桌面单包：GPUI 原生界面 + 同进程内嵌服务（Windows 端替代 WebUI）"
 license = "GPL-3.0-only"
 
 [workspace]
 
 [[bin]]
-name = "taygedo-desktop"
+# 单包名称：用户下载到的就是这一个可执行文件。
+#
+# 不再产出同目录的第二个服务 exe —— 双进程形态下服务子进程会在客户端退出后
+# 继续常驻，Windows 因此锁住 exe 映像，用户连安装目录都删不掉（真实故障）。
+name = "taygedo"
 path = "src/main.rs"
 
 [dependencies]
+# 同进程内嵌服务：链接主仓库的 lib 目标，按 desktop 形态编译
+# （无 WebUI 路由、无静态资源、无登录/改密，只接受回环来源）。
+taygedo = { package = "taygedo-rs", path = "..", default-features = false, features = [
+    "desktop",
+] }
+
 # 与 FluxDown 同款 GPUI 栈：gpui-fast（Retained Mode）+ gpui-kit 组件，
 # 组件一律开 `gpui-fast` feature 直接编译到 gpui-fast 上。
 gpui = { package = "gpui-fast", version = "0.1.13" }
-gpui_platform = { package = "gpui-fast-platform", version = "0.1.13", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_platform = { package = "gpui-fast-platform", version = "0.1.13", features = [
+    "font-kit",
+    "x11",
+    "wayland",
+    "runtime_shaders",
+] }
 gpui-component = { version = "0.9.0", features = ["gpui-fast"] }
-gpui-component-assets = { package = "gpui-kit-assets", version = "0.9.0", features = ["gpui-fast"] }
+gpui-component-assets = { package = "gpui-kit-assets", version = "0.9.0", features = [
+    "gpui-fast",
+] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 仅 rustls-tls，关闭默认特性（内含 native-tls）以免引入 OpenSSL/系统 TLS。
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "process", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "json",
+] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "sync",
+    "time",
+    "macros",
+] }
 thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

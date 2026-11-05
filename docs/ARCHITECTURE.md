@@ -78,30 +78,67 @@ windows / unix / unsupported   crypto_storage::StorageError（From 映射）
 
 ## 3. GPUI 桌面 UI 层
 
-`desktop/` 是**独立 crate、独立 Cargo.lock**，不加入主服务依赖图，因此主服务的
-`cargo build --locked`、Docker 分层缓存与 OpenWrt 交叉编译都不受 GPUI 依赖影响。
+`desktop/` 是**独立 crate、独立 Cargo.lock**，GPUI 依赖不进入主服务的依赖图，
+因此主服务的 `cargo build --locked`、Docker 分层缓存与 OpenWrt 交叉编译都不受
+影响。它与主服务的关系是**单向的**：`desktop` 依赖主仓库的 lib 目标 `taygedo`，
+反向不存在依赖。
+
+### 3.1 单包：界面与服务同进程
+
+Windows 发布物是**一个** `taygedo.exe`，服务端被静态链接进界面进程：
+
+```text
+taygedo.exe
+  ├─ GPUI 界面（views / state / theme）
+  └─ 内嵌 axum 服务（taygedo::start，绑定 127.0.0.1:8787）
+```
+
+早期形态是「客户端 + 同目录 `taygedo-rs.exe`」的双进程，由客户端 spawn 服务。
+该设计有一个不可接受的副作用：客户端退出时子进程不随之终止，服务继续常驻，
+Windows 于是锁住 `taygedo-rs.exe` 的映像文件，用户删除安装目录会失败。单包把
+进程数降为 1，关窗即退出，句柄随之释放。
+
+因此主仓库拆出 `src/lib.rs`：独立服务二进制（`taygedo-rs`）与桌面单包共用同一套
+启动逻辑，避免两份实现漂移。`cli_main()`（含启动横幅）只给独立二进制用——Windows
+GUI 子系统没有控制台，`println!` 写失败会 panic。
+
+### 3.2 分层
 
 依赖栈与 [FluxDown](https://github.com/zerx-lab/FluxDown) 同款：`gpui-fast`
 （以 `gpui` 名引入）+ `gpui-fast-platform` + `gpui-kit` 组件。分层：
 
 ```text
-main（composition root：Application、窗口、服务进程拉起）
+main（composition root：Runtime、内嵌服务、窗口）
   ├─ client（本机回环 REST，普通 JSON，无 token、无浏览器加密信封）
-  ├─ state（Entity 视图状态；异步命令走后台执行器，结果回写并 cx.notify）
-  └─ views（主面板：账号 / 签到 / 日志 / 配置 / 状态栏）
+  ├─ state（Entity 状态 + 全部动作：数据/弹窗/Toast/倒计时/轮询）
+  ├─ theme（明暗两套调色板，对齐 WebUI 的 --md-* 令牌）
+  └─ views（页头 / 统计 / 账号卡片 / 日志面板 / 三个弹窗 / Toast）
 ```
 
-- **打开即用**：桌面形态无登录态。客户端不收集口令、不保存 token。
-- **服务拉起**：`/api/meta` 不可达时，按 `std::env::current_exe()` 同目录查找
-  `taygedo-rs.exe` / `taygedo-rs` 并拉起；Windows 设置 `CREATE_NO_WINDOW`。
+- **打开即用**：桌面形态无登录态。不收集口令、不保存 token。
+- **启动**：先在当前运行时绑定 `127.0.0.1:8787` 再开窗，返回即端口就绪，不需要
+  轮询 `/api/meta`；端口被既有实例占用且该实例可达时，复用而不抢占。
+- **数据目录**：默认 `exe 同目录/data`，不依赖当前工作目录（从快捷方式启动时
+  CWD 往往不是 exe 目录），可用 `TAYGEDO_DATA_DIR` 覆盖。
 - 路径一律用 `std::path` / `std::env` 跨平台 API，不写死系统盘或安装目录。
 - Windows 用 `windows_subsystem = "windows"`，避免控制台窗口。
+
+### 3.3 界面与 WebUI 的一致性
+
+界面结构、文案与交互流程以 `src/ui.html` 为蓝本逐条对齐：页头（主题 / 设置 /
+添加账号）、三格统计、账号卡片（签到徽章、手机号与 UID、每日签到时间、立即签到、
+删除）、运行日志面板（账号筛选标签、级别着色、3 秒轮询）、添加账号弹窗（密码 /
+验证码双模式 + 60 秒倒计时）、全局设置弹窗、删除确认、Toast、明暗主题。
+
+不迁移的三项：传输加密、修改密码、退出登录——它们服务于 WebUI / OpenWrt 的鉴权
+模型，桌面单包没有登录态，放上去只会是无效入口。
 
 ## 4. 安全边界（重要）
 
 `desktop` 形态的免鉴权**不是**"接口敞开"，而是把信任边界前移到操作系统：
 
-1. 服务默认只监听 `127.0.0.1:8787`（`TAYGEDO_LISTEN` 可覆盖，但不建议）；
+1. 服务默认只监听 `127.0.0.1:8787`（独立二进制的 `TAYGEDO_LISTEN` 可覆盖；桌面
+   单包把该地址写成编译期常量 `taygedo::DESKTOP_LISTEN`，不接受运行期改写）；
 2. 鉴权中间件要求 `ip.is_loopback()` 为真，且复用统一来源归一化判定；
    不放宽到 `lan_cidrs`，即使误绑 `0.0.0.0`，非回环来源仍返回 403；
 3. 主密钥由 DPAPI 绑定当前 Windows 账户，其它账户/机器无法解封；
@@ -119,7 +156,7 @@ cargo test --locked
 cargo test --locked --no-default-features --features openwrt
 cargo test --locked --no-default-features --features desktop
 
-# GPUI 客户端（独立 lock）
+# 桌面单包（独立 lock；会连带编译主仓库的 lib 目标）
 cd desktop && cargo build --release --locked
 ```
 

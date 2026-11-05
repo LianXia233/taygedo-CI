@@ -1,16 +1,20 @@
-//! taygedo 桌面客户端 composition root。
+//! taygedo 桌面单包 composition root。
 //!
-//! Windows 端以 GPUI 原生界面替代 WebUI：打开即连本机回环 REST API，免鉴权。
-//! 启动前探测 /api/meta；不可达时按 current_exe 同目录拉起服务子进程。
+//! 结构：**一个进程**同时承担两件事 —— 内嵌 axum 服务（本机回环）+ GPUI 原生界面。
+//!
+//! 为什么不是「客户端 + 同目录服务 exe」的双进程：子进程会在客户端退出后继续
+//! 常驻，Windows 因此锁住 `taygedo-rs.exe` 的映像文件，用户删除安装目录会失败。
+//! 单进程形态下，关窗口即进程退出，所有文件句柄随之释放。
 
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod client;
 mod state;
+mod theme;
 mod views;
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::Duration;
 
 use client::ApiClient;
@@ -32,23 +36,11 @@ fn desktop_application() -> gpui::Application {
 }
 
 fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
-    let base = std::env::var("TAYGEDO_API_BASE")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| client::DEFAULT_API_BASE.to_string());
-
-    let client = match ApiClient::new(base.clone()) {
-        Ok(client) => client,
-        Err(error) => {
-            log::error!("无法创建 API 客户端：{error}");
-            std::process::exit(1);
-        }
-    };
-
-    // reqwest 依赖 tokio 的 IO/time 驱动，独立 runtime 贯穿整个应用生命周期。
+    // reqwest 依赖 tokio 的 IO/time 驱动；内嵌服务也跑在同一个运行时上。
+    // Application::run 的启动闭包是 FnOnce，闭包返回即释放其中的局部变量，
+    // 因此 Runtime 必须提升为 'static，否则内嵌服务与刷新任务会一起被取消。
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -59,28 +51,57 @@ fn main() {
             std::process::exit(1);
         }
     };
-    // Application::run 的启动闭包是 FnOnce(&mut App)，闭包返回即释放其中的局部变量。
-    // 若把 Runtime 留在闭包里，AppState::execute() 经 handle.spawn() 投递的任务会被取消，
-    // 状态栏会永远卡在「正在刷新…」。因此把 Runtime 提升为 'static，贯穿进程生命周期。
     let runtime: &'static tokio::runtime::Runtime = Box::leak(Box::new(runtime));
     let handle = runtime.handle().clone();
 
-    // 启动探活：不可达则拉起同目录服务；找不到服务时在 UI 明确报错，不静默失败。
-    let reachable = runtime.block_on(client.meta()).is_ok();
-    let startup_error: Option<String> = if reachable {
-        None
+    // 显式指定基址时不再启动内嵌服务：用户可能刻意指向另一个已在运行的实例，
+    // 或把端口让给别的程序。未指定则用编译期回环地址常量。
+    let override_base = std::env::var("TAYGEDO_API_BASE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let listen: SocketAddr = taygedo::DESKTOP_LISTEN
+        .parse()
+        .expect("DESKTOP_LISTEN 常量必须是合法 SocketAddr");
+
+    let mut base = override_base
+        .clone()
+        .unwrap_or_else(|| client::DEFAULT_API_BASE.to_string());
+    let mut service: Option<taygedo::ServiceHandle> = None;
+    let mut startup_error: Option<String> = None;
+
+    if override_base.is_some() {
+        log::info!("按 TAYGEDO_API_BASE 连接外部实例：{base}");
     } else {
-        match spawn_service() {
-            Ok(()) => {
-                if wait_until_ready(runtime, &client) {
-                    None
-                } else {
-                    Some(
-                        "已拉起服务子进程，但在限定时间内 /api/meta 仍不可达。请确认服务以 desktop 形态启动、8787 端口未被占用。".to_string(),
-                    )
+        // 已有实例在跑（例如用户开了第二个窗口）时直接复用，不抢端口。
+        let reuse = ApiClient::new(base.clone())
+            .map(|probe| runtime.block_on(probe.meta()).is_ok())
+            .unwrap_or(false);
+
+        if reuse {
+            log::info!("检测到已在运行的实例，复用 {base}");
+        } else {
+            match runtime.block_on(taygedo::start(listen, resolve_data_dir())) {
+                Ok(started) => {
+                    base = format!("http://{}", started.listen);
+                    log::info!("内嵌服务已启动：{base}");
+                    service = Some(started);
+                }
+                Err(message) => {
+                    startup_error = Some(format!(
+                        "{message}\n数据目录不可写或端口被占用时会出现该错误；关闭其他实例后重试。"
+                    ));
                 }
             }
-            Err(message) => Some(message),
+        }
+    }
+
+    let client = match ApiClient::new(base.clone()) {
+        Ok(client) => client,
+        Err(error) => {
+            log::error!("无法创建 API 客户端：{error}");
+            std::process::exit(1);
         }
     };
 
@@ -98,7 +119,7 @@ fn main() {
             )
         });
         state.update(cx, |state, cx| {
-            state.start_auto_refresh(cx);
+            state.start_polling(cx);
             if !matches!(&state.connection, Connection::Failed(_)) {
                 state.bootstrap(cx);
             }
@@ -106,11 +127,11 @@ fn main() {
 
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
-                origin: point(px(80.), px(60.)),
-                size: size(px(1060.), px(780.)),
+                origin: point(px(90.), px(50.)),
+                size: size(px(1180.), px(840.)),
             })),
             titlebar: Some(TitlebarOptions {
-                title: Some("塔吉多签到 · 桌面客户端".into()),
+                title: Some("塔吉多自动签到".into()),
                 appears_transparent: false,
                 traffic_light_position: None,
             }),
@@ -123,75 +144,33 @@ fn main() {
             log::error!("创建主窗口失败：{error:#}");
         }
     });
-}
 
-/// 按 `current_exe()` 同目录查找并拉起服务；Windows 子进程设 CREATE_NO_WINDOW。
-fn spawn_service() -> Result<(), String> {
-    let exe =
-        std::env::current_exe().map_err(|error| format!("无法定位当前可执行文件：{error}"))?;
-    let dir: PathBuf = exe
-        .parent()
-        .ok_or_else(|| "无法定位可执行文件所在目录".to_string())?
-        .to_path_buf();
-
-    // 先做平台检测再分支：Windows 与 Unix 的可执行文件名不同。
-    let name = if cfg!(target_os = "windows") {
-        "taygedo-rs.exe"
-    } else {
-        "taygedo-rs"
-    };
-    let service = dir.join(name);
-    if !service.is_file() {
-        return Err(format!(
-            "本机回环 API 不可达，且在 {} 未找到服务可执行文件 {name}。\n请将 taygedo-rs（Windows 为 taygedo-rs.exe）放在本程序同目录，或先手动启动服务；也可设置 TAYGEDO_API_BASE 指向已运行的本机回环服务。",
-            dir.display()
-        ));
-    }
-
-    let mut command = Command::new(&service);
-    command
-        .env("TAYGEDO_LISTEN", "127.0.0.1:8787")
-        .env("TAYGEDO_CRYPTO_POLICY", "never");
-
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        // 非 Windows 平台无控制台窗口标志：空操作。
-    }
-
-    match command.spawn() {
-        Ok(child) => {
-            log::info!(
-                "已拉起服务子进程：{} (pid {})",
-                service.display(),
-                child.id()
-            );
-            // 服务独立运行：不等待、不随客户端句柄释放而终止。
-            drop(child);
-            Ok(())
-        }
-        Err(error) => Err(format!(
-            "找到服务可执行文件 {}，但拉起失败：{error}",
-            service.display()
-        )),
+    // 窗口全部关闭后 app.run 返回：此处主动关闭内嵌服务，保证进程干净退出，
+    // 不留任何后台线程或监听端口。
+    if let Some(service) = service {
+        service.shutdown();
+        // 给优雅关闭留出极短窗口，然后直接退出进程（避免运行时被 leak 后卡住）。
+        std::thread::sleep(Duration::from_millis(80));
     }
 }
 
-/// 拉起服务后轮询 /api/meta，最多等待约 10 秒。
-fn wait_until_ready(runtime: &tokio::runtime::Runtime, client: &ApiClient) -> bool {
-    for _ in 0..20 {
-        let ready = runtime.block_on(async {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            client.meta().await.is_ok()
-        });
-        if ready {
-            return true;
+/// 数据目录：默认放在**可执行文件同目录的 `data/`**（绿色版行为），
+/// 可用 `TAYGEDO_DATA_DIR` 覆盖。
+///
+/// 不依赖当前工作目录：从快捷方式或开始菜单启动时 CWD 往往不是 exe 所在目录，
+/// 用 CWD 会把数据写进 System32 之类的意外位置。
+fn resolve_data_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("TAYGEDO_DATA_DIR") {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
         }
     }
-    false
+    match std::env::current_exe() {
+        Ok(exe) => match exe.parent() {
+            Some(dir) => dir.join("data"),
+            None => PathBuf::from("data"),
+        },
+        Err(_) => PathBuf::from("data"),
+    }
 }

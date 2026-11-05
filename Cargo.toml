@@ -5,6 +5,13 @@ edition = "2021"
 description = "塔吉多自动签到 - Rust 重写版（webui / openwrt / desktop 三构建形态：平台抽象层隔离 OS 差异，Windows 桌面走原生 GPUI）"
 license = "GPL-3.0-only"
 
+[lib]
+# 库目标不是给外部用户当 SDK 用的，只为两件事：
+#   1) 桌面单包在同一进程内启动 axum 服务（避免双进程锁住 exe 映像）；
+#   2) 独立服务 bin 与单包共用同一份启动逻辑，不出现两套实现漂移。
+name = "taygedo"
+path = "src/lib.rs"
+
 [[bin]]
 name = "taygedo-rs"
 path = "src/main.rs"

@@ -54,8 +54,9 @@ jobs:
   # 形态在编译期确定（Cargo feature），因此同一 target 要出不同产物：
   #   - 默认（webui）：Debian / Docker / 静态 Linux 部署，自带 WebUI
   #   - openwrt：只含业务 API，入口是 LuCI，不含任何前端资产
-  #   - desktop：Windows 桌面，无 WebUI 资产，只提供本机回环 API；
-  #     GPUI 客户端由 desktop/ 独立 crate 构建，与服务端一起打包
+  #   - desktop：Windows 桌面**单包**，无 WebUI 资产，只提供本机回环 API；
+  #     服务端以库的形式编进 desktop/ crate，与 GPUI 界面同进程，
+  #     发布物只有一个 exe（双进程会让服务子进程常驻并锁住 exe 映像）
   # OpenWrt 包必须用后者：它下载的是 `*-openwrt.tar.gz`，而不是通配的
   # Linux 产物——否则装到路由器上的仍是一个带 WebUI 的通用二进制。
   # ---------------------------------------------------------------------------
@@ -66,7 +67,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows（desktop：GPUI 客户端 + 回环服务，不含 WebUI）
+          # Windows（desktop 单包：GPUI 界面 + 同进程内嵌回环服务，不含 WebUI）
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -119,6 +120,10 @@ jobs:
       - name: Cache cargo (native)
         if: matrix.cross == false
         uses: Swatinem/rust-cache@v2
+        with:
+          # desktop/ 是独立 workspace（自己的 Cargo.lock 与 target/），
+          # 不显式列出就缓存不到，Windows 单包每次都会全量重编 GPUI 依赖。
+          workspaces: ". desktop"
 
       - name: Install cross
         if: matrix.cross == true
@@ -126,17 +131,28 @@ jobs:
         with:
           tool: cross
 
+      # Windows 走单包：服务端不再单独产出 exe，而是作为库被 desktop/ crate
+      # 静态链接进来，因此这里跳过主服务的独立构建。
       - name: Build (native)
-        if: matrix.cross == false
+        if: matrix.cross == false && matrix.os != 'windows-latest'
         run: cargo build --release --locked ${{ matrix.cargo_features }}
 
       - name: Build (cross)
         if: matrix.cross == true
         run: cross build --release --locked --target ${{ matrix.target }} ${{ matrix.cargo_features }}
 
-      # Windows 桌面端：GPUI 客户端是独立 crate / 独立 Cargo.lock，
-      # 与主服务分开编译，避免 GPUI 依赖进入 Linux / OpenWrt 构建图。
-      - name: Build GPUI desktop client
+      # Windows 桌面单包：GPUI 界面 + 内嵌服务同进程编译。
+      # 独立 crate / 独立 Cargo.lock，GPUI 依赖不会进入 Linux / OpenWrt 构建图。
+      #
+      # 桌面 crate 的 fmt / clippy 只能在这里跑：它需要 GPUI 的平台依赖
+      # （X11 / Wayland 或 MSVC + DirectX），Linux 的 quality 作业装不起。
+      - name: Lint desktop single package
+        if: matrix.os == 'windows-latest'
+        run: |
+          cargo fmt --check --manifest-path desktop/Cargo.toml
+          cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
+
+      - name: Build desktop single package
         if: matrix.os == 'windows-latest'
         run: cargo build --release --locked --manifest-path desktop/Cargo.toml
 
@@ -145,9 +161,12 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.target }}" = "x86_64-pc-windows-msvc" ]; then
-            echo "path=target/release/taygedo-rs.exe" >> "$GITHUB_OUTPUT"
+            # 单包：GPUI 界面与内嵌服务是同一个 exe
+            echo "path=desktop/target/release/taygedo.exe" >> "$GITHUB_OUTPUT"
+            echo "name=taygedo.exe" >> "$GITHUB_OUTPUT"
           else
             echo "path=target/${{ matrix.target }}/release/taygedo-rs" >> "$GITHUB_OUTPUT"
+            echo "name=taygedo-rs" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Package (Windows zip)
@@ -155,9 +174,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item "${{ steps.bin.outputs.path }}" dist/taygedo-rs.exe
-          Copy-Item "desktop/target/release/taygedo-desktop.exe" dist/taygedo-desktop.exe
-          Compress-Archive -Path dist/taygedo-rs.exe,dist/taygedo-desktop.exe -DestinationPath dist/taygedo-rs-windows-x86_64.zip -Force
+          # 单包：压缩包里只有一个可执行文件。
+          # 不再附带独立的服务 exe —— 那会引入"客户端退出、服务常驻"的孤儿进程，
+          # 进而锁住 exe 映像，用户无法删除安装目录。
+          Copy-Item "desktop/target/release/taygedo.exe" dist/taygedo.exe
+          Compress-Archive -Path dist/taygedo.exe -DestinationPath dist/taygedo-rs-windows-x86_64.zip -Force
 
       - name: Package (Linux tar.gz)
         if: matrix.os == 'ubuntu-latest'

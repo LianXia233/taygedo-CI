@@ -97,8 +97,6 @@ pub struct AccountRow {
     pub schedule: String,
     #[serde(default)]
     pub signed_today: bool,
-    #[serde(default)]
-    pub has_password: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -139,6 +137,11 @@ pub struct LogsResponse {
 }
 
 /// `GET /api/config` 响应。
+///
+/// 只声明桌面端**确实会展示**的字段。`crypto_policy` / `lan_cidrs` /
+/// `lan_no_auth` 属于 WebUI 的「传输加密」区，桌面单包没有登录态与浏览器侧
+/// 信封，那三项在这里没有渲染点——声明出来只会变成死代码。serde 默认忽略
+/// 多余的 JSON 字段，因此不声明不影响解析。
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigResponse {
     #[serde(default)]
@@ -149,12 +152,6 @@ pub struct ConfigResponse {
     pub cloud_duration: bool,
     #[serde(default)]
     pub share_platform: String,
-    #[serde(default)]
-    pub crypto_policy: String,
-    #[serde(default)]
-    pub lan_cidrs: String,
-    #[serde(default)]
-    pub lan_no_auth: bool,
 }
 
 /// `GET /api/meta` 响应（desktop 形态）。

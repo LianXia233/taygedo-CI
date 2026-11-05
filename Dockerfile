@@ -34,9 +34,14 @@ RUN if [ "$CARGO_MIRROR" = "off" ]; then \
         printf '' > .cargo/config.mirror.toml; \
     fi
 
-# 依赖层：放一个空 main，让 cargo 先把全部第三方 crate 编完。这一层只随
+# 依赖层：放一个空 main + 空 lib，让 cargo 先把全部第三方 crate 编完。这一层只随
 # Cargo.toml / Cargo.lock 变化失效，改业务代码不会重编 ring / tokio。
-RUN mkdir -p src && printf 'fn main() {}\n' > src/main.rs && \
+#
+# 空 lib 不能省：Cargo.toml 声明了 [lib] name="taygedo" path="src/lib.rs"，
+# 缺少该文件时 cargo 在目标解析阶段就报
+#   can't find lib `taygedo` at path `/app/src/lib.rs`
+# 整个镜像构建直接 exit 101（桌面单包把服务端拆成 lib 目标后引入的回归）。
+RUN mkdir -p src && printf 'fn main() {}\n' > src/main.rs && : > src/lib.rs && \
     cargo build --release --locked --no-default-features --features webui
 
 # 真实源码与前端资产。static/ 必须在编译前就位：webui 形态下 manifest.rs
@@ -47,10 +52,12 @@ RUN mkdir -p src && printf 'fn main() {}\n' > src/main.rs && \
 # 判定为 fresh，直接跳过编译 —— 镜像里就会静默装进那个空壳 main
 # （实测：产物只有 281 KB，容器起来立刻退出，且构建全绿不报错）。
 # 删掉产物是第二道保险：产物缺失时 cargo 一定会重编本 crate。
+# lib 产物一并删：dummy 阶段那个 src/lib.rs 是空文件，留着 rlib 只会让
+# "跳过重编"的风险多一处入口。
 COPY static ./static
 COPY src ./src
 RUN find src static -type f -exec touch {} + && \
-    rm -f target/release/taygedo-rs && \
+    rm -f target/release/taygedo-rs target/release/libtaygedo.rlib && \
     cargo build --release --locked --no-default-features --features webui
 
 # ---------------------------------------------------------------------------

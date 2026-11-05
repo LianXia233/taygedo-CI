@@ -6848,7 +6848,7 @@ dependencies = [
 
 [[package]]
 name = "taygedo-desktop"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "env_logger",
  "gpui-component",
@@ -6866,7 +6866,7 @@ dependencies = [
 
 [[package]]
 name = "taygedo-rs"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "aes",
  "aes-gcm",

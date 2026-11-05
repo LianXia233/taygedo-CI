@@ -5,7 +5,7 @@
 # （Linux / OpenWrt / Docker 都不需要 GPUI）。
 [package]
 name = "taygedo-desktop"
-version = "0.7.3"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.95"
 description = "塔吉多签到桌面单包：GPUI 原生界面 + 同进程内嵌服务（Windows 端替代 WebUI）"

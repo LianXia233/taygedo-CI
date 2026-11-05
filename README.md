@@ -192,10 +192,10 @@ flowchart TD
 #### 1. 安装软件包
 ```sh
 # apk 系统（OpenWrt 24.10 / 25.12+ / ImmortalWrt SNAPSHOT）
-apk add --allow-untrusted /tmp/luci-app-taygedo_0.7.3-r1_x86_64.apk
+apk add --allow-untrusted /tmp/luci-app-taygedo_0.8.0-r1_x86_64.apk
 
 # opkg 系统（OpenWrt 23.05 及更早分支）
-opkg install /tmp/luci-app-taygedo_0.7.3-1_x86_64.ipk
+opkg install /tmp/luci-app-taygedo_0.8.0-1_x86_64.ipk
 ```
 
 #### 2. 开箱即用
@@ -259,7 +259,7 @@ Windows 端**不再提供 WebUI**：交互层是原生 Rust 的 GPUI 窗口，�
 
 1. **安装 deb 软件包**：
    ```bash
-   sudo dpkg -i taygedo-rs_0.7.3_amd64.deb
+   sudo dpkg -i taygedo-rs_0.8.0_amd64.deb
    sudo apt-get install -f # 补齐依赖（静态单文件通常零依赖）
    ```
 2. **启用 systemd 服务**：
@@ -315,7 +315,7 @@ docker logs taygedo-rs
 | 标签 | 含义 |
 | :--- | :--- |
 | `latest` | 最新正式版（对应 `v*` tag） |
-| `0.7.3` / `0.7` | 具体版本，适合钉住不升级 |
+| `0.8.0` / `0.8` | 具体版本，适合钉住不升级 |
 | `edge` | 跟随 `main` 主干，含未发版改动 |
 | `sha-abc1234` | 某次提交的精确产物，最适合复现问题 |
 

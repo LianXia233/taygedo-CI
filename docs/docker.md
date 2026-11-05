@@ -87,8 +87,8 @@ docker compose logs -f
 | 标签 | 触发条件 | 建议用途 |
 | :--- | :--- | :--- |
 | `latest` | 推送 `v*` tag | 个人自用，跟随最新正式版 |
-| `0.7.3` | 推送 `v*` tag | 生产钉死，避免被动升级 |
-| `0.7` | 推送 `v*` tag | 接受补丁级更新，不接受次要版本变更 |
+| `0.8.0` | 推送 `v*` tag | 生产钉死，避免被动升级 |
+| `0.8` | 推送 `v*` tag | 接受补丁级更新，不接受次要版本变更 |
 | `edge` | 每次 `main` 有提交 | 尝鲜，含未发版改动 |
 | `sha-56ac142` | 每次 `main` 有提交 | 精确定位到某次提交，复现问题 |
 
@@ -366,7 +366,7 @@ docker rm -f taygedo-rs && docker run -d --name taygedo-rs ...
 
 ```bash
 docker rm -f taygedo-rs
-docker run -d --name taygedo-rs ... ghcr.io/lianxia233/taygedo-rs:0.7.3
+docker run -d --name taygedo-rs ... ghcr.io/lianxia233/taygedo-rs:0.8.0
 ```
 
 如果启动报解密失败或版本未知，别删数据文件 —— 用 §5.4 恢复备份。

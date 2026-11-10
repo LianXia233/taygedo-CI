@@ -2,7 +2,7 @@
 
 本文件记录塔吉多自动签到（Rust 版）的所有版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.8.0`。
+> 各版本的完整代码差异可对比 Git Tag：`v0.1.0` … `v0.8.1`。
 
 > **关于初始口令的重要提示**：`admin / admin` 这类固定初始口令**仅存在于 0.5.0 之前的历史版本**，
 > 下方旧版本条目（如 0.2.0）中的相关描述是当时的事实记录，**不代表当前行为**。
@@ -10,6 +10,27 @@
 > 以 [README](README.md) 的说明为准。
 
 ## [Unreleased]
+
+## [0.8.1] - 2026-11-11
+
+### 修复 · OpenWrt 数据目录接入原生备份/恢复
+
+- 新增 `/lib/upgrade/keep.d/taygedo` 保留清单：`/etc/config/taygedo` 与运行期数据目录
+  `/etc/taygedo/`（含 `keys/master.key`）随 OpenWrt 原生「备份/升级」走 —— LuCI 生成备份、
+  `sysupgrade -b`、保留配置刷机均不再丢失业务数据；"主密钥丢失导致恢复后密文不可解"的问题就此消除。
+  注意：备份包内含主密钥，请与路由器管理口令同等强度保管。
+- LuCI 设置弹窗同步备份行为说明；包版本随发版推进。
+
+### CI · 发布流水线按平台解耦
+
+- 原单一 `build-release` 拆分为两条互不阻塞的流水线：
+  - `build-release-openwrt`（`build.yml`）：OpenWrt musl 交叉编译 + ipk/apk 打包 + 发布；
+  - `build-release-other-systems`（`build-other-systems.yml`，新增）：Windows 桌面单包、
+    静态 Linux WebUI 与 Debian .deb 打包 + 发布；Docker 镜像维持独立的 `docker-image`。
+- 任一平台编译失败不再拖住其余平台的产物发布；desktop crate 的 fmt/clippy 门禁随桌面
+  编译迁移到 Windows runner 上执行。
+- 同一 tag 的两个发布作业共享 `release-assets-<ref>` 并发组串行执行（谁先到谁建 Release，
+  另一方追加资产），nightly 滚动清理改为按各自产物模式过滤，避免跨流水线误删资产。
 
 ## [0.8.0] - 2026-11-05
 

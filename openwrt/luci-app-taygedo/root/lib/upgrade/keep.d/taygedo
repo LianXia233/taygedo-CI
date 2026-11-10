@@ -1,0 +1,21 @@
+# luci-app-taygedo：接入 OpenWrt 原生备份/恢复（sysupgrade）
+#
+# /sbin/sysupgrade 构建备份清单时会把本文件与 /etc/sysupgrade.conf 一起
+# find 展开（目录递归为文件，含符号链接）。以下三类操作共用同一清单：
+#   - LuCI「系统 → 备份/升级 → 生成备份」（sysupgrade -b）
+#   - 保留配置刷机（sysupgrade 不带 -n 时先打包配置、刷完回写）
+#   - LuCI「恢复备份」（sysupgrade --restore-backup = tar -C / -xzf）
+#
+# - /etc/config/taygedo  UCI 服务级配置（端口/启停/受信网段等）。显式列出，
+#                        未修改的默认值也随备份保存，恢复结果可复现。
+# - /etc/taygedo/        运行期数据目录：XChaCha20-Poly1305 密文落盘的
+#                        accounts.json / config.json / state.json / keyring.json
+#                        与 keys/master.key。主密钥不进备份 = 密文永久不可解，
+#                        因此必须整目录保留（文件 0600 权限随 tar 一并打包；
+#                        缺失的父目录由 tar 按默认权限重建，init.d 启动时会
+#                        统一补回 0700/0600）。
+#                        注意：备份包内含 master.key，请与路由器管理口令同等
+#                        强度保管；如需密文/密钥分离的离线冷备，仍可单独抄出
+#                        keys/master.key 另存。
+/etc/config/taygedo
+/etc/taygedo/

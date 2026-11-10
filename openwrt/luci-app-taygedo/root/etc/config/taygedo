@@ -31,6 +31,10 @@ config taygedo 'main'
 	# OpenWrt 没有 systemd 凭据 / TPM，也不使用 Windows DPAPI，因此密钥保护
 	# 依赖文件系统权限本身：**请确保 /etc/taygedo 与 keys/ 均为 0700 root:root**。
 	#
-	# 密钥丢失 = 既有密文永久不可解（无法恢复，只能删库重建）。
-	# 备份时请把 keys/master.key 一并离线保管，且不要与密文放在同一介质上。
-	# 轮换密钥：/usr/bin/taygedo-rs --rotate-storage-key
+# 密钥丢失 = 既有密文永久不可解（无法恢复，只能删库重建）。
+# 备份：本包自带 /lib/upgrade/keep.d/taygedo，OpenWrt 原生「备份/升级」
+# （sysupgrade -b / LuCI 生成备份与恢复备份 / 保留配置刷机）会自动包含
+# /etc/taygedo 与 keys/master.key，恢复后重启服务即可原样解密。
+# 注意生成的备份包内含主密钥，请与路由器管理口令同等强度保管；如需密文
+# 与密钥分离的离线冷备，仍可将 keys/master.key 单独抄出另存。
+# 轮换密钥：/usr/bin/taygedo-rs --rotate-storage-key

@@ -491,6 +491,7 @@ function settingsModalHtml() {
 		'      <hr class="tgd-divider">',
 		'      <div class="tgd-hint">登录与账号密码由 OpenWrt（LuCI）负责，本应用不提供独立登录口令。</div>',
 		'      <div class="tgd-hint">该形态的数据通道是 rpcd 回环内部通道，不存在浏览器侧加密协商，因此没有加密策略可配。</div>',
+		'      <div class="tgd-hint">账号与配置数据已接入 OpenWrt 原生「备份/升级」：sysupgrade 备份/恢复、保留配置刷机会自动带上本应用全部数据（含解密主密钥）。</div>',
 		'    </div>',
 		'  </div>',
 		'</div>'

@@ -23,7 +23,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-taygedo
 PKG_VERSION:=0.8.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_LICENSE:=GPL-3.0
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=LianXia233
@@ -90,6 +90,12 @@ endef
 # 未知文件，因此天然保留。此处显式声明 conffiles 是为了让 **UCI 配置** 在
 # 升级时走"保留用户修改、仅合入新增默认项"的标准流程；否则新版新增的
 # lan_cidrs / luci_session_check 等选项会被安装为默认值而覆盖用户设置。
+#
+# OpenWrt 原生备份/恢复兼容：conffiles 只解决"包升级不覆盖用户配置"，但
+# /etc/taygedo（含 keys/master.key）不参与包管理，sysupgrade 的备份清单
+# （LuCI 生成备份 / 保留配置刷机共用）不会自动带上它——缺 master.key 时
+# 恢复出来的密文永久不可解。root/lib/upgrade/keep.d/taygedo 把两者一并
+# 纳入原生备份清单，install 段负责落盘。
 define Package/luci-app-taygedo/conffiles
 /etc/config/taygedo
 endef
@@ -161,6 +167,12 @@ define Package/luci-app-taygedo/install
 	$(INSTALL_DATA) ./root/etc/config/taygedo $(1)/etc/config/taygedo
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./root/etc/init.d/taygedo $(1)/etc/init.d/taygedo
+
+	# OpenWrt 原生备份/恢复（sysupgrade -b / LuCI 备份恢复 / 保留配置刷机）
+	# 的保留清单：UCI 配置与运行期数据目录（含 keys/master.key）随备份走。
+	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
+	$(INSTALL_DATA) ./root/lib/upgrade/keep.d/taygedo \
+		$(1)/lib/upgrade/keep.d/taygedo
 endef
 
 $(eval $(call BuildPackage,luci-app-taygedo))

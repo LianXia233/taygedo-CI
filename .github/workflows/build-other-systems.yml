@@ -11,20 +11,17 @@ name: build-release-other-systems
 # OpenWrt（LuCI 集成）在 build-release-openwrt（build.yml），Docker 镜像在
 # docker.yml —— 三条流水线互不阻塞：任一平台编译失败不影响其余平台的产物发布。
 #
-# 触发策略与解耦前一致：
-#   - push tag v*       → 正式版：资产发布到同名 Release
-#   - workflow_dispatch → 滚动 nightly：固定 tag=nightly，覆盖更新
+# 触发策略：仅 push tag v* → 资产发布到同名正式版 Release。
+# nightly 滚动预发布与 workflow_dispatch 手动构建已取消（不产预览版、
+# 不做无事件自动编译）；需要重新出包时打一个新 tag 即可。
 #
-# 与 build.yml 的 release 作业共享 release-assets 并发组：
-# 同一 tag 下谁先完成谁创建 Release，另一方排队后追加自己的资产；
-# nightly 清理只删本流水线归属的资产模式（zip / deb / 非 openwrt 的 tar.gz），
-# 避免把另一条流水线刚上传的 OpenWrt 资产清掉。
+# 与 build.yml（OpenWrt）的 release 作业共享 release-assets 并发组：
+# 同一 tag 下谁先完成谁创建 Release，另一方排队后追加自己的资产。
 
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -194,22 +191,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Build (glibc)
         run: cargo build --release --locked
-      # 版本号解析：${GITHUB_REF_NAME#v} 仅在 tag 推送时才是版本号；
-      # workflow_dispatch / 分支推送时得到的是分支名（如 main），
-      # 而 dpkg-deb 与 apk mkpkg 都要求版本号以数字开头，否则直接失败。
-      # 非 tag 构建回退为 Cargo.toml 版本，保证恒可打包。
-      # release 号恒为 1：nightly 是滚动发布，资产名必须稳定才能被覆盖更新，
-      # 构建号改由 Release 标题承载（见 release 作业的 Release target 步骤）。
       - name: Resolve version
         id: ver
         run: |
-          RAW="${GITHUB_REF_NAME#v}"
-          if printf '%s' "$RAW" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
-            VER="$RAW"
-          else
-            VER="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-            VER="${VER#v}"
-          fi
+          VER="${GITHUB_REF_NAME#v}"
           echo "version=$VER" >> "$GITHUB_OUTPUT"
           echo "release=1" >> "$GITHUB_OUTPUT"
           echo "resolved version=$VER release=1 (ref=${GITHUB_REF_NAME})"
@@ -249,62 +234,14 @@ jobs:
           find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.deb' \) \
             -exec cp {} dist/ \;
 
-      # 发布目标解析（两种触发方式走两条路径）：
-      #   push tag vX.Y.Z  -> 正式版：tag=vX.Y.Z，标题 "Taygedo vX.Y.Z"，非预发布
-      #   workflow_dispatch-> 滚动 nightly：固定 tag=nightly，标题带构建号，标记预发布。
-      # 之所以不按分支名当 tag：手动触发时 github.ref 是 refs/heads/main，
-      # 直接交给 action 会创建名为 main 的 Release，属于脏数据。
+      # 发布目标解析：工作流只由 tag v* 触发，直接取 tag 名作为 Release 目标。
       - name: Resolve release target
         id: rel
         run: |
-          case "${GITHUB_REF}" in
-            refs/tags/v*)
-              TAG="${GITHUB_REF#refs/tags/}"
-              VER="${TAG#v}"
-              echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-              echo "name=Taygedo $TAG" >> "$GITHUB_OUTPUT"
-              echo "prerelease=false" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              VER="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-              VER="${VER#v}"
-              echo "tag=nightly" >> "$GITHUB_OUTPUT"
-              echo "name=Taygedo Nightly v${VER} (build ${GITHUB_RUN_NUMBER})" >> "$GITHUB_OUTPUT"
-              echo "prerelease=true" >> "$GITHUB_OUTPUT"
-              ;;
-          esac
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=Taygedo $TAG" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
-
-      # nightly 是滚动 tag：资产名固定时会被同名覆盖，但版本号变动会留下历史文件，
-      # 因此发布前先清空本流水线归属的旧资产。
-      # 流水线解耦后不能再全量清空：这里只删其他系统产物模式
-      # （*.zip / *.deb / 非 *-openwrt 的 *.tar.gz），OpenWrt 资产归 build.yml 管，
-      # 互不清对方的账。
-      - name: Clean previous nightly assets (other-systems-owned patterns)
-        if: steps.rel.outputs.tag == 'nightly'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release view nightly --repo "${GITHUB_REPOSITORY}" --json assets \
-            --jq '.assets[].name' > old_assets.txt 2>/dev/null || :
-          if [ -s old_assets.txt ]; then
-            {
-              grep -E '\.zip$|\.deb$' old_assets.txt || :
-              grep -E '\.tar\.gz$' old_assets.txt | grep -vE -- '-openwrt\.tar\.gz$' || :
-            } | sort -u > owned_assets.txt
-            if [ -s owned_assets.txt ]; then
-              while IFS= read -r f; do
-                [ -n "$f" ] || continue
-                echo "removing old asset: $f"
-                gh release delete-asset nightly "$f" --repo "${GITHUB_REPOSITORY}" --yes || true
-              done < owned_assets.txt
-            else
-              echo "nightly 无其他系统归属的历史资产，跳过清理"
-            fi
-          else
-            echo "nightly release 尚不存在或无历史资产，跳过清理"
-          fi
 
       - name: Build release notes
         run: |
@@ -316,7 +253,6 @@ jobs:
             echo "| 版本 | \`${{ steps.rel.outputs.version }}\` |"
             echo "| 提交 | \`${{ steps.rel.outputs.sha }}\` |"
             echo "| 构建号 | \`${{ github.run_number }}\` |"
-            echo "| 触发方式 | \`${{ github.event_name }}\` |"
             echo "| 其他系统流水线 | [Run \`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
             echo ""
             echo "## 其他系统产物清单"
@@ -329,10 +265,6 @@ jobs:
             echo ""
             echo "> 本作业发布 Windows 桌面 / 静态 Linux / Debian 产物；"
             echo "> OpenWrt 产物（ipk / apk / *-openwrt.tar.gz）由 build-release-openwrt 流水线发布到同一 Release。"
-            if [ "${{ steps.rel.outputs.prerelease }}" = "true" ]; then
-              echo "> 本 Release 为 nightly 滚动预发布，每次手动构建覆盖更新，仅保留最新产物。"
-              echo "> 生产环境请使用正式版 tag（形如 \`vX.Y.Z\`）对应的 Release。"
-            fi
           } > notes.md
           cat notes.md
 
@@ -343,6 +275,6 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: ${{ steps.rel.outputs.name }}
           body_path: notes.md
-          prerelease: ${{ steps.rel.outputs.prerelease }}
+          prerelease: false
           files: dist/*
           generate_release_notes: false

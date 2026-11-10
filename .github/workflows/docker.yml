@@ -5,16 +5,17 @@ name: docker-image
 #
 # 触发策略：
 #   - push tag v*      → 打语义化版本标签 + latest（正式发版）
-#   - push main        → 打 edge + sha-<短哈希>（跟随主干，供自用尝鲜）
 #   - pull_request     → 只构建不推送、只编 amd64，用来验证 Dockerfile 没坏
-#   - workflow_dispatch→ 手动重发
+#   - workflow_dispatch→ 手动构建
+#
+# push main 的自动构建（edge 滚动镜像）已取消：不产预览版、不做无事件
+# 自动编译；跟随主干的尝鲜镜像需要时可手动 workflow_dispatch 构建一次。
 #
 # 镜像名固定为 ghcr.io/<owner>/taygedo-rs：与仓库名 taygedo-CI 脱钩，
 # 因为仓库名描述的是"CI 仓库"，镜像名应描述"这是什么程序"。
 on:
   push:
     tags: ['v*']
-    branches: [main]
   pull_request:
     paths:
       - Dockerfile
@@ -80,7 +81,6 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=edge,branch=main
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
           labels: |

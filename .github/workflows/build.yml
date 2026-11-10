@@ -1,4 +1,20 @@
-name: build-release
+name: build-release-openwrt
+
+# OpenWrt 发布流水线（自原 build-release 按平台解耦而来）。
+#
+# 本工作流只负责 OpenWrt 形态：LuCI 集成二进制（--features openwrt）交叉编译、
+# ipk/apk 打包与发布。Windows 桌面 / 静态 Linux WebUI / Debian 已移入
+# build-other-systems.yml，Docker 镜像仍在 docker.yml —— 三条流水线互不阻塞：
+# 任一平台编译失败不影响其余平台的产物发布。
+#
+# 触发策略与解耦前一致：
+#   - push tag v*       → 正式版：资产发布到同名 Release
+#   - workflow_dispatch → 滚动 nightly：固定 tag=nightly，覆盖更新
+#
+# 与 build-other-systems.yml 的 release 作业共享 release-assets 并发组：
+# 同一 tag 下谁先完成谁创建 Release，另一方排队后追加自己的资产；
+# nightly 清理只删本流水线归属的资产模式（*-openwrt.tar.gz / *.ipk / *.apk），
+# 避免把另一条流水线刚上传的 Windows/Linux/Debian 资产清掉。
 
 on:
   push:
@@ -29,7 +45,8 @@ jobs:
   #
   # 非阻塞：advisory 数据库每天都在变，一条与本次改动无关的新 advisory
   # 不应把整条发布流水线卡死。失败的结论会明确显示在 Actions 里，
-  # 由维护者评估后单独升级依赖。
+  # 由维护者评估后单独升级依赖。全仓只跑这一份（在两条发布流水线中
+  # 仅保留此处），audit 结论对所有平台产物同样生效。
   # ---------------------------------------------------------------------------
   audit:
     name: dependency-audit
@@ -49,57 +66,29 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   # ---------------------------------------------------------------------------
-  # 1) 编译各平台二进制
+  # 1) 编译 OpenWrt 二进制（其余平台见 build-other-systems.yml）
   #
-  # 形态在编译期确定（Cargo feature），因此同一 target 要出不同产物：
-  #   - 默认（webui）：Debian / Docker / 静态 Linux 部署，自带 WebUI
-  #   - openwrt：只含业务 API，入口是 LuCI，不含任何前端资产
-  #   - desktop：Windows 桌面**单包**，无 WebUI 资产，只提供本机回环 API；
-  #     服务端以库的形式编进 desktop/ crate，与 GPUI 界面同进程，
-  #     发布物只有一个 exe（双进程会让服务子进程常驻并锁住 exe 映像）
-  # OpenWrt 包必须用后者：它下载的是 `*-openwrt.tar.gz`，而不是通配的
-  # Linux 产物——否则装到路由器上的仍是一个带 WebUI 的通用二进制。
+  # 形态在编译期确定（Cargo feature）：OpenWrt 产物以 `openwrt` feature 编译，
+  # 只含业务 API，入口是 LuCI，不含任何前端资产。
+  # LuCI 包（openwrt/luci-app-taygedo 的 Makefile）下载的是
+  # `*-openwrt.tar.gz`，而不是通配的 Linux 产物——否则装到路由器上的
+  # 仍是一个带 WebUI 的通用二进制。
   # ---------------------------------------------------------------------------
   build:
     name: build-${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Windows（desktop 单包：GPUI 界面 + 同进程内嵌回环服务，不含 WebUI）
-          - name: windows-x86_64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            cargo_features: "--no-default-features --features desktop"
-            suffix: ""
-            cross: false
-          # Linux musl（独立部署：静态二进制，带 WebUI）
-          - name: linux-x86_64-musl
-            os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            cargo_features: ""
-            suffix: ""
-            cross: true
-          - name: linux-aarch64-musl
-            os: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            cargo_features: ""
-            suffix: ""
-            cross: true
-          # OpenWrt（LuCI 集成：无 WebUI、无前端资产）
           - name: openwrt-x86_64-musl
-            os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             cargo_features: "--no-default-features --features openwrt"
             suffix: "-openwrt"
-            cross: true
           - name: openwrt-aarch64-musl
-            os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             cargo_features: "--no-default-features --features openwrt"
             suffix: "-openwrt"
-            cross: true
     steps:
       - uses: actions/checkout@v7
 
@@ -111,81 +100,19 @@ jobs:
         shell: bash
         run: printf '' > .cargo/config.mirror.toml
 
-      - name: Install Rust (native)
-        if: matrix.cross == false
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache cargo (native)
-        if: matrix.cross == false
-        uses: Swatinem/rust-cache@v2
-        with:
-          # desktop/ 是独立 workspace（自己的 Cargo.lock 与 target/），
-          # 不显式列出就缓存不到，Windows 单包每次都会全量重编 GPUI 依赖。
-          workspaces: ". desktop"
-
       - name: Install cross
-        if: matrix.cross == true
         uses: taiki-e/install-action@v2
         with:
           tool: cross
 
-      # Windows 走单包：服务端不再单独产出 exe，而是作为库被 desktop/ crate
-      # 静态链接进来，因此这里跳过主服务的独立构建。
-      - name: Build (native)
-        if: matrix.cross == false && matrix.os != 'windows-latest'
-        run: cargo build --release --locked ${{ matrix.cargo_features }}
-
       - name: Build (cross)
-        if: matrix.cross == true
         run: cross build --release --locked --target ${{ matrix.target }} ${{ matrix.cargo_features }}
 
-      # Windows 桌面单包：GPUI 界面 + 内嵌服务同进程编译。
-      # 独立 crate / 独立 Cargo.lock，GPUI 依赖不会进入 Linux / OpenWrt 构建图。
-      #
-      # 桌面 crate 的 fmt / clippy 只能在这里跑：它需要 GPUI 的平台依赖
-      # （X11 / Wayland 或 MSVC + DirectX），Linux 的 quality 作业装不起。
-      - name: Lint desktop single package
-        if: matrix.os == 'windows-latest'
-        run: |
-          cargo fmt --check --manifest-path desktop/Cargo.toml
-          cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
-
-      - name: Build desktop single package
-        if: matrix.os == 'windows-latest'
-        run: cargo build --release --locked --manifest-path desktop/Cargo.toml
-
-      - name: Locate binary
-        id: bin
-        shell: bash
-        run: |
-          if [ "${{ matrix.target }}" = "x86_64-pc-windows-msvc" ]; then
-            # 单包：GPUI 界面与内嵌服务是同一个 exe
-            echo "path=desktop/target/release/taygedo.exe" >> "$GITHUB_OUTPUT"
-            echo "name=taygedo.exe" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=target/${{ matrix.target }}/release/taygedo-rs" >> "$GITHUB_OUTPUT"
-            echo "name=taygedo-rs" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Package (Windows zip)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          # 单包：压缩包里只有一个可执行文件。
-          # 不再附带独立的服务 exe —— 那会引入"客户端退出、服务常驻"的孤儿进程，
-          # 进而锁住 exe 映像，用户无法删除安装目录。
-          Copy-Item "desktop/target/release/taygedo.exe" dist/taygedo.exe
-          Compress-Archive -Path dist/taygedo.exe -DestinationPath dist/taygedo-rs-windows-x86_64.zip -Force
-
-      - name: Package (Linux tar.gz)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Package (tar.gz)
         shell: bash
         run: |
           mkdir -p dist
-          cp "${{ steps.bin.outputs.path }}" dist/taygedo-rs
+          cp "target/${{ matrix.target }}/release/taygedo-rs" dist/taygedo-rs
           NAME="taygedo-rs-${{ matrix.target }}${{ matrix.suffix }}.tar.gz"
           tar czf "$NAME" -C dist taygedo-rs
           cp "$NAME" dist/
@@ -198,53 +125,7 @@ jobs:
           path: dist/
 
   # ---------------------------------------------------------------------------
-  # 2) Debian .deb
-  # ---------------------------------------------------------------------------
-  debian:
-    name: debian-amd64
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Use default crates.io on GitHub runners
-        shell: bash
-        run: printf '' > .cargo/config.mirror.toml
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-gnu
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-      - name: Build (glibc)
-        run: cargo build --release --locked
-      # 版本号解析：${GITHUB_REF_NAME#v} 仅在 tag 推送时才是版本号；
-      # workflow_dispatch / 分支推送时得到的是分支名（如 main），
-      # 而 dpkg-deb 与 apk mkpkg 都要求版本号以数字开头，否则直接失败。
-      # 非 tag 构建回退为 Cargo.toml 版本，保证恒可打包。
-      # release 号恒为 1：nightly 是滚动发布，资产名必须稳定才能被覆盖更新，
-      # 构建号改由 Release 标题承载（见 release 作业的 Release target 步骤）。
-      - name: Resolve version
-        id: ver
-        run: |
-          RAW="${GITHUB_REF_NAME#v}"
-          if printf '%s' "$RAW" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
-            VER="$RAW"
-          else
-            VER="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-            VER="${VER#v}"
-          fi
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "release=1" >> "$GITHUB_OUTPUT"
-          echo "resolved version=$VER release=1 (ref=${GITHUB_REF_NAME})"
-      - name: Package .deb
-        run: |
-          bash scripts/package.sh deb x86_64 target/release/taygedo-rs \
-            "${{ steps.ver.outputs.version }}" dist-deb "${{ steps.ver.outputs.release }}"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: debian-amd64
-          path: dist-deb/*.deb
-
-  # ---------------------------------------------------------------------------
-  # 3) OpenWrt .ipk + .apk
+  # 2) OpenWrt .ipk + .apk
   # ---------------------------------------------------------------------------
   openwrt:
     name: openwrt-${{ matrix.arch }}
@@ -331,12 +212,18 @@ jobs:
           path: dist-openwrt/
 
   # ---------------------------------------------------------------------------
-  # 4) 发布到 Releases
+  # 3) 发布 OpenWrt 产物到 Releases
+  #
+  # 与 build-other-systems.yml 的 release 作业共享 release-assets 并发组：
+  # 同一 tag / nightly 下串行发布，谁先到谁创建 Release，另一方追加资产。
   # ---------------------------------------------------------------------------
   release:
-    name: release
-    needs: [quality, build, debian, openwrt]
+    name: release-openwrt
+    needs: [quality, build, openwrt]
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-assets-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
 
@@ -348,7 +235,7 @@ jobs:
       - name: Flatten files
         run: |
           mkdir -p dist
-          find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.deb' -o -name '*.ipk' -o -name '*.apk' \) \
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.ipk' -o -name '*.apk' \) \
             -exec cp {} dist/ \;
 
       # 发布目标解析（两种触发方式走两条路径）：
@@ -379,8 +266,11 @@ jobs:
           echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
 
       # nightly 是滚动 tag：资产名固定时会被同名覆盖，但版本号变动会留下历史文件，
-      # 因此发布前先清空该 Release 的全部旧资产，保证始终只有一份最新产物。
-      - name: Clean previous nightly assets
+      # 因此发布前先清空本流水线归属的旧资产。
+      # 流水线解耦后不能再全量清空：这里只删 OpenWrt 产物模式
+      # （*.ipk / *.apk / *-openwrt.tar.gz），Windows/Linux/Debian 资产归
+      # build-other-systems.yml 管，互不清对方的账。
+      - name: Clean previous nightly assets (openwrt-owned patterns)
         if: steps.rel.outputs.tag == 'nightly'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -388,11 +278,16 @@ jobs:
           gh release view nightly --repo "${GITHUB_REPOSITORY}" --json assets \
             --jq '.assets[].name' > old_assets.txt 2>/dev/null || :
           if [ -s old_assets.txt ]; then
-            while IFS= read -r f; do
-              [ -n "$f" ] || continue
-              echo "removing old asset: $f"
-              gh release delete-asset nightly "$f" --repo "${GITHUB_REPOSITORY}" --yes || true
-            done < old_assets.txt
+            grep -E '\.ipk$|\.apk$|-openwrt\.tar\.gz$' old_assets.txt > owned_assets.txt || :
+            if [ -s owned_assets.txt ]; then
+              while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                echo "removing old asset: $f"
+                gh release delete-asset nightly "$f" --repo "${GITHUB_REPOSITORY}" --yes || true
+              done < owned_assets.txt
+            else
+              echo "nightly 无 OpenWrt 归属的历史资产，跳过清理"
+            fi
           else
             echo "nightly release 尚不存在或无历史资产，跳过清理"
           fi
@@ -408,9 +303,9 @@ jobs:
             echo "| 提交 | \`${{ steps.rel.outputs.sha }}\` |"
             echo "| 构建号 | \`${{ github.run_number }}\` |"
             echo "| 触发方式 | \`${{ github.event_name }}\` |"
-            echo "| 流水线 | [Run \`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo "| OpenWrt 流水线 | [Run \`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
             echo ""
-            echo "## 产物清单"
+            echo "## OpenWrt 产物清单"
             echo ""
             echo "| 文件 | 大小 |"
             echo "| --- | ---: |"
@@ -418,6 +313,8 @@ jobs:
               echo "| \`$(basename "$f")\` | $(du -h "$f" | cut -f1) |"
             done
             echo ""
+            echo "> 本作业只发布 OpenWrt 产物（ipk / apk / *-openwrt.tar.gz）；"
+            echo "> Windows 桌面 / Linux / Debian 资产由 build-release-other-systems 流水线发布到同一 Release。"
             if [ "${{ steps.rel.outputs.prerelease }}" = "true" ]; then
               echo "> 本 Release 为 nightly 滚动预发布，每次手动构建覆盖更新，仅保留最新产物。"
               echo "> 生产环境请使用正式版 tag（形如 \`vX.Y.Z\`）对应的 Release。"

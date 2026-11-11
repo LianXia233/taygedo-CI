@@ -12,6 +12,22 @@
 
 ## [Unreleased]
 
+### CI · GitHub Actions 全量升级至 Node 24 运行时 (2026-11-12)
+
+- `.github/workflows/build.yml`：`rustsec/audit-check` 上游最新正式版 `v2.0.0` 仍声明
+  `node20`，但 `main` 已合入 Node 24 支持（PR #48，2026-03-20）且尚未发版；
+  已固定到该提交的完整 SHA `858dc40f52ca2b8570b7a997c1c4e35c6fc9a432`，
+  既消除告警又保留 immutable pin 的供应链安全性（输入项与 v2 完全一致）。
+  `actions/checkout@v7` 等已处于最新，未重复改动。
+- `.github/workflows/docker.yml`：Docker 官方 action 统一升级 ——
+  `setup-qemu-action@v3` / `setup-buildx-action@v3` / `login-action@v3` → `v4`、
+  `metadata-action@v5` → `v6`、`build-push-action@v6` → `v7`。
+- GitHub 已于 2026-09-23 从托管 runner 移除 Node 20 运行时，仍声明 `node20` 的 action 会被强制跑在 Node 24 上并打印 `Node.js 20 is deprecated` 告警，属于未验证状态；本次按各 action 的 `action.yml` 逐一核对 `runs.using` 后统一升级。
+- **仅改 CI 配置**：项目源码、`node-version` / `python-version` / `go-version` 等工具链版本、产物命名与 Release 流程均未改动。告警指的是 action 自身声明的运行时，不是项目构建所用的 Node 版本。
+  OpenWrt / Windows / Debian 三条流水线的产物形态、Cargo feature 与
+  Release 并发组均未改动；`docker.yml` 实际使用的输入项在新大版本中均保留。
+- 升级后全仓复扫 59 个工作流/Action 文件：`node20` / `node16` / `node12` 引用残留为 0，所有 YAML 均可解析。
+
 ## [0.8.1] - 2026-11-11
 
 ### 修复 · OpenWrt 数据目录接入原生备份/恢复
